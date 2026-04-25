@@ -103,7 +103,10 @@ function runAgent(panel, workspaceRoot, task, output, extensionRoot, configuredP
         output.appendLine(`Signal: ${signal}`);
       }
 
-      const structuredResult = extractStructuredResult(logs);
+      const structuredResult = extractStructuredResult(logs, stdout, stderr);
+      if (structuredResult) {
+        appendStructuredResultSummary(output, structuredResult);
+      }
 
       if (stopRequested) {
         output.appendLine('Agent stopped by user');
@@ -234,7 +237,12 @@ function getOutputTail(text) {
   return lines.slice(-12).join('\n');
 }
 
-function extractStructuredResult(lines) {
+function extractStructuredResult(lines, stdout, stderr) {
+  const markedFromText = extractMarkedStructuredResultFromText(stdout, stderr);
+  if (markedFromText) {
+    return markedFromText;
+  }
+
   const markedResult = extractMarkedStructuredResult(lines);
   if (markedResult) {
     return markedResult;
@@ -254,6 +262,41 @@ function extractStructuredResult(lines) {
     } catch {
       // Ignore parse failures and continue scanning earlier lines.
     }
+  }
+
+  return null;
+}
+
+function extractMarkedStructuredResultFromText(stdout, stderr) {
+  const text = [String(stdout || ''), String(stderr || '')].filter(Boolean).join('\n');
+  if (!text) {
+    return null;
+  }
+
+  const startMarker = '__LOCAL_CURSOR_AGENT_RESULT_START__';
+  const endMarker = '__LOCAL_CURSOR_AGENT_RESULT_END__';
+  const endIndex = text.lastIndexOf(endMarker);
+  if (endIndex < 0) {
+    return null;
+  }
+
+  const startIndex = text.lastIndexOf(startMarker, endIndex);
+  if (startIndex < 0 || startIndex >= endIndex) {
+    return null;
+  }
+
+  const payload = text.slice(startIndex + startMarker.length, endIndex).trim();
+  if (!payload) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(payload);
+    if (parsed && typeof parsed === 'object' && typeof parsed.ok === 'boolean') {
+      return parsed;
+    }
+  } catch {
+    // Ignore parse errors and keep line-based fallback path.
   }
 
   return null;
@@ -295,6 +338,45 @@ function findLastLineIndex(lines, value) {
   }
 
   return -1;
+}
+
+function appendStructuredResultSummary(output, structuredResult) {
+  if (!output || !structuredResult || typeof structuredResult !== 'object') {
+    return;
+  }
+
+  const changedFiles = Array.isArray(structuredResult.changedFiles)
+    ? structuredResult.changedFiles.filter(Boolean)
+    : [];
+  const fallbackReason = String(structuredResult.fallbackReason || '').trim();
+  const fallbackMode = String(structuredResult.fallbackMode || '').trim();
+  const summary = String(structuredResult.summary || '').trim();
+  const finalStatus = String(structuredResult.finalStatus || (structuredResult.ok ? 'success' : 'error')).trim();
+  const buildText = typeof structuredResult.buildText === 'string' && structuredResult.buildText.trim()
+    ? structuredResult.buildText.trim()
+    : typeof structuredResult.buildStarted === 'boolean'
+      ? (structuredResult.buildStarted ? (structuredResult.buildSucceeded ? 'succeeded' : 'failed') : 'not started')
+      : 'not run';
+  const reasonCode = String(
+    structuredResult.reasonCode ||
+    structuredResult.rootCauseCode ||
+    structuredResult.failureCode ||
+    ''
+  ).trim();
+
+  output.appendLine('--- Structured result summary ---');
+  output.appendLine(`Status: ${finalStatus || 'not available'}`);
+  if (reasonCode) {
+    output.appendLine(`ReasonCode: ${reasonCode}`);
+  }
+  output.appendLine(`Build: ${buildText}`);
+  output.appendLine(`ChangedFiles: ${changedFiles.length}`);
+  if (fallbackReason || fallbackMode) {
+    output.appendLine(`Fallback: ${[fallbackReason, fallbackMode].filter(Boolean).join(' / ')}`);
+  }
+  if (summary) {
+    output.appendLine(`Summary: ${summary}`);
+  }
 }
 
 function hasRunningProcess() {
