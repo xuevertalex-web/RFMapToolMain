@@ -23,12 +23,12 @@ namespace LocalCursorAgent.Embeddings
         private bool _disabledForSession;
         private int _consecutiveFailures;
 
-        public EmbeddingService(string endpoint = "http://localhost:11434", string model = "nomic-embed-text", bool disabled = false)
+        public EmbeddingService(string endpoint = "http://localhost:11434", string model = "nomic-embed-text", bool disabled = false, HttpClient? httpClient = null)
         {
             _endpoint = endpoint;
             _model = model;
             _disabledByConfiguration = disabled;
-            _httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+            _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
         }
 
         /// <summary>
@@ -60,6 +60,13 @@ namespace LocalCursorAgent.Embeddings
 
                     if (!response.IsSuccessStatusCode)
                     {
+                        var errorResponseBody = await response.Content.ReadAsStringAsync();
+                        if (IsTerminalNotFound(response.StatusCode, errorResponseBody))
+                        {
+                            LogEmbeddingDisabled($"Embedding service returned NotFound for model '{_model}' at '{_endpoint}'.");
+                            return null;
+                        }
+
                         if (ShouldRetry(response.StatusCode) && attempt < 3)
                         {
                             await Task.Delay(GetRetryDelay(attempt));
@@ -182,6 +189,17 @@ namespace LocalCursorAgent.Embeddings
             return numeric >= 500 || statusCode == System.Net.HttpStatusCode.RequestTimeout;
         }
 
+        private static bool IsTerminalNotFound(System.Net.HttpStatusCode statusCode, string responseBody)
+        {
+            if (statusCode == System.Net.HttpStatusCode.NotFound)
+                return true;
+
+            if (string.IsNullOrWhiteSpace(responseBody))
+                return false;
+
+            return responseBody.Contains("not found", StringComparison.OrdinalIgnoreCase);
+        }
+
         private static TimeSpan GetRetryDelay(int attempt)
         {
             return TimeSpan.FromMilliseconds(250 * attempt);
@@ -207,6 +225,20 @@ namespace LocalCursorAgent.Embeddings
             {
                 Console.WriteLine("[embedding] Semantic indexing will continue in degraded mode.");
             }
+            Console.WriteLine($"[embedding] Status: {DescribeStatus()}");
+            _serviceUnavailableLogged = true;
+        }
+
+        private void LogEmbeddingDisabled(string message)
+        {
+            _consecutiveFailures = Math.Max(_consecutiveFailures, 3);
+            _disabledForSession = true;
+
+            if (_serviceUnavailableLogged)
+                return;
+
+            Console.WriteLine($"[embedding] {message}");
+            Console.WriteLine("[embedding] Semantic embeddings are disabled for this session.");
             Console.WriteLine($"[embedding] Status: {DescribeStatus()}");
             _serviceUnavailableLogged = true;
         }
