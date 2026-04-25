@@ -49,9 +49,12 @@ const webviewClientActions = `function startAgentRunFromInput() {
         saveWebviewState();
         updateExportRunReportButtonState();
         updateExportLogsButtonState();
+        lastDispatchedRunModel = selectedOllamaModel;
+        renderModelSelectionStatusLine();
         vscode.postMessage({
           type: 'sendTask',
-          task
+          task,
+          selectedModel: selectedOllamaModel
         });
       }
 
@@ -221,11 +224,11 @@ const webviewClientActions = `function startAgentRunFromInput() {
         const text = getLogsText();
         try {
           await navigator.clipboard.writeText(text);
-          copyLogsButton.textContent = 'Скопировано';
-          resetButtonTextLater(copyLogsButton, 'Копировать', 1500);
+          copyLogsButton.textContent = 'Copied';
+          resetButtonTextLater(copyLogsButton, 'Copy', 1500);
         } catch {
-          copyLogsButton.textContent = 'Ошибка';
-          resetButtonTextLater(copyLogsButton, 'Копировать', 1500);
+          copyLogsButton.textContent = 'Error';
+          resetButtonTextLater(copyLogsButton, 'Copy', 1500);
         }
       }
 
@@ -288,3 +291,4 @@ function getWebviewClientActions() {
 }
 
 module.exports = { getWebviewClientActions };
+

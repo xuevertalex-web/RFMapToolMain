@@ -38,7 +38,8 @@ function createPanelRunController(options) {
       vscode.window.setStatusBarMessage('Agent running...', 0);
       output.appendLine('Agent run started');
 
-      const result = await runAgent(panel, workspaceState.workspaceRoot, task, output, extensionRoot);
+      const selectedModel = String(message.selectedModel || message.model || '').trim();
+      const result = await runAgent(panel, workspaceState.workspaceRoot, task, output, extensionRoot, selectedModel);
       const resultText = (result.result && result.result.message) || result.text;
       panel.webview.postMessage({ type: 'result', text: resultText });
       panel.webview.postMessage({

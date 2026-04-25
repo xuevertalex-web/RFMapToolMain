@@ -3,7 +3,7 @@ const { getWebviewClientResultHandlers } = require('./webviewClientResultHandler
 const webviewClientEvents = `copyLogsButton.addEventListener('click', copyLogs);
       if (helpButton) {
         helpButton.addEventListener('click', () => {
-          appendLogLine('system', 'Справка: Enter отправляет задачу, Shift+Enter добавляет новую строку. Кнопка + очищает текущий вывод. ↻ повторяет последний запуск. ⇩ экспортирует отчет запуска.');
+          appendLogLine('system', 'Help: Enter sends task, Shift+Enter adds a new line. + clears current output. R reruns last task. E exports run report.');
           logs.scrollTop = logs.scrollHeight;
         });
       }
@@ -27,6 +27,10 @@ const webviewClientEvents = `copyLogsButton.addEventListener('click', copyLogs);
       updateRunStats();
       updateCopyStructuredResultButtonState();
       updateExportRunReportButtonState();
+      requestModelSelectionState();
+      if (modelSelector) {
+        modelSelector.addEventListener('change', handleModelSelectorChange);
+      }
 
       document.getElementById('send').addEventListener('click', () => {
         startAgentRunFromInput();
@@ -76,6 +80,8 @@ const webviewClientEvents = `copyLogsButton.addEventListener('click', copyLogs);
           handleAgentFinishedMessage(message);
         } else if (message.type === 'runningState') {
           setRunningState(!!message.running);
+        } else if (message.type === 'modelSelectionState') {
+          applyModelSelectionState(message.payload);
         }
       });`;
 

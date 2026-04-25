@@ -30,6 +30,22 @@ function createPanelMessageHandler(options) {
   return async function handlePanelMessage(message) {
     const type = String(message && message.type || '');
 
+    if (type === 'getModelSelectionState') {
+      if (typeof options.getModelSelectionState === 'function') {
+        const payload = await options.getModelSelectionState();
+        panel.webview.postMessage({ type: 'modelSelectionState', payload });
+      }
+      return;
+    }
+
+    if (type === 'setSelectedModel') {
+      if (typeof options.setSelectedModel === 'function') {
+        const payload = await options.setSelectedModel(message.model);
+        panel.webview.postMessage({ type: 'modelSelectionState', payload });
+      }
+      return;
+    }
+
     if (type === 'sendTask') {
       await panelRunController.handleSendTask(message);
       return;

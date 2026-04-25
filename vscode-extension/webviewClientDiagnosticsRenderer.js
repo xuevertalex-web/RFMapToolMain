@@ -1,5 +1,11 @@
-const webviewClientDiagnosticsRenderer = `function renderBuildDiagnostics(run) {
+﻿const webviewClientDiagnosticsRenderer = `function renderBuildDiagnostics(run) {
         if (!diagnosticsSection || !diagnosticsList || !diagnosticsEmpty) return;
+        const diagnosticsCount = Array.isArray(run.diagnostics) ? run.diagnostics.length : 0;
+        const buildTextNormalized = String(run.buildText || '').trim().toLowerCase();
+        const buildNotStarted = buildTextNormalized === 'not started' || buildTextNormalized === 'not run';
+        const shouldHideSection = buildNotStarted && diagnosticsCount === 0;
+        diagnosticsSection.style.display = shouldHideSection ? 'none' : '';
+
         buildStatus.textContent = 'Build: ' + run.buildText;
         buildStatus.className = run.buildSucceeded === true
           ? 'build-status ok'
@@ -7,10 +13,10 @@ const webviewClientDiagnosticsRenderer = `function renderBuildDiagnostics(run) {
             ? 'build-status fail'
             : 'build-status na';
         diagnosticsList.replaceChildren();
-        diagnosticsSummary.textContent = Array.isArray(run.diagnostics) && run.diagnostics.length
-          ? 'Diagnostics: ' + run.diagnostics.length
+        diagnosticsSummary.textContent = diagnosticsCount > 0
+          ? 'Diagnostics: ' + diagnosticsCount
           : 'Diagnostics: not available';
-        if (!Array.isArray(run.diagnostics) || run.diagnostics.length === 0) {
+        if (diagnosticsCount === 0) {
           diagnosticsEmpty.style.display = 'block';
           return;
         }

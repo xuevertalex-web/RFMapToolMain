@@ -32,7 +32,9 @@ const webviewClientBootstrap = `const vscode = acquireVsCodeApi();
       const copyLogsButton = document.getElementById('copyLogs');
       const exportLogsButton = document.getElementById('exportLogs');
       const helpButton = document.getElementById('helpButton');
-      const modelName = document.getElementById('modelName');
+      const modelSelector = document.getElementById('modelSelector');
+      const modelSelectionToast = document.getElementById('modelSelectionToast');
+      const modelSelectionStatus = document.getElementById('modelSelectionStatus');
       const modelPing = document.getElementById('modelPing');
       const recentRunsContainer = document.getElementById('recentRuns');
       const status = document.getElementById('status');
@@ -51,6 +53,12 @@ const webviewClientBootstrap = `const vscode = acquireVsCodeApi();
       let recentRuns = [];
       let suppressPlainResultLog = false;
       let currentRunTask = '';
+      let availableOllamaModels = [];
+      let selectedOllamaModel = '';
+      let defaultOllamaModel = '';
+      let selectedOllamaModelSource = '';
+      let lastDispatchedRunModel = '';
+      let modelSelectionToastTimer = null;
       let lastResultPayload = {
         resultText: '',
         summaryText: '',

@@ -112,6 +112,54 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           }));
       }
 
+      function isTimeoutFallbackReason(fallbackReason) {
+        return String(fallbackReason || '').trim().toUpperCase() === 'MODEL_TIMEOUT';
+      }
+
+      function getFallbackResultText(fallbackReason) {
+        if (!fallbackReason) {
+          return '';
+        }
+        return isTimeoutFallbackReason(fallbackReason)
+          ? 'Локальная модель не завершила запрос вовремя; использован fallback по индексированному контексту.'
+          : 'Запрос к локальной модели завершился ошибкой; использован fallback по индексированному контексту.';
+      }
+
+      function normalizeFallbackTimelineConsistency(timeline, fallbackReason) {
+        if (!Array.isArray(timeline) || !fallbackReason) {
+          return Array.isArray(timeline) ? timeline : [];
+        }
+
+        const timeoutExpected = isTimeoutFallbackReason(fallbackReason);
+        const hasTimeout = timeline.some(event => String(event && event.stage || '').trim() === 'ModelCallTimedOut');
+        const withoutTimeout = timeline.filter(event => String(event && event.stage || '').trim() !== 'ModelCallTimedOut');
+        if (!timeoutExpected) {
+          return withoutTimeout;
+        }
+
+        if (hasTimeout) {
+          return timeline;
+        }
+
+        const timeoutEvent = {
+          stage: 'ModelCallTimedOut',
+          status: 'timed_out',
+          message: 'Model call timed out',
+          timestamp: ''
+        };
+
+        const insertBeforeIndex = withoutTimeout.findIndex(event => {
+          const stage = String(event && event.stage || '').trim();
+          return stage === 'AnalysisFallbackStarted' || stage === 'RunCompleted';
+        });
+
+        if (insertBeforeIndex < 0) {
+          return withoutTimeout.concat(timeoutEvent);
+        }
+
+        return withoutTimeout.slice(0, insertBeforeIndex).concat(timeoutEvent, withoutTimeout.slice(insertBeforeIndex));
+      }
+
       function buildDerivedTimeline(runStatus, structured, fallbackReason, fallbackMode, provider, model, duration, buildText) {
         if (!structured || typeof structured !== 'object' || runStatus === 'running' || runStatus === 'error') {
           return [];
@@ -158,12 +206,13 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
       }
 
       function buildDerivedSummary(structured, status, fallbackReason, fallbackMode, provider, model, duration, buildText) {
-        const summaryText = normalizeOptionalText(structured && structured.summaryText);
-        const summary = normalizeOptionalText(structured && structured.summary);
+        const summaryText = fallbackReason ? '' : normalizeOptionalText(structured && structured.summaryText);
+        const summary = fallbackReason ? '' : normalizeOptionalText(structured && structured.summary);
         const details = [];
         details.push('Final status: ' + status);
         if (fallbackReason) details.push('Fallback reason: ' + fallbackReason);
         if (fallbackMode) details.push('Fallback mode: ' + fallbackMode);
+        if (fallbackReason) details.push('Fallback result: ' + getFallbackResultText(fallbackReason));
         if (provider || model) details.push('Model: ' + [provider, model].filter(Boolean).join(' / '));
         if (duration && duration !== 'not available') details.push('Duration: ' + duration);
         details.push('Build: ' + (buildText || 'not run'));
@@ -212,7 +261,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         const fallbackReason = normalizeOptionalText(structured && structured.fallbackReason);
         const fallbackMode = normalizeOptionalText(structured && structured.fallbackMode);
         const finalStatus = normalizeOptionalText(structured && structured.finalStatus);
-        const timeline = normalizeTraceEvents(structured);
+        const timeline = normalizeFallbackTimelineConsistency(normalizeTraceEvents(structured), fallbackReason);
         const buildText = normalizeBuildText(structured, buildSucceeded, buildStarted);
         const derivedTimeline = timeline.length === 0
           ? buildDerivedTimeline(status, structured, fallbackReason, fallbackMode, provider, model, duration, buildText)
@@ -235,7 +284,9 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           finalStatus,
           degradedFlags: Array.isArray(structured && structured.degradedFlags) ? structured.degradedFlags.map(String) : [],
           summary,
-          messageText: normalizeText(structured && structured.message || message.result || message.error, ''),
+          messageText: fallbackReason
+            ? getFallbackResultText(fallbackReason)
+            : normalizeText(structured && structured.message || message.result || message.error, ''),
           buildSucceeded,
           buildStarted,
           buildText,

@@ -228,19 +228,106 @@ const webviewStyles = `
         margin-top: 6px;
       }
 
+      .composer-model-row {
+        margin-top: 6px;
+        width: 100%;
+        justify-content: flex-start;
+      }
+
+      .model-selector-row {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-right: auto;
+        color: var(--vscode-descriptionForeground);
+      }
+
+      .model-selector-ping {
+        font-size: 0.82em;
+        color: var(--vscode-descriptionForeground);
+        opacity: 0.95;
+        max-width: 220px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .model-selector-row select {
+        min-width: 220px;
+        max-width: 100%;
+        padding: 4px 8px;
+        color: var(--vscode-input-foreground);
+        background: var(--vscode-input-background);
+        border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+        border-radius: 6px;
+      }
+
+      .model-selection-toast {
+        display: none;
+        margin-top: 8px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        border: 1px solid rgba(46, 160, 67, 0.30);
+        background: rgba(46, 160, 67, 0.16);
+        color: var(--vscode-foreground);
+      }
+
+      .model-selection-toast.show {
+        display: block;
+      }
+
+      .model-selection-toast.warn {
+        border-color: rgba(143, 112, 0, 0.35);
+        background: rgba(143, 112, 0, 0.14);
+      }
+
+      .model-selection-status {
+        margin-top: 6px;
+        min-height: 1.2em;
+        color: var(--vscode-descriptionForeground);
+      }
+
       .composer-status {
         display: flex;
         align-items: center;
         gap: 8px;
         flex-wrap: wrap;
-        margin-top: 6px;
+        margin-top: 4px;
         color: var(--vscode-descriptionForeground);
-        font-size: 0.9em;
+        font-size: 0.78em;
+        opacity: 0.85;
       }
 
       .composer-status-item {
         min-width: 0;
         overflow-wrap: anywhere;
+      }
+
+      @media (max-width: 760px) {
+        .composer-actions {
+          justify-content: flex-start;
+          gap: 4px;
+        }
+
+        .secondary-button {
+          font-size: 0.92em;
+          padding: 4px 6px;
+        }
+
+        .model-selector-row {
+          gap: 6px;
+        }
+
+        .model-selector-row select {
+          min-width: 160px;
+          flex: 1 1 180px;
+        }
+
+        .model-selector-ping {
+          max-width: 100%;
+          white-space: normal;
+          line-height: 1.2;
+        }
       }
 
       .send-button {

@@ -23,7 +23,7 @@ function resolveAgentProjectPath(workspaceRoot, extensionRoot, configuredProject
   return '';
 }
 
-function runAgent(panel, workspaceRoot, task, output, extensionRoot, configuredProjectPath) {
+function runAgent(panel, workspaceRoot, task, output, extensionRoot, configuredProjectPath, selectedModel) {
   return new Promise((resolve, reject) => {
     const projectPath = resolveAgentProjectPath(workspaceRoot, extensionRoot, configuredProjectPath);
     if (!projectPath) {
@@ -34,10 +34,15 @@ function runAgent(panel, workspaceRoot, task, output, extensionRoot, configuredP
     stopRequested = false;
     console.log('WorkspaceRoot:', workspaceRoot);
     const args = ['run', '--project', projectPath, '--', '--workspace', workspaceRoot, '--task', task];
+    const normalizedModel = String(selectedModel || '').trim();
+    if (normalizedModel) {
+      args.push('--ollama-model', normalizedModel);
+    }
     const cwd = path.dirname(projectPath);
     const commandLine = `dotnet ${args.join(' ')}`;
 
     output.appendLine(`Task: ${task}`);
+    output.appendLine(`Model: ${normalizedModel || '(default)'}`);
     output.appendLine(`WorkspaceRoot: ${workspaceRoot}`);
     output.appendLine(`ProjectPath: ${projectPath}`);
     output.appendLine(`Command: ${commandLine}`);

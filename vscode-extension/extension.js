@@ -6,6 +6,12 @@ const { createEditorNavigationService } = require('./editorNavigation');
 const { createExportService } = require('./exportService');
 const { createPanelMessageHandler } = require('./messageRouter');
 const { createExtensionCommandHandlers } = require('./commandHandlers');
+const {
+  loadSelectedOllamaModel,
+  getSelectedOllamaModelSync,
+  saveSelectedOllamaModel,
+  buildModelSelectionStateWithPing
+} = require('./modelSelection');
 
 let isAgentRunning = false;
 
@@ -34,8 +40,11 @@ function activate(context) {
     const getBackendProjectPath = () => String(
       vscode.workspace.getConfiguration('localCursorAgent').get('backendProjectPath') || ''
     ).trim();
-    const runConfiguredAgent = (panel, workspaceRoot, task, runOutput, runExtensionRoot) =>
-      runAgent(panel, workspaceRoot, task, runOutput, runExtensionRoot, getBackendProjectPath());
+    let selectedModelState = getSelectedOllamaModelSync(context.globalState);
+    const runConfiguredAgent = (panel, workspaceRoot, task, runOutput, runExtensionRoot, selectedModelOverride) => {
+      const runModel = String(selectedModelOverride || '').trim() || selectedModelState.model;
+      return runAgent(panel, workspaceRoot, task, runOutput, runExtensionRoot, getBackendProjectPath(), runModel);
+    };
     const commandHandlers = createExtensionCommandHandlers({
       output,
       extensionRoot,
@@ -62,6 +71,20 @@ function activate(context) {
       stopCurrentAgent,
       editorNavigation,
       exportService,
+      getModelSelectionState: () => buildModelSelectionStateWithPing(selectedModelState.model, selectedModelState.warning, selectedModelState.source),
+      setSelectedModel: async candidate => {
+        const previousModel = selectedModelState.model;
+        const resolved = await saveSelectedOllamaModel(context.globalState, candidate);
+        selectedModelState = resolved;
+        if (resolved.warning) {
+          output.appendLine(resolved.warning);
+        }
+        const payload = await buildModelSelectionStateWithPing(resolved.model, resolved.warning, resolved.source);
+        if (resolved.model !== previousModel) {
+          payload.notice = `Модель переключена: ${resolved.model}`;
+        }
+        return payload;
+      },
       getIsAgentRunning: () => isAgentRunning,
       setIsAgentRunning: value => {
         isAgentRunning = value === true;
@@ -110,6 +133,15 @@ function activate(context) {
         webviewOptions: { retainContextWhenHidden: true }
       })
     );
+    loadSelectedOllamaModel(context.globalState).then(resolved => {
+      selectedModelState = resolved;
+      if (resolved.warning) {
+        output.appendLine(resolved.warning);
+      }
+    }).catch(err => {
+      const message = err instanceof Error ? err.message : String(err);
+      output.appendLine(`Model selection init failed: ${message}`);
+    });
     output.appendLine('Local Cursor Agent activation completed');
 
     if (process.env.LOCAL_CURSOR_AGENT_AUTO_OPEN_PANEL === '1') {

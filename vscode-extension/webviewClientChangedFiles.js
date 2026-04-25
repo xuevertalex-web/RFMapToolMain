@@ -166,7 +166,19 @@ const webviewClientChangedFiles = `function normalizeChangedFileEntry(entry) {
         updateExportChangedFilesButtonState();
         updateRunStats();
 
-        if (!Array.isArray(currentChangedFiles) || currentChangedFiles.length === 0) {
+        const hasAnyChangedFiles = Array.isArray(currentChangedFiles) && currentChangedFiles.length > 0;
+        const detailsActions = document.querySelector('.details-actions');
+        const changedLegend = document.getElementById('changedFilesLegend');
+        const changedFilterRow = document.querySelector('.filter-row');
+
+        if (changedFilesTitle) changedFilesTitle.style.display = hasAnyChangedFiles ? '' : 'none';
+        if (detailsActions) detailsActions.style.display = hasAnyChangedFiles ? '' : 'none';
+        if (runStats) runStats.style.display = hasAnyChangedFiles ? '' : 'none';
+        if (changedLegend) changedLegend.style.display = hasAnyChangedFiles ? '' : 'none';
+        if (changedFilterRow) changedFilterRow.style.display = hasAnyChangedFiles ? '' : 'none';
+        if (changedFiles) changedFiles.style.display = hasAnyChangedFiles ? '' : 'none';
+
+        if (!hasAnyChangedFiles) {
           const emptyItem = document.createElement('li');
           emptyItem.textContent = 'No changed files';
           changedFiles.appendChild(emptyItem);
