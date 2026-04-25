@@ -80,7 +80,7 @@ namespace LocalCursorAgent.LLM.Runtime
                 return (LlmRuntimeStatus.ModelTimeout, LlmTimeoutKind.OverallSafetyBudget);
             if (ContainsAny(text, "timed out", "timeout"))
                 return (LlmRuntimeStatus.ModelTimeout, LlmTimeoutKind.FirstResponse);
-            if (ContainsAny(text, "unable to reach", "service unavailable", "connection refused", "no such host"))
+            if (ContainsAny(text, "unable to reach", "service unavailable", "unavailable due to", "connection refused", "no such host"))
                 return (LlmRuntimeStatus.ProviderUnavailable, LlmTimeoutKind.None);
 
             return (LlmRuntimeStatus.LlmRequestFailed, LlmTimeoutKind.None);

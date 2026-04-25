@@ -20,6 +20,8 @@ await RunRuntimeProfileSelectionRegression();
 await RunRuntimeNormalizedClassificationRegression();
 await RunOllamaQwenProfileSelectionRegression();
 await RunOllamaUsableAnalysisClassificationRegression();
+await RunRuntimeProviderSelection_OpenAiGeminiRegression();
+await RunRuntimeNonOllamaClassificationRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -454,6 +456,96 @@ static async Task RunRuntimeNormalizedClassificationRegression()
     AssertTrue(failureResult.IsFailure, "Expected normalized failure=true.");
 
     Console.WriteLine("PASS RuntimeNormalizedClassification_TimeoutAndRequestFailed");
+}
+
+static Task RunRuntimeProviderSelection_OpenAiGeminiRegression()
+{
+    var oldOpenAiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+    var oldGeminiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+    var oldOpenAiModel = Environment.GetEnvironmentVariable("OPENAI_MODEL");
+    var oldGeminiModel = Environment.GetEnvironmentVariable("GEMINI_MODEL");
+
+    try
+    {
+        Environment.SetEnvironmentVariable("OPENAI_API_KEY", "test-openai-key");
+        Environment.SetEnvironmentVariable("OPENAI_MODEL", "gpt-4.1-mini");
+        Environment.SetEnvironmentVariable("GEMINI_API_KEY", "test-gemini-key");
+        Environment.SetEnvironmentVariable("GEMINI_MODEL", "gemini-1.5-flash");
+
+        var appRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(appRoot);
+
+        var openAiClient = LlmRuntimeFactory.Create("openai", null, appRoot);
+        var openAiPrimary = ExtractPrimaryClient(openAiClient);
+        AssertTrue(openAiPrimary is ILlmRuntimeClient, "Expected runtime client as OpenAI primary.");
+        AssertTrue(((ILlmRuntimeClient)openAiPrimary).Metadata.Provider == "openai", "Expected OpenAI provider metadata.");
+
+        var geminiClient = LlmRuntimeFactory.Create("gemini", null, appRoot);
+        var geminiPrimary = ExtractPrimaryClient(geminiClient);
+        AssertTrue(geminiPrimary is ILlmRuntimeClient, "Expected runtime client as Gemini primary.");
+        AssertTrue(((ILlmRuntimeClient)geminiPrimary).Metadata.Provider == "gemini", "Expected Gemini provider metadata.");
+
+        Console.WriteLine("PASS RuntimeProviderSelection_OpenAiGemini");
+        return Task.CompletedTask;
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("OPENAI_API_KEY", oldOpenAiKey);
+        Environment.SetEnvironmentVariable("OPENAI_MODEL", oldOpenAiModel);
+        Environment.SetEnvironmentVariable("GEMINI_API_KEY", oldGeminiKey);
+        Environment.SetEnvironmentVariable("GEMINI_MODEL", oldGeminiModel);
+    }
+}
+
+static async Task RunRuntimeNonOllamaClassificationRegression()
+{
+    var openAiProfile = LlmProfiles.Resolve("openai", "gpt-4.1-mini");
+    var openAiPolicy = LlmProfiles.ResolvePolicy("openai", "gpt-4.1-mini");
+    var geminiProfile = LlmProfiles.Resolve("gemini", "gemini-1.5-flash");
+    var geminiPolicy = LlmProfiles.ResolvePolicy("gemini", "gemini-1.5-flash");
+
+    var openAiTimeout = new LlmRuntimeClient(
+        new FakeAdapter("openai", "gpt-4.1-mini", "Error: OpenAI request timed out. simulated timeout"),
+        openAiProfile,
+        openAiPolicy);
+    var openAiTimeoutResult = await openAiTimeout.GenerateNormalized("ping");
+    AssertTrue(openAiTimeoutResult.Status == LlmRuntimeStatus.ModelTimeout, "Expected OpenAI timeout classification.");
+
+    var openAiFailed = new LlmRuntimeClient(
+        new FakeAdapter("openai", "gpt-4.1-mini", "Error: OpenAI request failed. simulated failure"),
+        openAiProfile,
+        openAiPolicy);
+    var openAiFailedResult = await openAiFailed.GenerateNormalized("ping");
+    AssertTrue(openAiFailedResult.Status == LlmRuntimeStatus.LlmRequestFailed, "Expected OpenAI request-failure classification.");
+
+    var geminiUnavailable = new LlmRuntimeClient(
+        new FakeAdapter("gemini", "gemini-1.5-flash", "Error: Gemini unavailable due to quota or rate limits."),
+        geminiProfile,
+        geminiPolicy);
+    var geminiUnavailableResult = await geminiUnavailable.GenerateNormalized("ping");
+    AssertTrue(geminiUnavailableResult.Status == LlmRuntimeStatus.ProviderUnavailable, "Expected Gemini provider-unavailable classification.");
+
+    var geminiUsable = new LlmRuntimeClient(
+        new FakeAdapter("gemini", "gemini-1.5-flash", "Here is the analysis summary in plain text."),
+        geminiProfile,
+        geminiPolicy);
+    var geminiUsableResult = await geminiUsable.GenerateNormalized("ping");
+    AssertTrue(geminiUsableResult.Status == LlmRuntimeStatus.Success, "Expected Gemini usable response classified as success.");
+    AssertTrue(geminiUsableResult.IsUsable, "Expected Gemini usable response to be usable.");
+
+    Console.WriteLine("PASS RuntimeNonOllamaClassification_OpenAiGemini");
+}
+
+static ILLMClient ExtractPrimaryClient(ILLMClient client)
+{
+    if (client is not FallbackLLMClient)
+        return client;
+
+    var primaryField = typeof(FallbackLLMClient).GetField("_primary", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+    if (primaryField?.GetValue(client) is ILLMClient primary)
+        return primary;
+
+    return client;
 }
 
 static Task RunOllamaQwenProfileSelectionRegression()

@@ -9,16 +9,24 @@ namespace LocalCursorAgent.LLM.Runtime
         {
             var provider = NormalizeProvider(providerOverride ?? Environment.GetEnvironmentVariable("LOCALCURSOR_LLM_PROVIDER"));
             var preferOpenAi = provider is "openai" or "chatgpt" or "hybrid" or "";
+            var preferGemini = provider is "gemini" or "google";
             var preferOllama = provider is "local" or "ollama";
 
             var openAiClient = TryCreateOpenAiClient(appRoot);
+            var geminiClient = TryCreateGeminiClient();
             var ollamaClient = CreateOllamaClient(ollamaModelOverride);
 
-            if (preferOllama && openAiClient is not null)
-                return new FallbackLLMClient(ollamaClient, openAiClient);
+            if (preferOllama && (openAiClient is not null || geminiClient is not null))
+                return new FallbackLLMClient(ollamaClient, openAiClient ?? geminiClient!);
+
+            if (preferGemini && geminiClient is not null)
+                return new FallbackLLMClient(geminiClient, openAiClient ?? ollamaClient);
 
             if (preferOpenAi && openAiClient is not null)
-                return new FallbackLLMClient(openAiClient, ollamaClient);
+                return new FallbackLLMClient(openAiClient, geminiClient ?? ollamaClient);
+
+            if (geminiClient is not null)
+                return new FallbackLLMClient(geminiClient, ollamaClient);
 
             return ollamaClient;
         }
@@ -54,6 +62,20 @@ namespace LocalCursorAgent.LLM.Runtime
             var adapter = new OpenAiProviderAdapter(apiKey, model);
             var profile = LlmProfiles.Resolve("openai", model);
             var policy = LlmProfiles.ResolvePolicy("openai", model);
+            return new LlmRuntimeClient(adapter, profile, policy);
+        }
+
+        private static ILLMClient? TryCreateGeminiClient()
+        {
+            var apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY")?.Trim();
+            if (string.IsNullOrWhiteSpace(apiKey))
+                return null;
+
+            var model = Environment.GetEnvironmentVariable("GEMINI_MODEL")?.Trim();
+            model = string.IsNullOrWhiteSpace(model) ? "gemini-1.5-flash" : model;
+            var adapter = new GeminiProviderAdapter(apiKey, model);
+            var profile = LlmProfiles.Resolve("gemini", model);
+            var policy = LlmProfiles.ResolvePolicy("gemini", model);
             return new LlmRuntimeClient(adapter, profile, policy);
         }
 

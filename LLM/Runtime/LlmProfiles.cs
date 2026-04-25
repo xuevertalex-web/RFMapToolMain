@@ -48,6 +48,21 @@ namespace LocalCursorAgent.LLM.Runtime
                 TimeoutProfile: "remote_standard",
                 StallProfile: "remote_standard",
                 RetryPreference: "provider-fallback",
+                PreferFallbackOnHardFailure: true),
+            ["gemini/default"] = new(
+                ProfileId: "gemini/default",
+                Provider: "gemini",
+                ContextClass: "remote-large",
+                ExpectedLatencyClass: "medium-high",
+                StreamingSupported: false,
+                StructuredOutputReliability: "medium-high",
+                CodeStrength: "high",
+                ParsingStrictness: "strict",
+                UsableTextTolerance: "medium",
+                ExpectedAnalysisResponseMode: "structured_or_text",
+                TimeoutProfile: "remote_gemini_standard",
+                StallProfile: "remote_gemini_standard",
+                RetryPreference: "provider-fallback",
                 PreferFallbackOnHardFailure: true)
         };
 
@@ -56,6 +71,12 @@ namespace LocalCursorAgent.LLM.Runtime
             FirstResponseTimeout: TimeSpan.FromSeconds(180),
             StallTimeout: TimeSpan.FromSeconds(90),
             OverallSafetyBudget: TimeSpan.FromMinutes(6),
+            TreatUsablePartialOutputAsSuccessForAnalysis: true);
+        private static readonly LlmRuntimePolicy GeminiStandardPolicy = new(
+            ConnectStartTimeout: TimeSpan.FromSeconds(15),
+            FirstResponseTimeout: TimeSpan.FromSeconds(120),
+            StallTimeout: TimeSpan.FromSeconds(70),
+            OverallSafetyBudget: TimeSpan.FromMinutes(4),
             TreatUsablePartialOutputAsSuccessForAnalysis: true);
 
         public static LlmRuntimeProfile Resolve(string provider, string? model = null)
@@ -79,6 +100,8 @@ namespace LocalCursorAgent.LLM.Runtime
             {
                 return OllamaRelaxedPolicy;
             }
+            if (provider.Equals("gemini", StringComparison.OrdinalIgnoreCase))
+                return GeminiStandardPolicy;
 
             return LlmRuntimePolicy.Default;
         }
