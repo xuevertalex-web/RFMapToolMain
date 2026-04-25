@@ -74,7 +74,7 @@
                     },
     "scripts":  {
                     "compile":  "node -e \"console.log(\u0027No build step required\u0027)\"",
-                    "test":  "node agentRunner.test.js"
+                    "test":  "node agentRunner.test.js && node webviewRendering.test.js"
                 },
     "devDependencies":  {
 
