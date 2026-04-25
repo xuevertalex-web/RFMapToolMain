@@ -1085,7 +1085,14 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             if (string.IsNullOrWhiteSpace(response))
                 return false;
 
-            return response.StartsWith("Error:", StringComparison.OrdinalIgnoreCase);
+            var normalized = response.Trim();
+            return normalized.StartsWith("Error: Ollama ", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.StartsWith("Error: OpenAI ", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.StartsWith("Error: LLM returned status ", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.StartsWith("Error: Unable to reach ", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.StartsWith("Error: Unexpected response format from ", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.StartsWith("Error: No response from ", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.StartsWith("Error: Empty prompt", StringComparison.OrdinalIgnoreCase);
         }
 
         private bool TryRepairCs8802(BuildVerifier.BuildResult buildResult, HashSet<string> changedFiles, out string? nextPrompt)

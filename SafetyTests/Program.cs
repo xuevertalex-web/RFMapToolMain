@@ -14,6 +14,7 @@ using LocalCursorAgent.Tools;
 await RunAnalysisFallbackTimeoutRegression();
 await RunAnalysisFallbackLlmRequestFailedRegression();
 await RunAnalysisNormalResponseRegression();
+await RunAnalysisUsableErrorPrefixedResponse_NoFallbackRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -302,6 +303,88 @@ static async Task RunAnalysisFallbackLlmRequestFailedRegression()
     Console.WriteLine("PASS AnalysisFallback_LlmRequestFailed_IndexedContextSummary_StructuredObservability");
 }
 
+static async Task RunAnalysisUsableErrorPrefixedResponse_NoFallbackRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    File.WriteAllText(Path.Combine(workspaceRoot, "Program.cs"), "namespace SampleApp; public static class Entry { public static void Hello() { } }");
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    tracer.StartRun(
+        "Analyze the project briefly",
+        "Analyze the project briefly",
+        workspaceRoot,
+        runtimeRoot,
+        AgentAccessMode.WorkspaceWrite.ToString(),
+        "FakeUsableErrorPrefixedSuccessClient",
+        "fake-usable-error-prefixed-success-model");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var toolRegistry = new ToolRegistry();
+    var memory = new MemoryStore();
+    var permissionGuard = new PermissionGuard();
+    var safeProcessRunner = new SafeProcessRunner(session, permissionGuard, tracer);
+    var buildVerifier = new BuildVerifier(safeProcessRunner, tracer);
+    var sandboxManager = new SandboxManager(workspaceRoot, runtimeRoot);
+    var embeddingService = new EmbeddingService(disabled: true);
+    var vectorStore = new VectorStore();
+    var fileStateManager = new FileStateManager();
+    var projectIndexer = new ProjectIndexer(workspaceRoot, embeddingService, vectorStore, new AgentConfig(workspaceRoot), fileStateManager);
+    var contextBuilder = new ContextBuilder(workspaceRoot, vectorStore, fileStateManager, new ProjectSymbolDirectory(), tracer);
+
+    var agent = new Agent(
+        new FakeUsableErrorPrefixedSuccessClient(),
+        toolRegistry,
+        memory,
+        buildVerifier,
+        sandboxManager,
+        projectIndexer,
+        contextBuilder,
+        fileStateManager,
+        session,
+        workspaceResolution: null);
+
+    var oldOut = Console.Out;
+    var capture = new StringWriter();
+    Console.SetOut(capture);
+
+    try
+    {
+        _ = await agent.RunTask("Analyze the project briefly");
+    }
+    finally
+    {
+        Console.SetOut(oldOut);
+    }
+
+    var structured = ExtractStructuredPayload(capture.ToString());
+
+    AssertTrue(structured.GetProperty("ok").GetBoolean(), "Expected successful analysis run for usable error-prefixed response.");
+    AssertTrue(string.IsNullOrEmpty(structured.GetProperty("fallbackReason").GetString()), "Expected empty fallbackReason for usable model response.");
+    AssertTrue(string.IsNullOrEmpty(structured.GetProperty("fallbackMode").GetString()), "Expected empty fallbackMode for usable model response.");
+    AssertTrue(structured.GetProperty("reasonCode").GetString() == "SUCCESS_ANALYSIS_RESPONSE", "Expected reasonCode=SUCCESS_ANALYSIS_RESPONSE.");
+
+    var timeline = structured.GetProperty("timeline");
+    AssertTrue(timeline.ValueKind == JsonValueKind.Array && timeline.GetArrayLength() > 0, "Expected non-empty timeline.");
+    var stages = timeline.EnumerateArray().Select(e => e.GetProperty("stage").GetString() ?? string.Empty).ToArray();
+    AssertNotContains(stages, "AnalysisFallbackStarted");
+    AssertNotContains(stages, "AnalysisFallbackCompleted");
+    AssertNotContains(stages, "ModelCallTimedOut");
+
+    Console.WriteLine("PASS Analysis_UsableErrorPrefixedResponse_NoFallback");
+}
+
 static JsonElement ExtractStructuredPayload(string output)
 {
     var jsonLine = output
@@ -356,6 +439,15 @@ sealed class FakeLlmRequestFailedClient : ILLMClient
 {
     public Task<string> Generate(string prompt, CancellationToken cancellationToken = default)
         => Task.FromResult("Error: Ollama request failed. simulated provider failure");
+
+    public Task<bool> IsAvailable(CancellationToken cancellationToken = default)
+        => Task.FromResult(true);
+}
+
+sealed class FakeUsableErrorPrefixedSuccessClient : ILLMClient
+{
+    public Task<string> Generate(string prompt, CancellationToken cancellationToken = default)
+        => Task.FromResult("Error: I cannot execute tools directly in this mode, but here is the project analysis: the code is small, has one entry type, and does not require build changes.");
 
     public Task<bool> IsAvailable(CancellationToken cancellationToken = default)
         => Task.FromResult(true);
