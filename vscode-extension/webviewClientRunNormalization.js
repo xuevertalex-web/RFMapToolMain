@@ -3,6 +3,55 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         return text || fallback || 'not available';
       }
 
+      function normalizeOptionalText(value) {
+        return String(value === undefined || value === null ? '' : value).trim();
+      }
+
+      function normalizeDurationText(structured) {
+        if (!structured || typeof structured !== 'object') {
+          return 'not available';
+        }
+        const rawDuration = structured.durationMs;
+        if (Number.isFinite(rawDuration) && rawDuration >= 0) {
+          return String(Math.floor(rawDuration)) + ' ms';
+        }
+        return normalizeText(structured.duration, 'not available');
+      }
+
+      function normalizeFinalStatusValue(structured, ok, failed) {
+        const finalStatus = normalizeOptionalText(structured && structured.finalStatus).toLowerCase();
+        const fallbackReason = normalizeOptionalText(structured && structured.fallbackReason);
+        const fallbackMode = normalizeOptionalText(structured && structured.fallbackMode);
+
+        if (failed) {
+          return 'error';
+        }
+        if (finalStatus === 'fallback-success') {
+          return 'fallback-success';
+        }
+        if (finalStatus === 'success') {
+          return 'success';
+        }
+        if (finalStatus === 'error' || finalStatus === 'failed' || finalStatus === 'failure') {
+          return 'error';
+        }
+        if (ok && (fallbackReason || fallbackMode)) {
+          return 'fallback-success';
+        }
+        if (ok) {
+          return 'success';
+        }
+        return 'running';
+      }
+
+      function normalizeBuildText(structured, buildSucceeded, buildStarted) {
+        const buildText = normalizeOptionalText(structured && structured.buildText);
+        if (buildText) {
+          return buildText;
+        }
+        return normalizeBooleanBuild(buildSucceeded, buildStarted);
+      }
+
       function normalizeBooleanBuild(value, started) {
         if (started === false) return 'not started';
         if (value === true) return 'succeeded';
@@ -63,6 +112,64 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           }));
       }
 
+      function buildDerivedTimeline(runStatus, structured, fallbackReason, fallbackMode, provider, model, duration, buildText) {
+        if (!structured || typeof structured !== 'object' || runStatus === 'running' || runStatus === 'error') {
+          return [];
+        }
+
+        const events = [];
+        events.push({
+          stage: 'status',
+          status: runStatus,
+          message: 'Derived from structured metadata',
+          timestamp: '',
+          isDerived: true
+        });
+
+        if (fallbackReason || fallbackMode) {
+          events.push({
+            stage: 'fallback',
+            status: fallbackMode || 'active',
+            message: [fallbackReason, fallbackMode].filter(Boolean).join(' | '),
+            timestamp: '',
+            isDerived: true
+          });
+        }
+
+        if (provider || model || duration) {
+          events.push({
+            stage: 'model',
+            status: provider || 'not available',
+            message: [model, duration].filter(Boolean).join(' | '),
+            timestamp: '',
+            isDerived: true
+          });
+        }
+
+        events.push({
+          stage: 'build',
+          status: buildText || 'not run',
+          message: 'Build stage state',
+          timestamp: '',
+          isDerived: true
+        });
+
+        return events;
+      }
+
+      function buildDerivedSummary(structured, status, fallbackReason, fallbackMode, provider, model, duration, buildText) {
+        const summaryText = normalizeOptionalText(structured && structured.summaryText);
+        const summary = normalizeOptionalText(structured && structured.summary);
+        const details = [];
+        details.push('Final status: ' + status);
+        if (fallbackReason) details.push('Fallback reason: ' + fallbackReason);
+        if (fallbackMode) details.push('Fallback mode: ' + fallbackMode);
+        if (provider || model) details.push('Model: ' + [provider, model].filter(Boolean).join(' / '));
+        if (duration && duration !== 'not available') details.push('Duration: ' + duration);
+        details.push('Build: ' + (buildText || 'not run'));
+        return [summaryText, summary, details.join('; ')].filter(Boolean).join('\\n');
+      }
+
       function normalizeFailureSummary(message, structured) {
         const source = structured && typeof structured === 'object' ? structured : {};
         return {
@@ -98,32 +205,46 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         const changedRanges = structured && Array.isArray(structured.changedRanges) ? structured.changedRanges : [];
         const changedKinds = structured && Array.isArray(structured.changedKinds) ? structured.changedKinds : [];
         const task = String(currentRunTask || (taskInput && taskInput.value ? taskInput.value : '')).trim();
+        const status = normalizeFinalStatusValue(structured, ok, failed);
+        const provider = normalizeText(structured && (structured.provider || structured.modelProvider), 'not available');
+        const model = normalizeText(structured && structured.model, 'not available');
+        const duration = normalizeDurationText(structured);
+        const fallbackReason = normalizeOptionalText(structured && structured.fallbackReason);
+        const fallbackMode = normalizeOptionalText(structured && structured.fallbackMode);
+        const finalStatus = normalizeOptionalText(structured && structured.finalStatus);
+        const timeline = normalizeTraceEvents(structured);
+        const buildText = normalizeBuildText(structured, buildSucceeded, buildStarted);
+        const derivedTimeline = timeline.length === 0
+          ? buildDerivedTimeline(status, structured, fallbackReason, fallbackMode, provider, model, duration, buildText)
+          : [];
+        const summary = buildDerivedSummary(structured, finalStatus || status, fallbackReason, fallbackMode, provider, model, duration, buildText);
 
         return {
           ok,
           failed,
           cancelled: String(message && message.error || '').toLowerCase().includes('stopped by user'),
-          status: failed ? 'failed' : ok ? 'success' : 'running',
+          status,
           task,
           taskPreview: task ? (task.length > 140 ? task.slice(0, 137) + '...' : task) : 'not available',
           workspace: normalizeText(structured && (structured.workspace || structured.workspaceRoot), 'not available'),
-          duration: normalizeText(structured && (structured.duration || structured.durationMs), 'not available'),
-          provider: normalizeText(structured && (structured.provider || structured.modelProvider), 'not available'),
-          model: normalizeText(structured && structured.model, 'not available'),
-          fallbackReason: normalizeText(structured && structured.fallbackReason, ''),
-          fallbackMode: normalizeText(structured && structured.fallbackMode, ''),
-          finalStatus: normalizeText(structured && structured.finalStatus, ''),
+          duration,
+          provider,
+          model,
+          fallbackReason,
+          fallbackMode,
+          finalStatus,
           degradedFlags: Array.isArray(structured && structured.degradedFlags) ? structured.degradedFlags.map(String) : [],
-          summary: normalizeText(structured && structured.summary, ''),
+          summary,
           messageText: normalizeText(structured && structured.message || message.result || message.error, ''),
           buildSucceeded,
           buildStarted,
-          buildText: normalizeBooleanBuild(buildSucceeded, buildStarted),
+          buildText,
           changedFiles,
           changedHints,
           changedRanges,
           changedKinds,
-          timeline: normalizeTraceEvents(structured),
+          timeline: timeline.length ? timeline : derivedTimeline,
+          timelineDerived: timeline.length === 0 && derivedTimeline.length > 0,
           diagnostics: normalizeDiagnostics(structured),
           failure: failed ? normalizeFailureSummary(message || {}, structured) : null
         };

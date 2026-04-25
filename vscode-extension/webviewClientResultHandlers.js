@@ -1,6 +1,12 @@
 const webviewClientResultHandlers = `function applyNormalizedRunResult(run) {
         structuredResultSection.style.display = 'block';
-        status.textContent = run.failed ? 'Ошибка' : run.ok ? 'Готово' : 'В работе';
+        status.textContent = run.status === 'error'
+          ? 'Error'
+          : run.status === 'fallback-success'
+            ? 'Fallback success'
+            : run.status === 'success'
+              ? 'Success'
+              : 'Running';
         renderRunStatus(run);
         renderModelStatus(run);
         renderRunSummary(run);

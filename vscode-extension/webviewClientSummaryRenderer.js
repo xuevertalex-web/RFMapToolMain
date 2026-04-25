@@ -1,10 +1,11 @@
 const webviewClientSummaryRenderer = `function renderRunSummary(run) {
         result.textContent = run.messageText || 'not available';
         result.classList.toggle('muted', !run.messageText);
-        resultBadge.textContent = run.failed ? 'failed' : run.ok ? 'success' : 'running';
-        resultBadge.className = 'result-badge ' + (run.failed ? 'error' : run.ok ? 'ok' : 'running');
+        const badgeStatus = run.status || (run.failed ? 'error' : run.ok ? 'success' : 'running');
+        resultBadge.textContent = badgeStatus;
+        resultBadge.className = 'result-badge ' + (badgeStatus === 'error' ? 'error' : badgeStatus === 'running' ? 'running' : 'ok');
         summary.textContent = run.summary || 'not available';
-        summary.className = 'summary-box ' + (run.failed ? 'error' : run.buildSucceeded === false ? 'warn' : run.ok ? 'ok' : 'na');
+        summary.className = 'summary-box ' + (badgeStatus === 'error' ? 'error' : run.buildSucceeded === false ? 'warn' : badgeStatus === 'running' ? 'na' : 'ok');
       }`;
 
 function getWebviewClientSummaryRenderer() {

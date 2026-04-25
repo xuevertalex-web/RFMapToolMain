@@ -3,6 +3,9 @@ const webviewClientStatusRenderer = `function renderRunStatus(run) {
         runStatusGrid.replaceChildren();
         const rows = [
           ['status', run.status],
+          ['final status', run.finalStatus || run.status],
+          ['fallback reason', run.fallbackReason || 'not available'],
+          ['fallback mode', run.fallbackMode || 'not available'],
           ['workspace', run.workspace],
           ['task', run.taskPreview],
           ['duration', run.duration],

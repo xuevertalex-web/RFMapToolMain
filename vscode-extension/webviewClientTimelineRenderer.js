@@ -11,10 +11,10 @@ const webviewClientTimelineRenderer = `function renderRunTimeline(run) {
           item.className = 'timeline-item';
           const title = document.createElement('div');
           title.className = 'timeline-title';
-          title.textContent = event.stage + ' · ' + event.status;
+          title.textContent = event.stage + ' · ' + event.status + (event.isDerived ? ' (derived)' : '');
           const detail = document.createElement('div');
           detail.className = 'timeline-detail';
-          detail.textContent = [event.timestamp, event.message].filter(Boolean).join(' — ') || 'not available';
+          detail.textContent = [event.timestamp, event.message].filter(Boolean).join(' - ') || 'not available';
           item.appendChild(title);
           item.appendChild(detail);
           timelineList.appendChild(item);
