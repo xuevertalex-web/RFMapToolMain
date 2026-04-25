@@ -16,6 +16,7 @@ using LocalCursorAgent.LLM.Runtime;
 
 await RunAnalysisFallbackTimeoutRegression();
 await RunAnalysisFallbackLlmRequestFailedRegression();
+await RunAnalysisFallback_ProviderUnavailable_IndexedContextSummary_Regression();
 await RunAnalysisNormalResponseRegression();
 await RunAnalysisUsableErrorPrefixedResponse_NoFallbackRegression();
 await RunEmbeddingNotFound_DisablesTruthfullyRegression();
@@ -315,6 +316,87 @@ static async Task RunAnalysisFallbackLlmRequestFailedRegression()
     Console.WriteLine("PASS AnalysisFallback_LlmRequestFailed_IndexedContextSummary_StructuredObservability");
 }
 
+static async Task RunAnalysisFallback_ProviderUnavailable_IndexedContextSummary_Regression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    File.WriteAllText(Path.Combine(workspaceRoot, "Program.cs"), "namespace SampleApp; public static class Entry { public static void Hello() { } }");
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    tracer.StartRun(
+        "Analyze the project briefly",
+        "Analyze the project briefly",
+        workspaceRoot,
+        runtimeRoot,
+        AgentAccessMode.WorkspaceWrite.ToString(),
+        "FakeProviderUnavailableClient",
+        "fake-provider-unavailable-model");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var toolRegistry = new ToolRegistry();
+    var memory = new MemoryStore();
+    var permissionGuard = new PermissionGuard();
+    var safeProcessRunner = new SafeProcessRunner(session, permissionGuard, tracer);
+    var buildVerifier = new BuildVerifier(safeProcessRunner, tracer);
+    var sandboxManager = new SandboxManager(workspaceRoot, runtimeRoot);
+    var embeddingService = new EmbeddingService(disabled: true);
+    var vectorStore = new VectorStore();
+    var fileStateManager = new FileStateManager();
+    var projectIndexer = new ProjectIndexer(workspaceRoot, embeddingService, vectorStore, new AgentConfig(workspaceRoot), fileStateManager);
+    var contextBuilder = new ContextBuilder(workspaceRoot, vectorStore, fileStateManager, new ProjectSymbolDirectory(), tracer);
+
+    var profile = LlmProfiles.Resolve("ollama", "qwen2.5-coder:7b-instruct-q4_K_M");
+    var policy = LlmProfiles.ResolvePolicy("ollama", "qwen2.5-coder:7b-instruct-q4_K_M");
+    var llmClient = new LlmRuntimeClient(
+        new FakeAdapter("ollama", "qwen2.5-coder:7b-instruct-q4_K_M", "Error: LLM returned status NotFound"),
+        profile,
+        policy);
+
+    var agent = new Agent(
+        llmClient,
+        toolRegistry,
+        memory,
+        buildVerifier,
+        sandboxManager,
+        projectIndexer,
+        contextBuilder,
+        fileStateManager,
+        session,
+        workspaceResolution: null);
+
+    var oldOut = Console.Out;
+    var capture = new StringWriter();
+    Console.SetOut(capture);
+
+    try
+    {
+        _ = await agent.RunTask("Analyze the project briefly");
+    }
+    finally
+    {
+        Console.SetOut(oldOut);
+    }
+
+    var structured = ExtractStructuredPayload(capture.ToString());
+    AssertTrue(structured.GetProperty("ok").GetBoolean(), "Expected fallback analysis run to be successful.");
+    AssertTrue(structured.GetProperty("fallbackReason").GetString() == "PROVIDER_UNAVAILABLE", "Expected fallbackReason=PROVIDER_UNAVAILABLE.");
+    AssertTrue(structured.GetProperty("fallbackMode").GetString() == "INDEXED_CONTEXT_SUMMARY", "Expected fallbackMode=INDEXED_CONTEXT_SUMMARY.");
+    AssertTrue(structured.GetProperty("reasonCode").GetString() == "ANALYSIS_FALLBACK_USED", "Expected reasonCode=ANALYSIS_FALLBACK_USED.");
+
+    Console.WriteLine("PASS AnalysisFallback_ProviderUnavailable_IndexedContextSummary");
+}
+
 static async Task RunAnalysisUsableErrorPrefixedResponse_NoFallbackRegression()
 {
     var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
@@ -486,6 +568,12 @@ static async Task RunRuntimeNormalizedClassificationRegression()
     var failureResult = await failureClient.GenerateNormalized("ping");
     AssertTrue(failureResult.Status == LlmRuntimeStatus.LlmRequestFailed, "Expected normalized request-failed status.");
     AssertTrue(failureResult.IsFailure, "Expected normalized failure=true.");
+
+    var unavailableClient = new LlmRuntimeClient(
+        new FakeAdapter("ollama", "qwen2.5-coder:7b", "Error: LLM returned status NotFound"),
+        LlmProfiles.Resolve("ollama"));
+    var unavailableResult = await unavailableClient.GenerateNormalized("ping");
+    AssertTrue(unavailableResult.Status == LlmRuntimeStatus.ProviderUnavailable, "Expected NotFound to normalize as provider unavailable.");
 
     Console.WriteLine("PASS RuntimeNormalizedClassification_TimeoutAndRequestFailed");
 }

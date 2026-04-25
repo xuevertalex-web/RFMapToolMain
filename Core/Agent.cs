@@ -294,10 +294,13 @@ namespace LocalCursorAgent.Core
 
                             tracer.LogActionEvent("AnalysisFallbackStarted", "Agent", ExecutionTracer.ActionLogLevel.Warning, "started", fallbackReason, metadata: new Dictionary<string, object?>
                             {
-                                { "fallback_mode", "INDEXED_CONTEXT_SUMMARY" }
+                                { "fallback_mode", "INDEXED_CONTEXT_SUMMARY" },
+                                { "provider_outcome", runtimeResult?.Status.ToString() ?? "legacy_classifier" },
+                                { "response_length", currentResponse?.Length ?? 0 },
+                                { "response_preview", string.IsNullOrWhiteSpace(currentResponse) ? string.Empty : (currentResponse.Length > 120 ? currentResponse[..120] : currentResponse) }
                             });
-                            var fallbackSummary = BuildAnalysisFallbackSummary(task, contextInfo);
-                            tracer.LogActionEvent("AnalysisFallback", "Agent", ExecutionTracer.ActionLogLevel.Warning, "used", "LLM_REQUEST_FAILED", metadata: new Dictionary<string, object?>
+                            var fallbackSummary = BuildAnalysisFallbackSummary(task, contextInfo, fallbackReason);
+                            tracer.LogActionEvent("AnalysisFallback", "Agent", ExecutionTracer.ActionLogLevel.Warning, "used", fallbackReason, metadata: new Dictionary<string, object?>
                             {
                                 { "selected_files", contextInfo.SelectedFiles.ToArray() },
                                 { "file_count", contextInfo.SelectedFiles.Count }
@@ -972,7 +975,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                    lower.StartsWith("\u044f \u0440\u0430\u0441\u0441\u043c\u043e\u0442\u0440\u044e", StringComparison.Ordinal);
         }
 
-        private static string BuildAnalysisFallbackSummary(string task, ContextInformation contextInfo)
+        private static string BuildAnalysisFallbackSummary(string task, ContextInformation contextInfo, string fallbackReason)
         {
             var files = contextInfo.SelectedFiles.Take(10).ToList();
             var lines = new List<string> { "Краткий обзор проекта:" };
@@ -1010,8 +1013,19 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 lines.Add($"- {file}{symbolSuffix}");
             }
 
-            lines.Add("- Ответ собран из индексированного контекста, потому что локальная модель не завершила запрос вовремя.");
+            lines.Add(GetAnalysisFallbackReasonText(fallbackReason));
             return string.Join(Environment.NewLine, lines);
+        }
+
+        private static string GetAnalysisFallbackReasonText(string fallbackReason)
+        {
+            if (string.Equals(fallbackReason, "MODEL_TIMEOUT", StringComparison.OrdinalIgnoreCase))
+                return "- Ответ собран из индексированного контекста, потому что локальная модель не завершила запрос вовремя.";
+
+            if (string.Equals(fallbackReason, "PROVIDER_UNAVAILABLE", StringComparison.OrdinalIgnoreCase))
+                return "- Ответ собран из индексированного контекста, потому что локальная модель недоступна или не найдена.";
+
+            return "- Ответ собран из индексированного контекста, потому что запрос к локальной модели завершился ошибкой.";
         }
 
         private static string BuildCompactAnalysisContext(ContextInformation contextInfo)
@@ -1379,7 +1393,13 @@ next_safe_action: {diagnostic.NextSafeAction}";
         {
             if (runtimeResult is not null)
             {
-                return runtimeResult.Status == LlmRuntimeStatus.ModelTimeout ? "MODEL_TIMEOUT" : "LLM_REQUEST_FAILED";
+                return runtimeResult.Status switch
+                {
+                    LlmRuntimeStatus.ModelTimeout => "MODEL_TIMEOUT",
+                    LlmRuntimeStatus.ProviderUnavailable => "PROVIDER_UNAVAILABLE",
+                    LlmRuntimeStatus.UnsupportedCapability => "UNSUPPORTED_CAPABILITY",
+                    _ => "LLM_REQUEST_FAILED"
+                };
             }
 
             return IsModelTimeoutResponse(response) ? "MODEL_TIMEOUT" : "LLM_REQUEST_FAILED";
@@ -2216,4 +2236,5 @@ Write the final project overview now.";
     }
 #pragma warning restore CS0162
 }
+
 

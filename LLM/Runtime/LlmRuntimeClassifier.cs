@@ -80,6 +80,8 @@ namespace LocalCursorAgent.LLM.Runtime
                 return (LlmRuntimeStatus.ModelTimeout, LlmTimeoutKind.OverallSafetyBudget);
             if (ContainsAny(text, "timed out", "timeout"))
                 return (LlmRuntimeStatus.ModelTimeout, LlmTimeoutKind.FirstResponse);
+            if (ContainsAny(text, "returned status notfound", "returned status not found", "returned status 404", "status notfound", "status 404", "model not found"))
+                return (LlmRuntimeStatus.ProviderUnavailable, LlmTimeoutKind.None);
             if (ContainsAny(text, "unable to reach", "service unavailable", "unavailable due to", "connection refused", "no such host"))
                 return (LlmRuntimeStatus.ProviderUnavailable, LlmTimeoutKind.None);
 
