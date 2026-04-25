@@ -245,6 +245,7 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
         const degradedFlags = Array.isArray(payload.degradedFlags)
           ? payload.degradedFlags.map(item => normalizeOptionalLogText(item)).filter(Boolean)
           : [];
+        const embeddingsInfo = formatEmbeddingsLogStatus(embeddingsStatus, degradedFlags);
 
         const lines = [];
         lines.push('Status: ' + (status || 'not available'));
@@ -255,9 +256,38 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
         lines.push('ChangedFiles: ' + String(changedFiles.length));
         if (fallbackReason || fallbackMode) lines.push('Fallback: ' + [fallbackReason, fallbackMode].filter(Boolean).join(' / '));
         if (modelText) lines.push('Model: ' + modelText);
-        if (embeddingsStatus) lines.push('EmbeddingsStatus: ' + embeddingsStatus);
-        if (degradedFlags.length) lines.push('Degraded: ' + degradedFlags.join(', '));
+        if (embeddingsInfo.text) lines.push('Embeddings: ' + embeddingsInfo.text);
         return lines;
+      }
+
+      function formatEmbeddingsLogStatus(status, degradedFlags) {
+        const normalizedStatus = normalizeOptionalLogText(status).toLowerCase();
+        const flags = Array.isArray(degradedFlags)
+          ? degradedFlags.map(item => normalizeOptionalLogText(item).toLowerCase()).filter(Boolean)
+          : [];
+        const embeddingsFlagged = flags.some(flag => flag.includes('embed'));
+
+        if (normalizedStatus === 'degraded' || normalizedStatus === 'notfound' || embeddingsFlagged) {
+          return { text: 'degraded (semantic retrieval limited)' };
+        }
+
+        if (normalizedStatus === 'disabled' || normalizedStatus === 'unavailable') {
+          return { text: normalizedStatus };
+        }
+
+        if (normalizedStatus === 'ready' || normalizedStatus === 'ok' || normalizedStatus === 'active' || normalizedStatus === 'enabled') {
+          return { text: 'active' };
+        }
+
+        if (normalizedStatus) {
+          return { text: status };
+        }
+
+        if (flags.length) {
+          return { text: 'degraded (semantic retrieval limited)' };
+        }
+
+        return { text: '' };
       }
 
       function normalizeStructuredBuildText(payload) {

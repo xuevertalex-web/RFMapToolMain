@@ -18,6 +18,65 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         return normalizeText(structured.duration, 'not available');
       }
 
+      function normalizeReasonCode(structured) {
+        if (!structured || typeof structured !== 'object') {
+          return '';
+        }
+        return normalizeOptionalText(structured.reasonCode || structured.rootCauseCode || structured.failureCode || structured.code);
+      }
+
+      function normalizeModelUsedText(provider, model) {
+        return normalizeText([provider, model].filter(Boolean).join(' / '), 'not available');
+      }
+
+      function normalizeEmbeddingsSummary(embeddingsStatus, degradedFlags) {
+        const normalizedStatus = normalizeOptionalText(embeddingsStatus).toLowerCase();
+        const flags = Array.isArray(degradedFlags)
+          ? degradedFlags.map(item => normalizeOptionalText(item).toLowerCase()).filter(Boolean)
+          : [];
+        const embeddingsFlagged = flags.some(flag => flag.includes('embed'));
+
+        if (normalizedStatus === 'degraded' || normalizedStatus === 'notfound' || embeddingsFlagged) {
+          return {
+            text: 'degraded (semantic retrieval limited)',
+            isWarning: true
+          };
+        }
+
+        if (normalizedStatus === 'disabled' || normalizedStatus === 'unavailable') {
+          return {
+            text: normalizedStatus,
+            isWarning: false
+          };
+        }
+
+        if (normalizedStatus === 'ready' || normalizedStatus === 'ok' || normalizedStatus === 'active' || normalizedStatus === 'enabled') {
+          return {
+            text: 'active',
+            isWarning: false
+          };
+        }
+
+        if (normalizedStatus) {
+          return {
+            text: normalizeOptionalText(embeddingsStatus),
+            isWarning: normalizedStatus !== 'not available'
+          };
+        }
+
+        if (flags.length > 0) {
+          return {
+            text: 'degraded (semantic retrieval limited)',
+            isWarning: true
+          };
+        }
+
+        return {
+          text: 'not available',
+          isWarning: false
+        };
+      }
+
       function normalizeFinalStatusValue(structured, ok, failed) {
         const finalStatus = normalizeOptionalText(structured && structured.finalStatus).toLowerCase();
         const fallbackReason = normalizeOptionalText(structured && structured.fallbackReason);
@@ -121,8 +180,8 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           return '';
         }
         return isTimeoutFallbackReason(fallbackReason)
-          ? 'Локальная модель не завершила запрос вовремя; использован fallback по индексированному контексту.'
-          : 'Запрос к локальной модели завершился ошибкой; использован fallback по индексированному контексту.';
+          ? 'Local model timed out; indexed-context fallback was used.'
+          : 'Local model request failed; indexed-context fallback was used.';
       }
 
       function normalizeFallbackTimelineConsistency(timeline, fallbackReason) {
@@ -205,17 +264,19 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         return events;
       }
 
-      function buildDerivedSummary(structured, status, fallbackReason, fallbackMode, provider, model, duration, buildText) {
+      function buildDerivedSummary(structured, status, reasonCode, fallbackReason, fallbackMode, modelUsed, duration, buildText, embeddingsSummary, embeddingsWarning) {
         const summaryText = fallbackReason ? '' : normalizeOptionalText(structured && structured.summaryText);
         const summary = fallbackReason ? '' : normalizeOptionalText(structured && structured.summary);
         const details = [];
         details.push('Final status: ' + status);
+        if (reasonCode) details.push('Reason code: ' + reasonCode);
         if (fallbackReason) details.push('Fallback reason: ' + fallbackReason);
         if (fallbackMode) details.push('Fallback mode: ' + fallbackMode);
         if (fallbackReason) details.push('Fallback result: ' + getFallbackResultText(fallbackReason));
-        if (provider || model) details.push('Model: ' + [provider, model].filter(Boolean).join(' / '));
+        if (modelUsed && modelUsed !== 'not available') details.push('Model used: ' + modelUsed);
         if (duration && duration !== 'not available') details.push('Duration: ' + duration);
         details.push('Build: ' + (buildText || 'not run'));
+        if (embeddingsWarning) details.push('Embeddings: ' + embeddingsSummary);
         return [summaryText, summary, details.join('; ')].filter(Boolean).join('\\n');
       }
 
@@ -257,17 +318,32 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         const status = normalizeFinalStatusValue(structured, ok, failed);
         const provider = normalizeText(structured && (structured.provider || structured.modelProvider), 'not available');
         const model = normalizeText(structured && structured.model, 'not available');
+        const modelUsed = normalizeModelUsedText(provider, model);
         const duration = normalizeDurationText(structured);
         const fallbackReason = normalizeOptionalText(structured && structured.fallbackReason);
         const fallbackMode = normalizeOptionalText(structured && structured.fallbackMode);
+        const reasonCode = normalizeReasonCode(structured);
         const finalStatus = normalizeOptionalText(structured && structured.finalStatus);
         const embeddingsStatus = normalizeOptionalText(structured && (structured.embeddingsStatus || structured.EmbeddingsStatus));
+        const degradedFlags = Array.isArray(structured && structured.degradedFlags) ? structured.degradedFlags.map(String) : [];
+        const embeddingsSummary = normalizeEmbeddingsSummary(embeddingsStatus, degradedFlags);
         const timeline = normalizeFallbackTimelineConsistency(normalizeTraceEvents(structured), fallbackReason);
         const buildText = normalizeBuildText(structured, buildSucceeded, buildStarted);
         const derivedTimeline = timeline.length === 0
           ? buildDerivedTimeline(status, structured, fallbackReason, fallbackMode, provider, model, duration, buildText)
           : [];
-        const summary = buildDerivedSummary(structured, finalStatus || status, fallbackReason, fallbackMode, provider, model, duration, buildText);
+        const summary = buildDerivedSummary(
+          structured,
+          finalStatus || status,
+          reasonCode,
+          fallbackReason,
+          fallbackMode,
+          modelUsed,
+          duration,
+          buildText,
+          embeddingsSummary.text,
+          embeddingsSummary.isWarning
+        );
 
         return {
           ok,
@@ -280,11 +356,15 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           duration,
           provider,
           model,
+          modelUsed,
+          reasonCode,
           fallbackReason,
           fallbackMode,
           finalStatus,
           embeddingsStatus,
-          degradedFlags: Array.isArray(structured && structured.degradedFlags) ? structured.degradedFlags.map(String) : [],
+          embeddingsSummary: embeddingsSummary.text,
+          embeddingsWarning: embeddingsSummary.isWarning,
+          degradedFlags,
           summary,
           messageText: fallbackReason
             ? getFallbackResultText(fallbackReason)
@@ -293,6 +373,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           buildStarted,
           buildText,
           changedFiles,
+          changedFilesCount: changedFiles.length,
           changedHints,
           changedRanges,
           changedKinds,
@@ -308,3 +389,4 @@ function getWebviewClientRunNormalization() {
 }
 
 module.exports = { getWebviewClientRunNormalization };
+

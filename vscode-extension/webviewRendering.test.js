@@ -3,6 +3,8 @@ const vm = require('vm');
 const { getWebviewBody } = require('./webviewBody');
 const { getWebviewClientModelSelector } = require('./webviewClientModelSelector');
 const { getWebviewClientRunNormalization } = require('./webviewClientRunNormalization');
+const { getWebviewClientStatusRenderer } = require('./webviewClientStatusRenderer');
+const { getWebviewClientSummaryRenderer } = require('./webviewClientSummaryRenderer');
 const { buildModelSelectionState } = require('./modelSelection');
 
 function createClassList() {
@@ -61,6 +63,26 @@ function createSelectElement() {
   };
 }
 
+function createGridElement() {
+  return {
+    children: [],
+    replaceChildren() {
+      this.children = [];
+    },
+    appendChild(child) {
+      this.children.push(child);
+    }
+  };
+}
+
+function createTextBlock() {
+  return {
+    textContent: '',
+    className: '',
+    classList: createClassList()
+  };
+}
+
 function buildContext() {
   const context = {
     modelSelector: createSelectElement(),
@@ -76,6 +98,10 @@ function buildContext() {
     suppressPlainResultLog: false,
     currentRunTask: '',
     taskInput: { value: '' },
+    runStatusGrid: createGridElement(),
+    result: createTextBlock(),
+    resultBadge: createTextBlock(),
+    summary: createTextBlock(),
     normalizeChangedFileEntry: value => {
       if (value && typeof value === 'object') {
         return {
@@ -110,6 +136,8 @@ function buildContext() {
 
   vm.runInNewContext(getWebviewClientModelSelector(), context, { filename: 'webviewClientModelSelector.js' });
   vm.runInNewContext(getWebviewClientRunNormalization(), context, { filename: 'webviewClientRunNormalization.js' });
+  vm.runInNewContext(getWebviewClientStatusRenderer(), context, { filename: 'webviewClientStatusRenderer.js' });
+  vm.runInNewContext(getWebviewClientSummaryRenderer(), context, { filename: 'webviewClientSummaryRenderer.js' });
   return context;
 }
 
@@ -184,7 +212,12 @@ function testRunNormalizationContracts() {
   assert.strictEqual(success.status, 'success');
   assert.strictEqual(success.fallbackReason, '');
   assert.strictEqual(success.fallbackMode, '');
+  assert.strictEqual(success.reasonCode, '');
+  assert.strictEqual(success.modelUsed, 'ollama / qwen2.5-coder:7b');
+  assert.strictEqual(success.changedFilesCount, 0);
   assert.strictEqual(success.buildText, 'not started');
+  assert.strictEqual(success.embeddingsSummary, 'not available');
+  assert.strictEqual(success.embeddingsWarning, false);
   assertNoMojibake(success.summary, 'success summary');
 
   const timeoutFallback = context.normalizeRunResult({
@@ -202,6 +235,8 @@ function testRunNormalizationContracts() {
   });
   assert.strictEqual(timeoutFallback.status, 'fallback-success');
   assert.strictEqual(timeoutFallback.fallbackReason, 'MODEL_TIMEOUT');
+  assert.match(timeoutFallback.messageText, /timed out/i);
+  assertNoMojibake(timeoutFallback.messageText, 'timeout fallback message');
 
   const requestFailureFallback = context.normalizeRunResult({
     ok: true,
@@ -218,6 +253,22 @@ function testRunNormalizationContracts() {
   });
   assert.strictEqual(requestFailureFallback.status, 'fallback-success');
   assert.strictEqual(requestFailureFallback.fallbackReason, 'LLM_REQUEST_FAILED');
+  assert.match(requestFailureFallback.messageText, /request failed/i);
+  assertNoMojibake(requestFailureFallback.messageText, 'request fallback message');
+
+  const embeddingsDegraded = context.normalizeRunResult({
+    ok: true,
+    structuredResult: {
+      ok: true,
+      finalStatus: 'success',
+      message: 'ok',
+      embeddingsStatus: 'NotFound',
+      degradedFlags: ['embeddings']
+    }
+  });
+  assert.strictEqual(embeddingsDegraded.status, 'success');
+  assert.strictEqual(embeddingsDegraded.embeddingsSummary, 'degraded (semantic retrieval limited)');
+  assert.strictEqual(embeddingsDegraded.embeddingsWarning, true);
 
   const failure = context.normalizeRunResult({
     ok: false,
@@ -233,8 +284,79 @@ function testRunNormalizationContracts() {
   assert.ok(failure.failure, 'failure block should be populated');
 }
 
+function readStatusRows(grid) {
+  const rows = [];
+  for (let i = 0; i < grid.children.length; i += 2) {
+    const key = grid.children[i];
+    const value = grid.children[i + 1];
+    if (!key || !value) {
+      continue;
+    }
+    rows.push([String(key.textContent || ''), String(value.textContent || '')]);
+  }
+  return rows;
+}
+
+function testStatusAndSummaryRendering() {
+  const context = buildContext();
+
+  const successRun = {
+    status: 'success',
+    ok: true,
+    failed: false,
+    reasonCode: '',
+    finalStatus: 'success',
+    fallbackReason: '',
+    fallbackMode: '',
+    buildText: 'not started',
+    buildStarted: false,
+    buildSucceeded: false,
+    changedFilesCount: 0,
+    modelUsed: 'ollama / qwen2.5-coder:7b',
+    embeddingsSummary: 'not available',
+    embeddingsWarning: false,
+    duration: '500 ms',
+    workspace: 'workspace',
+    taskPreview: 'analysis task',
+    messageText: 'done',
+    summary: 'analysis complete'
+  };
+
+  context.renderRunStatus(successRun);
+  const successRows = readStatusRows(context.runStatusGrid);
+  assert.ok(successRows.some(([key, value]) => key === 'status' && value === 'success'));
+  assert.ok(successRows.some(([key, value]) => key === 'build' && value === 'not started'));
+  assert.ok(successRows.some(([key, value]) => key === 'model used' && value === 'ollama / qwen2.5-coder:7b'));
+  assert.ok(!successRows.some(([key]) => key === 'fallback reason'));
+
+  context.renderRunSummary(successRun);
+  assert.strictEqual(context.resultBadge.textContent, 'success');
+  assert.ok(context.resultBadge.className.includes('ok'));
+  assert.ok(context.summary.className.includes('na'));
+
+  const fallbackRun = {
+    ...successRun,
+    status: 'fallback-success',
+    fallbackReason: 'MODEL_TIMEOUT',
+    fallbackMode: 'indexed_context',
+    reasonCode: 'ANALYSIS_FALLBACK_USED',
+    messageText: 'Local model timed out; indexed-context fallback was used.'
+  };
+
+  context.renderRunStatus(fallbackRun);
+  const fallbackRows = readStatusRows(context.runStatusGrid);
+  assert.ok(fallbackRows.some(([key, value]) => key === 'fallback reason' && value === 'MODEL_TIMEOUT'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'fallback mode' && value === 'indexed_context'));
+
+  context.renderRunSummary(fallbackRun);
+  assert.strictEqual(context.resultBadge.textContent, 'fallback-success');
+  assert.ok(context.resultBadge.className.includes('running'));
+  assert.ok(context.summary.className.includes('na'));
+}
+
 testSelectorAndStatusPresence();
 testModelStateHydrationAndSelectorOptions();
 testRunNormalizationContracts();
+testStatusAndSummaryRendering();
 
 console.log('webview rendering tests passed');
