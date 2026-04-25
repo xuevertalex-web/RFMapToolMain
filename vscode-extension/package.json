@@ -1,0 +1,81 @@
+{
+  "name": "local-cursor-agent",
+  "displayName": "Local Cursor Agent",
+  "description": "A local VS Code agent UI that runs the .NET backend.",
+  "version": "0.1.14",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:localCursorAgent.chatView",
+    "onCommand:localCursorAgent.openPanel",
+    "onCommand:localCursorAgent.runTask",
+    "onCommand:localCursorAgent.showChat"
+  ],
+  "categories": [
+    "Other"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "localCursorAgent",
+          "title": "Local Agent",
+          "icon": "resources/local-agent.svg"
+        }
+      ]
+    },
+    "views": {
+      "localCursorAgent": [
+        {
+          "id": "localCursorAgent.chatView",
+          "name": "Agent",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Local Cursor Agent",
+      "properties": {
+        "localCursorAgent.backendProjectPath": {
+          "type": "string",
+          "default": "C:\\Users\\Enot.DESKTOP-C19QK7E\\Desktop\\LocalCursorAgent\\LocalCursorAgent.csproj",
+          "description": "Absolute path to LocalCursorAgent.csproj."
+        },
+        "localCursorAgent.targetWorkspacePath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional absolute path to the project workspace the agent should work on. When empty, the active VS Code workspace is used."
+        },
+        "localCursorAgent.allowBackendWorkspace": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow running the agent against the LocalCursorAgent backend repository itself."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "localCursorAgent.showChat",
+        "title": "Local Cursor Agent: Show Chat"
+      },
+      {
+        "command": "localCursorAgent.openPanel",
+        "title": "Local Cursor Agent: Open Panel"
+      },
+      {
+        "command": "localCursorAgent.runTask",
+        "title": "Local Cursor Agent: Run Agent"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "node -e \"console.log('No build step required')\"",
+    "test": "node agentRunner.test.js"
+  },
+  "devDependencies": {},
+  "dependencies": {}
+}

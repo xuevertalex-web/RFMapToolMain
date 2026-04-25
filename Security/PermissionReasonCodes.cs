@@ -1,0 +1,55 @@
+namespace LocalCursorAgent.Security;
+
+public static class PermissionReasonCodes
+{
+    public const string Allowed = "ALLOWED";
+    public const string WorkspaceNotResolved = "WORKSPACE_NOT_RESOLVED";
+    public const string AccessDeniedOutsideWorkspace = "ACCESS_DENIED_OUTSIDE_WORKSPACE";
+    public const string AccessDeniedByMode = "ACCESS_DENIED_BY_MODE";
+    public const string AccessDeniedDeleteOperation = "ACCESS_DENIED_DELETE_OPERATION";
+    public const string WorkspaceRootNotResolved = "WORKSPACE_ROOT_NOT_RESOLVED";
+    public const string PathNormalizationFailed = "PATH_NORMALIZATION_FAILED";
+    public const string PathOutsideWorkspace = "PATH_OUTSIDE_WORKSPACE";
+    public const string ReadOnlyWriteDenied = "READONLY_WRITE_DENIED";
+    public const string ReadOnlyDeleteDenied = "READONLY_DELETE_DENIED";
+    public const string WriteModeDeleteDenied = "WRITEMODE_DELETE_DENIED";
+    public const string ProtectedPathDenied = "PROTECTED_PATH_DENIED";
+    public const string ReparsePointDenied = "REPARSE_POINT_DENIED";
+    public const string NetworkPathDenied = "NETWORK_PATH_DENIED";
+    public const string ExtendedLengthPathDenied = "EXTENDED_LENGTH_PATH_DENIED";
+    public const string AlternateDataStreamDenied = "ALTERNATE_DATA_STREAM_DENIED";
+    public const string InvalidPathSyntaxDenied = "INVALID_PATH_SYNTAX_DENIED";
+    public const string InvalidWorkingDirectory = "INVALID_WORKING_DIRECTORY";
+    public const string ToolDeniedByPolicy = "TOOL_DENIED_BY_POLICY";
+    public const string WorkspaceRootProtected = "WORKSPACE_ROOT_PROTECTED";
+    public const string WorkspaceNotAllowed = "WORKSPACE_NOT_ALLOWED";
+    public const string WorkspaceDeniedByPolicy = "WORKSPACE_DENIED_BY_POLICY";
+    public const string WorkspacePolicyInvalid = "WORKSPACE_POLICY_INVALID";
+    public const string WorkspacePolicyNotFound = "WORKSPACE_POLICY_NOT_FOUND";
+    public const string TargetFileNotFound = "TARGET_FILE_NOT_FOUND";
+    public const string PatchPreviewRejected = "PATCH_PREVIEW_REJECTED";
+    public const string PatchTargetMismatch = "PATCH_TARGET_MISMATCH";
+    public const string PatchAnchorNotFound = "PATCH_ANCHOR_NOT_FOUND";
+    public const string PatchFileChangedSinceRead = "PATCH_FILE_CHANGED_SINCE_READ";
+    public const string PatchApplyFailed = "PATCH_APPLY_FAILED";
+    public const string PatchRollbackFailed = "PATCH_ROLLBACK_FAILED";
+    public const string BackupCaptureFailed = "BACKUP_CAPTURE_FAILED";
+    public const string IntentConfirmed = "INTENT_CONFIRMED";
+    public const string IntentBypassed = "INTENT_BYPASSED";
+    public const string IntentTooVague = "INTENT_TOO_VAGUE";
+    public const string IntentTargetMismatch = "INTENT_TARGET_MISMATCH";
+    public const string IntentMutationNotConfirmed = "INTENT_MUTATION_NOT_CONFIRMED";
+    public const string IntentScopeUnclear = "INTENT_SCOPE_UNCLEAR";
+    public const string SingleFileConfirmed = "SINGLE_FILE_CONFIRMED";
+    public const string MultiFileConfirmed = "MULTI_FILE_CONFIRMED";
+    public const string MultiFileNotConfirmed = "MULTI_FILE_NOT_CONFIRMED";
+    public const string MultiFileScopeUnclear = "MULTI_FILE_SCOPE_UNCLEAR";
+    public const string MultiFileTargetSetUnconfirmed = "MULTI_FILE_TARGET_SET_UNCONFIRMED";
+    public const string MultiFileTooBroad = "MULTI_FILE_TOO_BROAD";
+    public const string DeleteSnapshotCreateFailed = "DELETE_SNAPSHOT_CREATE_FAILED";
+    public const string DeleteRollbackFailed = "DELETE_ROLLBACK_FAILED";
+    public const string RenameRollbackFailed = "RENAME_ROLLBACK_FAILED";
+    public const string MoveRollbackFailed = "MOVE_ROLLBACK_FAILED";
+    public const string TargetPathConflict = "TARGET_PATH_CONFLICT";
+    public const string DestructiveApplyFailed = "DESTRUCTIVE_APPLY_FAILED";
+}

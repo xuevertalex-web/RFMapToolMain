@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>LocalCursorAgent</AssemblyName>
+    <RootNamespace>LocalCursorAgent</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableDefaultNoneItems>false</EnableDefaultNoneItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="Configuration\**\*.cs" />
+    <Compile Include="Context\**\*.cs" />
+    <Compile Include="Core\**\*.cs" />
+    <Compile Include="Diagnostics\**\*.cs" />
+    <Compile Include="Embeddings\**\*.cs" />
+    <Compile Include="Execution\**\*.cs" />
+    <Compile Include="Indexing\**\*.cs" />
+    <Compile Include="LLM\**\*.cs" />
+    <Compile Include="Memory\**\*.cs" />
+    <Compile Include="Security\**\*.cs" />
+    <Compile Include="Tools\**\*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="agent-policy.json" Condition="Exists('agent-policy.json')" />
+    <None Include="localcursoragent.secrets.json" Condition="Exists('localcursoragent.secrets.json')" />
+  </ItemGroup>
+</Project>

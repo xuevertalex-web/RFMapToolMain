@@ -1,0 +1,17 @@
+localcursoragent.secrets.json
+bin/
+obj/
+.agent-runtime/
+agent-runtime/
+.vs/
+.vscode/.ropeproject/
+desktop-app/node_modules/
+node_modules/
+*.user
+*.suo
+*.log
+*.tmp
+*.cache
+TestResults/
+coverage/
+*.trx

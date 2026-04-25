@@ -1,0 +1,402 @@
+using System.Text.RegularExpressions;
+using LocalCursorAgent.Diagnostics;
+using LocalCursorAgent.Indexing;
+
+namespace LocalCursorAgent.Core;
+
+public enum TargetResolutionGateOutcome
+{
+    Resolved,
+    Bypassed,
+    Failed
+}
+
+public sealed class TargetResolutionGateResult
+{
+    public TargetResolutionGateOutcome Outcome { get; init; }
+    public string RawTargetToken { get; init; } = string.Empty;
+    public string Classification { get; init; } = "Unknown";
+    public string ReasonCode { get; init; } = TargetResolutionReasonCodes.TargetNotApplicable;
+    public string Reason { get; init; } = string.Empty;
+    public double Confidence { get; init; }
+    public IReadOnlyList<string> ExactSymbolCandidates { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> ExactFilenameCandidates { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> PartialCandidates { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> SemanticCandidates { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> SelectedFiles { get; init; } = Array.Empty<string>();
+
+    public bool IsResolved => Outcome == TargetResolutionGateOutcome.Resolved;
+    public bool IsBypassed => Outcome == TargetResolutionGateOutcome.Bypassed;
+    public bool IsFailed => Outcome == TargetResolutionGateOutcome.Failed;
+}
+
+public sealed class TargetResolutionGate
+{
+    private static readonly HashSet<string> GenericSuffixTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Service",
+        "Controller",
+        "Manager",
+        "Helper",
+        "Repository",
+        "Handler"
+    };
+
+    private readonly ProjectIndexer _projectIndexer;
+    private readonly ExecutionTracer _tracer;
+
+    public TargetResolutionGate(ProjectIndexer projectIndexer, ExecutionTracer tracer)
+    {
+        _projectIndexer = projectIndexer;
+        _tracer = tracer;
+    }
+
+    public async Task<TargetResolutionGateResult> ResolveAsync(string query)
+    {
+        _tracer.LogActionEvent("TargetResolution", "TargetResolutionGate", ExecutionTracer.ActionLogLevel.Info, "started", metadata: new Dictionary<string, object?>
+        {
+            { "query", query }
+        });
+        var rawToken = ExtractTargetToken(query);
+        var classification = ClassifyToken(query, rawToken);
+        if (string.IsNullOrWhiteSpace(rawToken))
+        {
+            return LogAndReturn(query, new TargetResolutionGateResult
+            {
+                Outcome = TargetResolutionGateOutcome.Bypassed,
+                RawTargetToken = string.Empty,
+                Classification = classification,
+                ReasonCode = TargetResolutionReasonCodes.TargetNotApplicable,
+                Reason = "No exact target token detected; semantic retrieval may proceed.",
+                Confidence = 0.0
+            }, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>());
+        }
+
+        var exactSymbolCandidates = ResolveExactSymbolCandidates(rawToken);
+        if (exactSymbolCandidates.Count == 1)
+        {
+            return LogAndReturn(query, new TargetResolutionGateResult
+            {
+                Outcome = TargetResolutionGateOutcome.Resolved,
+                RawTargetToken = rawToken,
+                Classification = classification,
+                ReasonCode = TargetResolutionReasonCodes.TargetExactSymbolMatch,
+                Reason = "Exact symbol match resolved target.",
+                Confidence = 1.0,
+                ExactSymbolCandidates = exactSymbolCandidates,
+                SelectedFiles = exactSymbolCandidates
+            }, exactSymbolCandidates, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>());
+        }
+
+        if (exactSymbolCandidates.Count > 1)
+        {
+            return LogAndReturn(query, new TargetResolutionGateResult
+            {
+                Outcome = TargetResolutionGateOutcome.Failed,
+                RawTargetToken = rawToken,
+                Classification = classification,
+                ReasonCode = TargetResolutionReasonCodes.TargetAmbiguous,
+                Reason = "Exact symbol match is ambiguous.",
+                Confidence = 0.0,
+                ExactSymbolCandidates = exactSymbolCandidates
+            }, exactSymbolCandidates, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>());
+        }
+
+        var exactFilenameCandidates = ResolveExactFilenameCandidates(rawToken);
+        if (exactFilenameCandidates.Count == 1)
+        {
+            return LogAndReturn(query, new TargetResolutionGateResult
+            {
+                Outcome = TargetResolutionGateOutcome.Resolved,
+                RawTargetToken = rawToken,
+                Classification = classification,
+                ReasonCode = TargetResolutionReasonCodes.TargetExactFilenameMatch,
+                Reason = "Exact filename match resolved target.",
+                Confidence = 1.0,
+                ExactFilenameCandidates = exactFilenameCandidates,
+                SelectedFiles = exactFilenameCandidates
+            }, Array.Empty<string>(), exactFilenameCandidates, Array.Empty<string>(), Array.Empty<string>());
+        }
+
+        if (exactFilenameCandidates.Count > 1)
+        {
+            return LogAndReturn(query, new TargetResolutionGateResult
+            {
+                Outcome = TargetResolutionGateOutcome.Failed,
+                RawTargetToken = rawToken,
+                Classification = classification,
+                ReasonCode = TargetResolutionReasonCodes.TargetAmbiguous,
+                Reason = "Exact filename match is ambiguous.",
+                Confidence = 0.0,
+                ExactFilenameCandidates = exactFilenameCandidates
+            }, Array.Empty<string>(), exactFilenameCandidates, Array.Empty<string>(), Array.Empty<string>());
+        }
+
+        var partialCandidates = ResolvePartialCandidates(rawToken, classification);
+        if (partialCandidates.Count == 1)
+        {
+            return LogAndReturn(query, new TargetResolutionGateResult
+            {
+                Outcome = TargetResolutionGateOutcome.Resolved,
+                RawTargetToken = rawToken,
+                Classification = classification,
+                ReasonCode = TargetResolutionReasonCodes.TargetPartialMatch,
+                Reason = "Constrained partial match resolved target.",
+                Confidence = 0.75,
+                PartialCandidates = partialCandidates,
+                SelectedFiles = partialCandidates
+            }, Array.Empty<string>(), Array.Empty<string>(), partialCandidates, Array.Empty<string>());
+        }
+
+        if (partialCandidates.Count > 1)
+        {
+            return LogAndReturn(query, new TargetResolutionGateResult
+            {
+                Outcome = TargetResolutionGateOutcome.Failed,
+                RawTargetToken = rawToken,
+                Classification = classification,
+                ReasonCode = TargetResolutionReasonCodes.TargetAmbiguous,
+                Reason = "Constrained partial match is ambiguous.",
+                Confidence = 0.0,
+                PartialCandidates = partialCandidates
+            }, Array.Empty<string>(), Array.Empty<string>(), partialCandidates, Array.Empty<string>());
+        }
+
+        var semanticCandidates = await _projectIndexer.FindRelevantFiles(query, 5);
+        if (semanticCandidates.Count == 1)
+        {
+            return LogAndReturn(query, new TargetResolutionGateResult
+            {
+                Outcome = TargetResolutionGateOutcome.Failed,
+                RawTargetToken = rawToken,
+                Classification = classification,
+                ReasonCode = TargetResolutionReasonCodes.TargetLowConfidence,
+                Reason = "Only semantic retrieval found a candidate; confidence is too low for patching.",
+                Confidence = 0.4,
+                SemanticCandidates = semanticCandidates
+            }, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), semanticCandidates);
+        }
+
+        if (semanticCandidates.Count > 1)
+        {
+            return LogAndReturn(query, new TargetResolutionGateResult
+            {
+                Outcome = TargetResolutionGateOutcome.Failed,
+                RawTargetToken = rawToken,
+                Classification = classification,
+                ReasonCode = TargetResolutionReasonCodes.TargetLowConfidence,
+                Reason = "Semantic retrieval is ambiguous; confidence is too low for patching.",
+                Confidence = 0.3,
+                SemanticCandidates = semanticCandidates
+            }, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), semanticCandidates);
+        }
+
+        return LogAndReturn(query, new TargetResolutionGateResult
+        {
+            Outcome = TargetResolutionGateOutcome.Failed,
+            RawTargetToken = rawToken,
+            Classification = classification,
+            ReasonCode = IsSymbolLikeToken(rawToken) ? TargetResolutionReasonCodes.TargetSymbolNotFound : TargetResolutionReasonCodes.TargetFileNotFound,
+            Reason = IsSymbolLikeToken(rawToken)
+                ? "Target symbol not found in workspace."
+                : "Target file not found in workspace.",
+            Confidence = 0.0,
+            SemanticCandidates = semanticCandidates
+        }, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), semanticCandidates);
+    }
+
+    private TargetResolutionGateResult LogAndReturn(
+        string query,
+        TargetResolutionGateResult result,
+        IReadOnlyList<string> exactSymbolCandidates,
+        IReadOnlyList<string> exactFilenameCandidates,
+        IReadOnlyList<string> partialCandidates,
+        IReadOnlyList<string> semanticCandidates)
+    {
+        _tracer.LogTargetResolutionGate(
+            query,
+            result.RawTargetToken,
+            result.Classification,
+            exactSymbolCandidates,
+            exactFilenameCandidates,
+            partialCandidates,
+            semanticCandidates,
+            result.SelectedFiles,
+            result.Outcome.ToString(),
+            result.ReasonCode,
+            result.Reason,
+            result.Confidence);
+        _tracer.LogActionEvent("TargetResolution", "TargetResolutionGate", result.IsFailed ? ExecutionTracer.ActionLogLevel.Warning : ExecutionTracer.ActionLogLevel.Info, result.Outcome.ToString().ToLowerInvariant(), result.ReasonCode, new Dictionary<string, object?>
+        {
+            { "raw_target_token", result.RawTargetToken },
+            { "classification", result.Classification },
+            { "selected_files", result.SelectedFiles.ToArray() },
+            { "exact_symbol_candidates", exactSymbolCandidates.ToArray() },
+            { "exact_filename_candidates", exactFilenameCandidates.ToArray() },
+            { "partial_candidates", partialCandidates.ToArray() },
+            { "semantic_candidates", semanticCandidates.ToArray() }
+        });
+
+        return result;
+    }
+
+    private List<string> ResolveExactSymbolCandidates(string rawToken)
+    {
+        return _projectIndexer.GetIndexedFiles()
+            .Where(filePath =>
+            {
+                var symbols = _projectIndexer.SymbolDirectory.GetSymbols(filePath);
+                return symbols.Any(symbol => symbol.Equals(rawToken, StringComparison.OrdinalIgnoreCase));
+            })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private List<string> ResolveExactFilenameCandidates(string rawToken)
+    {
+        return _projectIndexer.GetIndexedFiles()
+            .Where(filePath => IsExactFilenameMatch(filePath, rawToken))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private List<string> ResolvePartialCandidates(string rawToken, string classification)
+    {
+        if (!IsMeaningfulPartialToken(rawToken))
+            return new List<string>();
+
+        return _projectIndexer.GetIndexedFiles()
+            .Where(filePath =>
+            {
+                var stem = Path.GetFileNameWithoutExtension(filePath);
+                if (IsMeaningfulPrefixMatch(stem, rawToken))
+                    return true;
+
+                var symbols = _projectIndexer.SymbolDirectory.GetSymbols(filePath);
+                return symbols.Any(symbol => IsMeaningfulPrefixMatch(symbol, rawToken));
+            })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static bool IsExactFilenameMatch(string filePath, string rawToken)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || string.IsNullOrWhiteSpace(rawToken))
+            return false;
+
+        var normalizedPath = filePath.Replace('\\', '/');
+        var normalizedToken = rawToken.Replace('\\', '/').Trim();
+        var fileName = Path.GetFileName(filePath);
+        var stem = Path.GetFileNameWithoutExtension(filePath);
+
+        if (normalizedToken.Contains('/'))
+        {
+            return normalizedPath.EndsWith(normalizedToken, StringComparison.OrdinalIgnoreCase) ||
+                   normalizedPath.Equals(normalizedToken, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (normalizedToken.EndsWith(Path.GetExtension(filePath), StringComparison.OrdinalIgnoreCase))
+        {
+            return fileName.Equals(normalizedToken, StringComparison.OrdinalIgnoreCase) ||
+                   normalizedPath.EndsWith(normalizedToken, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return fileName.Equals(normalizedToken, StringComparison.OrdinalIgnoreCase) ||
+               stem.Equals(normalizedToken, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsMeaningfulPartialToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token) || token.Length < 4)
+            return false;
+
+        if (GenericSuffixTokens.Contains(token))
+            return false;
+
+        return Regex.IsMatch(token, @"[A-Za-z]{4,}");
+    }
+
+    private static bool IsMeaningfulPrefixMatch(string candidate, string token)
+    {
+        if (string.IsNullOrWhiteSpace(candidate) || string.IsNullOrWhiteSpace(token))
+            return false;
+
+        if (GenericSuffixTokens.Contains(token) && candidate.Equals(token, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (candidate.Equals(token, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return candidate.StartsWith(token, StringComparison.OrdinalIgnoreCase) ||
+               token.StartsWith(candidate, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ExtractTargetToken(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return string.Empty;
+
+        var pathLike = Regex.Match(query, @"([A-Za-z0-9_\-./\\]+\.cs)\b");
+        if (pathLike.Success)
+        {
+            var token = Path.GetFileNameWithoutExtension(pathLike.Groups[1].Value);
+            if (!string.IsNullOrWhiteSpace(token))
+                return token;
+        }
+
+        var pathSegment = Regex.Match(query, @"(?:^|[\s""'`])([A-Za-z0-9_\-]+(?:[\\/][A-Za-z0-9_\-./\\]+)+)(?:$|[\s""'`,:;])");
+        if (pathSegment.Success)
+        {
+            var token = Path.GetFileNameWithoutExtension(pathSegment.Groups[1].Value);
+            if (!string.IsNullOrWhiteSpace(token))
+                return token;
+        }
+
+        var symbols = Regex.Matches(query, @"\b[A-Z][A-Za-z0-9_]{3,}\b")
+            .Select(m => m.Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var suffixPreferred = symbols.FirstOrDefault(s => s.EndsWith("Service", StringComparison.OrdinalIgnoreCase) ||
+                                                          s.EndsWith("Controller", StringComparison.OrdinalIgnoreCase) ||
+                                                          s.EndsWith("Manager", StringComparison.OrdinalIgnoreCase) ||
+                                                          s.EndsWith("Handler", StringComparison.OrdinalIgnoreCase) ||
+                                                          s.EndsWith("Repository", StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(suffixPreferred))
+            return suffixPreferred;
+
+        return symbols.FirstOrDefault() ?? string.Empty;
+    }
+
+    private static string ClassifyToken(string query, string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return "Unknown";
+
+        if (query.Contains('/') || query.Contains('\\') || token.Contains('/') || token.Contains('\\') || token.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+            return "FilenameLike";
+
+        if (IsSymbolLikeToken(token))
+            return "SymbolLike";
+
+        return "Unknown";
+    }
+
+    private static bool IsSymbolLikeToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return false;
+
+        return token.Length >= 4 &&
+               (token.EndsWith("Service", StringComparison.OrdinalIgnoreCase) ||
+                token.EndsWith("Controller", StringComparison.OrdinalIgnoreCase) ||
+                token.EndsWith("Manager", StringComparison.OrdinalIgnoreCase) ||
+                token.EndsWith("Handler", StringComparison.OrdinalIgnoreCase) ||
+                token.EndsWith("Repository", StringComparison.OrdinalIgnoreCase) ||
+                token.EndsWith("Helper", StringComparison.OrdinalIgnoreCase) ||
+                Regex.IsMatch(token, @"^[A-Z][A-Za-z0-9_]+$"));
+    }
+}

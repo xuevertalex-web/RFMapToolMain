@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aelivar</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-top">
+        <button id="openWorkspaceBtn" class="nav-action" type="button">Открыть проект</button>
+      </div>
+
+      <div class="sidebar-section workspace-box">
+        <div class="section-caption">Проект</div>
+        <div id="workspaceInfo" class="workspace-info" style="display:none;">
+          <button id="workspaceToggleBtn" class="workspace-toggle" type="button" title="Свернуть или развернуть проект">
+            <span id="workspaceToggleIcon" class="workspace-toggle-icon">▾</span>
+            <span id="workspaceName" class="workspace-name">Нет проекта</span>
+          </button>
+        </div>
+        <div id="workspaceClosed" class="workspace-closed">
+          Выберите рабочую папку через `File -> Open Workspace...`
+        </div>
+      </div>
+
+      <div id="projectExplorerSection" class="sidebar-section explorer-box">
+        <div class="section-header">
+          <span class="section-caption">Файлы</span>
+        </div>
+        <div id="fileTree" class="file-tree">
+          <div class="workspace-closed">Структура проекта появится после открытия workspace</div>
+        </div>
+      </div>
+
+      <div class="sidebar-section sessions-box">
+        <div class="section-header">
+          <span class="section-caption">Беседы</span>
+          <button id="newSessionBtn" class="icon-btn" title="Новая беседа" type="button">+</button>
+        </div>
+        <div id="sessionsList" class="sessions-list"></div>
+      </div>
+
+      <div id="settingsSection" class="settings-sheet hidden">
+        <div class="settings-card">
+          <div class="settings-head">
+            <div class="section-caption">Настройки</div>
+            <button id="closeSettingsBtn" class="icon-btn" title="Закрыть" type="button">×</button>
+          </div>
+          <label class="setting-field">
+            <span>Модель</span>
+            <select id="modelSelect" class="form-select">
+              <option value="qwen2.5-coder:7b">qwen2.5-coder:7b</option>
+            </select>
+          </label>
+          <label class="setting-field">
+            <span>Тема</span>
+            <select id="themeSelect" class="form-select">
+              <option value="light">Светлая</option>
+              <option value="dark">Тёмная</option>
+              <option value="rainbow">Радужная</option>
+            </select>
+          </label>
+          <label class="setting-field">
+            <span>Режим доступа</span>
+            <select id="accessModeSelect" class="form-select">
+              <option value="ReadOnly">Только чтение</option>
+              <option value="WorkspaceWrite">Запись в проект</option>
+              <option value="WorkspaceFullAccess">Полный доступ</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <button class="nav-link settings-link" data-activity="settings" type="button">Настройки</button>
+      </div>
+
+      <div id="sidebarOverlay" class="sidebar-overlay hidden">
+        <div class="settings-card overlay-card">
+          <div class="settings-head">
+            <div id="overlayTitle" class="section-caption">Панель</div>
+            <button id="closeOverlayBtn" class="icon-btn" title="Закрыть" type="button">×</button>
+          </div>
+          <div id="overlayBody" class="overlay-body"></div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="chat-shell">
+      <header class="chat-header">
+        <div class="chat-header-left">
+          <button id="backButton" class="header-icon" type="button" title="Назад">←</button>
+          <button id="forwardButton" class="header-icon" type="button" title="Вперёд">→</button>
+          <div class="chat-title-wrap">
+            <h2 id="chatTitle">Выберите или создайте беседу</h2>
+            <span id="statusInfo" class="chat-subtitle">Готово</span>
+          </div>
+        </div>
+        <div class="chat-header-right">
+          <span id="legacyChatStatus" class="status-badge idle"></span>
+        </div>
+      </header>
+
+      <section id="chatPanel" class="chat-panel active">
+        <div id="liveActivityBar" class="live-activity-bar hidden">
+          <button id="activityToggleBtn" class="activity-toggle" type="button" title="Показать или скрыть текущие действия агента">
+            <span id="chatStatus" class="status-badge idle"></span>
+            <span id="activitySummary" class="activity-summary">Ожидание</span>
+          </button>
+        </div>
+        <section id="activityDetails" class="activity-details hidden">
+          <div class="activity-details-head">
+            <div>
+              <div id="activityTitle" class="activity-title">Агент ничего не делает</div>
+              <div id="activityPath" class="activity-path">Путь пока не определён</div>
+            </div>
+            <button id="activityCloseBtn" class="icon-btn" type="button" title="Скрыть детали">×</button>
+          </div>
+          <pre id="activityMeta" class="activity-meta">События появятся во время работы агента.</pre>
+        </section>
+        <section id="inlinePreviewPanel" class="inline-preview-panel hidden">
+          <div class="inline-preview-head">
+            <div>
+              <div id="previewTitle" class="preview-title">Просмотр</div>
+              <div id="previewPath" class="activity-path">Файл не выбран</div>
+            </div>
+            <button id="previewCloseBtn" class="icon-btn" type="button" title="Скрыть файл">×</button>
+          </div>
+          <pre id="filePreview" class="file-preview">Выберите файл.</pre>
+        </section>
+        <div id="messagesArea" class="messages-area">
+          <div class="empty-state">
+            <div class="empty-title">Aelivar</div>
+            <div class="empty-text">Откройте проект и сразу пишите задачу агенту.</div>
+          </div>
+        </div>
+
+        <div class="composer-wrap">
+          <div class="composer-card">
+            <textarea
+              id="taskInput"
+              class="task-input"
+              placeholder="Опишите, что нужно сделать"
+              disabled
+            ></textarea>
+            <div class="composer-row">
+              <div class="composer-meta">
+                <button id="attachButton" class="meta-icon" type="button" title="Добавить любые файлы">+</button>
+                <select id="composerModelSelect" class="meta-select">
+                  <option value="qwen2.5-coder:7b">qwen2.5-coder:7b</option>
+                </select>
+                <select id="composerReasoningSelect" class="meta-select">
+                  <option>Низкий</option>
+                  <option selected>Средний</option>
+                  <option>Высокий</option>
+                </select>
+              </div>
+              <div class="composer-actions">
+                <button id="stopBtn" class="send-button muted" type="button" style="display:none;">Стоп</button>
+                <button id="sendBtn" class="send-button" type="button" disabled>↑</button>
+              </div>
+            </div>
+            <div id="attachmentBar" class="attachment-bar hidden"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="legacyPreviewPanel" class="chat-panel preview-panel hidden">
+        <div class="preview-head">
+          <div id="legacyPreviewTitle" class="preview-title">Просмотр</div>
+        </div>
+        <pre id="legacyFilePreview" class="file-preview">Выберите файл.</pre>
+      </section>
+    </main>
+  </div>
+
+  <script src="./renderer.js"></script>
+</body>
+</html>
