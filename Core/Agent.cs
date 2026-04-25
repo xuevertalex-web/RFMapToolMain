@@ -7,6 +7,7 @@ using LocalCursorAgent.Context;
 using LocalCursorAgent.Embeddings;
 using LocalCursorAgent.Diagnostics;
 using LocalCursorAgent.Security;
+using LocalCursorAgent.LLM.Runtime;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Text.Json;
@@ -160,6 +161,8 @@ namespace LocalCursorAgent.Core
                 string? lastBuildErrorSignature = null;
                 string? lastDeniedToolResult = null;
                 var analysisOnlyTask = IsAnalysisOnlyTask(task);
+                var runtimeClient = _llmClient as ILlmRuntimeClient;
+                var runtimeMetadata = runtimeClient?.Metadata;
                 var actualIterationsUsed = 0;
                 var lastSuccessfulStep = "Indexing";
                 var lastKnownAction = "Indexing completed";
@@ -260,7 +263,10 @@ namespace LocalCursorAgent.Core
                     });
                     var modelStart = DateTime.UtcNow;
                     modelCallStarted = true;
-                    currentResponse = await _llmClient.Generate(prompt, CancellationToken.None);
+                    var runtimeResult = runtimeClient is null
+                        ? null
+                        : await runtimeClient.GenerateNormalized(prompt, CancellationToken.None);
+                    currentResponse = runtimeResult?.Completion ?? await _llmClient.Generate(prompt, CancellationToken.None);
                     tracer.LogActionEvent("ModelRequest", "Agent", ExecutionTracer.ActionLogLevel.Info, "completed", metadata: new Dictionary<string, object?>
                     {
                         { "operation_kind", "task_iteration" },
@@ -271,12 +277,13 @@ namespace LocalCursorAgent.Core
                     lastKnownAction = "Model response received";
                     _memory.Add("llm_response", currentResponse.Length > 100 ? currentResponse.Substring(0, 100) + "..." : currentResponse);
 
-                    if (IsHardLlmFailureResponse(currentResponse))
+                    var isHardFailure = runtimeResult?.IsFailure ?? IsHardLlmFailureResponse(currentResponse);
+                    if (isHardFailure)
                     {
                         _memory.Add("llm_failure", currentResponse, "LlmUnavailableOrRequestFailed");
                         if (analysisOnlyTask)
                         {
-                            var fallbackReason = IsModelTimeoutResponse(currentResponse) ? "MODEL_TIMEOUT" : "LLM_REQUEST_FAILED";
+                            var fallbackReason = ResolveFallbackReason(runtimeResult, currentResponse);
                             if (string.Equals(fallbackReason, "MODEL_TIMEOUT", StringComparison.Ordinal))
                             {
                                 tracer.LogActionEvent("ModelCallTimedOut", "Agent", ExecutionTracer.ActionLogLevel.Warning, "timed_out", fallbackReason, metadata: new Dictionary<string, object?>
@@ -313,8 +320,8 @@ namespace LocalCursorAgent.Core
                                 false,
                                 runStartedUtc: runStartedUtc,
                                 workspace: _sessionContext?.ActiveWorkspaceRoot,
-                                provider: ResolveProviderName(_llmClient),
-                                model: ResolveModelName(_llmClient),
+                                provider: ResolveProviderName(_llmClient, runtimeMetadata),
+                                model: ResolveModelName(_llmClient, runtimeMetadata),
                                 degradedFlags: new[] { "ANALYSIS_FALLBACK_USED" },
                                 fallbackReason: fallbackReason,
                                 fallbackMode: "INDEXED_CONTEXT_SUMMARY",
@@ -354,8 +361,8 @@ namespace LocalCursorAgent.Core
                             false,
                             runStartedUtc: runStartedUtc,
                             workspace: _sessionContext?.ActiveWorkspaceRoot,
-                            provider: ResolveProviderName(_llmClient),
-                            model: ResolveModelName(_llmClient),
+                            provider: ResolveProviderName(_llmClient, runtimeMetadata),
+                            model: ResolveModelName(_llmClient, runtimeMetadata),
                             degradedFlags: Array.Empty<string>(),
                             fallbackReason: string.Empty,
                             fallbackMode: string.Empty,
@@ -1085,14 +1092,10 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             if (string.IsNullOrWhiteSpace(response))
                 return false;
 
-            var normalized = response.Trim();
-            return normalized.StartsWith("Error: Ollama ", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.StartsWith("Error: OpenAI ", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.StartsWith("Error: LLM returned status ", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.StartsWith("Error: Unable to reach ", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.StartsWith("Error: Unexpected response format from ", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.StartsWith("Error: No response from ", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.StartsWith("Error: Empty prompt", StringComparison.OrdinalIgnoreCase);
+            var fallbackMetadata = new LlmProviderMetadata("legacy", string.Empty, "legacy-classifier");
+            var fallbackProfile = LlmProfiles.Resolve("ollama");
+            var classified = LlmRuntimeClassifier.Classify(response, fallbackMetadata, fallbackProfile, LlmRuntimePolicy.Default);
+            return classified.IsFailure;
         }
 
         private bool TryRepairCs8802(BuildVerifier.BuildResult buildResult, HashSet<string> changedFiles, out string? nextPrompt)
@@ -1372,8 +1375,21 @@ next_safe_action: {diagnostic.NextSafeAction}";
                    response.Contains("timeout", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static string ResolveProviderName(ILLMClient llmClient)
+        private static string ResolveFallbackReason(LlmRuntimeResult? runtimeResult, string response)
         {
+            if (runtimeResult is not null)
+            {
+                return runtimeResult.Status == LlmRuntimeStatus.ModelTimeout ? "MODEL_TIMEOUT" : "LLM_REQUEST_FAILED";
+            }
+
+            return IsModelTimeoutResponse(response) ? "MODEL_TIMEOUT" : "LLM_REQUEST_FAILED";
+        }
+
+        private static string ResolveProviderName(ILLMClient llmClient, LlmProviderMetadata? metadata = null)
+        {
+            if (metadata is not null && !string.IsNullOrWhiteSpace(metadata.Provider))
+                return metadata.Provider;
+
             if (llmClient == null)
                 return string.Empty;
 
@@ -1383,8 +1399,11 @@ next_safe_action: {diagnostic.NextSafeAction}";
             return typeName;
         }
 
-        private static string ResolveModelName(ILLMClient llmClient)
+        private static string ResolveModelName(ILLMClient llmClient, LlmProviderMetadata? metadata = null)
         {
+            if (metadata is not null && !string.IsNullOrWhiteSpace(metadata.Model))
+                return metadata.Model;
+
             if (llmClient == null)
                 return string.Empty;
 

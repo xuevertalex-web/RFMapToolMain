@@ -1,3 +1,5 @@
+using LocalCursorAgent.LLM.Runtime;
+
 namespace LocalCursorAgent.LLM
 {
     public sealed class FallbackLLMClient : ILLMClient
@@ -13,9 +15,18 @@ namespace LocalCursorAgent.LLM
 
         public async Task<string> Generate(string prompt, CancellationToken cancellationToken = default)
         {
-            var primaryResult = await _primary.Generate(prompt, cancellationToken);
-            if (!IsHardFailure(primaryResult))
-                return primaryResult;
+            if (_primary is ILlmRuntimeClient runtimePrimary)
+            {
+                var normalizedPrimary = await runtimePrimary.GenerateNormalized(prompt, cancellationToken);
+                if (normalizedPrimary.IsUsable || !normalizedPrimary.IsFailure)
+                    return normalizedPrimary.Completion;
+            }
+            else
+            {
+                var primaryResult = await _primary.Generate(prompt, cancellationToken);
+                if (!IsHardFailure(primaryResult))
+                    return primaryResult;
+            }
 
             var fallbackResult = await _fallback.Generate(prompt, cancellationToken);
             return fallbackResult;

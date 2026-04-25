@@ -473,64 +473,7 @@ static string DescribeAccessMode(AgentAccessMode accessMode) => accessMode switc
 
 static ILLMClient CreateLlmClient(string? providerOverride, string? ollamaModelOverride, string appRoot)
 {
-    var provider = (providerOverride ?? Environment.GetEnvironmentVariable("LOCALCURSOR_LLM_PROVIDER"))?.Trim().ToLowerInvariant();
-    var preferOpenAI = provider is "openai" or "chatgpt" or "hybrid" or null or "";
-    var preferOllama = provider is "local" or "ollama";
-
-    var openAiApiKeyFallback = LoadOpenAiApiKeyFallback(appRoot);
-    var apiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY")?.Trim();
-    apiKey = string.IsNullOrWhiteSpace(apiKey) ? openAiApiKeyFallback : apiKey;
-    var openAiModel = Environment.GetEnvironmentVariable("OPENAI_MODEL")?.Trim();
-    var openAiClient = string.IsNullOrWhiteSpace(apiKey)
-        ? null
-        : new OpenAIChatClient(apiKey, string.IsNullOrWhiteSpace(openAiModel) ? "gpt-4.1-mini" : openAiModel);
-
-    var endpoint = Environment.GetEnvironmentVariable("OLLAMA_ENDPOINT")?.Trim();
-    var modelName = ollamaModelOverride ?? Environment.GetEnvironmentVariable("OLLAMA_MODEL")?.Trim();
-    var ollamaClient = new OllamaClient(
-        string.IsNullOrWhiteSpace(endpoint) ? "http://localhost:11434" : endpoint,
-        string.IsNullOrWhiteSpace(modelName) ? "qwen2.5-coder:7b" : modelName);
-
-    if (preferOllama && openAiClient is not null)
-        return new FallbackLLMClient(ollamaClient, openAiClient);
-
-    if (openAiClient is not null)
-        return new FallbackLLMClient(openAiClient, ollamaClient);
-
-    return ollamaClient;
-}
-
-static string LoadOpenAiApiKeyFallback(string appRoot)
-{
-    var candidates = new[]
-    {
-        Path.Combine(appRoot, "localcursoragent.secrets.json"),
-        Path.Combine(AppContext.BaseDirectory, "localcursoragent.secrets.json")
-    };
-
-    foreach (var candidate in candidates)
-    {
-        if (!File.Exists(candidate))
-            continue;
-
-        try
-        {
-            var json = File.ReadAllText(candidate);
-            var secrets = JsonSerializer.Deserialize<LocalCursorAgentSecrets>(json, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            });
-
-            if (!string.IsNullOrWhiteSpace(secrets?.OpenAiApiKey))
-                return secrets.OpenAiApiKey.Trim();
-        }
-        catch
-        {
-            // Ignore malformed local secrets files and fall back to env/local provider selection.
-        }
-    }
-
-    return string.Empty;
+    return LocalCursorAgent.LLM.Runtime.LlmRuntimeFactory.Create(providerOverride, ollamaModelOverride, appRoot);
 }
 
 static string? FindDefaultWorkspacePolicyPath(string appRoot)
@@ -640,11 +583,6 @@ internal sealed class WorkspacePolicyFile
     public AgentAccessMode? AccessMode { get; set; }
     public List<string>? WorkspaceAllowRoots { get; set; }
     public List<string>? WorkspaceDenyRoots { get; set; }
-}
-
-internal sealed class LocalCursorAgentSecrets
-{
-    public string? OpenAiApiKey { get; set; }
 }
 
 internal sealed class WorkspacePolicyLoadResult

@@ -10,11 +10,14 @@ using LocalCursorAgent.LLM;
 using LocalCursorAgent.Memory;
 using LocalCursorAgent.Security;
 using LocalCursorAgent.Tools;
+using LocalCursorAgent.LLM.Runtime;
 
 await RunAnalysisFallbackTimeoutRegression();
 await RunAnalysisFallbackLlmRequestFailedRegression();
 await RunAnalysisNormalResponseRegression();
 await RunAnalysisUsableErrorPrefixedResponse_NoFallbackRegression();
+await RunRuntimeProfileSelectionRegression();
+await RunRuntimeNormalizedClassificationRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -417,6 +420,40 @@ static void AssertTrue(bool condition, string message)
         throw new InvalidOperationException(message);
 }
 
+static Task RunRuntimeProfileSelectionRegression()
+{
+    var appRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(appRoot);
+
+    var client = LlmRuntimeFactory.Create("local", "qwen2.5-coder:14b", appRoot);
+    AssertTrue(client is ILlmRuntimeClient, "Expected runtime-aware client from factory.");
+    var runtime = (ILlmRuntimeClient)client;
+    AssertTrue(runtime.Metadata.Provider == "ollama", "Expected ollama provider metadata.");
+    AssertTrue(runtime.Metadata.Model == "qwen2.5-coder:14b", "Expected selected ollama model metadata.");
+    AssertTrue(runtime.Profile.Provider == "ollama", "Expected ollama runtime profile.");
+    Console.WriteLine("PASS RuntimeProfile_SecondOllamaModel_NoCoreChanges");
+    return Task.CompletedTask;
+}
+
+static async Task RunRuntimeNormalizedClassificationRegression()
+{
+    var timeoutClient = new LlmRuntimeClient(
+        new FakeAdapter("openai", "gpt-4.1-mini", "Error: OpenAI request timed out. simulated timeout"),
+        LlmProfiles.Resolve("openai"));
+    var timeoutResult = await timeoutClient.GenerateNormalized("ping");
+    AssertTrue(timeoutResult.Status == LlmRuntimeStatus.ModelTimeout, "Expected normalized timeout status.");
+    AssertTrue(timeoutResult.TimeoutKind == LlmTimeoutKind.FirstResponse, "Expected first-response timeout kind.");
+
+    var failureClient = new LlmRuntimeClient(
+        new FakeAdapter("ollama", "qwen2.5-coder:7b", "Error: Ollama request failed. simulated failure"),
+        LlmProfiles.Resolve("ollama"));
+    var failureResult = await failureClient.GenerateNormalized("ping");
+    AssertTrue(failureResult.Status == LlmRuntimeStatus.LlmRequestFailed, "Expected normalized request-failed status.");
+    AssertTrue(failureResult.IsFailure, "Expected normalized failure=true.");
+
+    Console.WriteLine("PASS RuntimeNormalizedClassification_TimeoutAndRequestFailed");
+}
+
 sealed class FakeTimeoutLlmClient : ILLMClient
 {
     public Task<string> Generate(string prompt, CancellationToken cancellationToken = default)
@@ -448,6 +485,25 @@ sealed class FakeUsableErrorPrefixedSuccessClient : ILLMClient
 {
     public Task<string> Generate(string prompt, CancellationToken cancellationToken = default)
         => Task.FromResult("Error: I cannot execute tools directly in this mode, but here is the project analysis: the code is small, has one entry type, and does not require build changes.");
+
+    public Task<bool> IsAvailable(CancellationToken cancellationToken = default)
+        => Task.FromResult(true);
+}
+
+sealed class FakeAdapter : ILlmProviderAdapter
+{
+    private readonly string _response;
+
+    public FakeAdapter(string provider, string model, string response)
+    {
+        Metadata = new LlmProviderMetadata(provider, model, nameof(FakeAdapter));
+        _response = response;
+    }
+
+    public LlmProviderMetadata Metadata { get; }
+
+    public Task<string> Generate(string prompt, CancellationToken cancellationToken = default)
+        => Task.FromResult(_response);
 
     public Task<bool> IsAvailable(CancellationToken cancellationToken = default)
         => Task.FromResult(true);
