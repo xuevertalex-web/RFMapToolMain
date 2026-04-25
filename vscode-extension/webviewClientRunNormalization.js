@@ -36,17 +36,24 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           : [];
         const embeddingsFlagged = flags.some(flag => flag.includes('embed'));
 
-        if (normalizedStatus === 'degraded' || normalizedStatus === 'notfound' || embeddingsFlagged) {
-          return {
-            text: 'degraded (semantic retrieval limited)',
-            isWarning: true
-          };
-        }
-
         if (normalizedStatus === 'disabled' || normalizedStatus === 'unavailable') {
           return {
             text: normalizedStatus,
             isWarning: false
+          };
+        }
+
+        if (normalizedStatus === 'notfound') {
+          return {
+            text: 'disabled (model not found)',
+            isWarning: false
+          };
+        }
+
+        if (normalizedStatus === 'degraded' || embeddingsFlagged) {
+          return {
+            text: 'degraded (semantic retrieval limited)',
+            isWarning: true
           };
         }
 

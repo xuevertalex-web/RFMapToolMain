@@ -256,13 +256,27 @@ function testRunNormalizationContracts() {
   assert.match(requestFailureFallback.messageText, /request failed/i);
   assertNoMojibake(requestFailureFallback.messageText, 'request fallback message');
 
-  const embeddingsDegraded = context.normalizeRunResult({
+  const embeddingsDisabledNotFound = context.normalizeRunResult({
     ok: true,
     structuredResult: {
       ok: true,
       finalStatus: 'success',
       message: 'ok',
       embeddingsStatus: 'NotFound',
+      degradedFlags: ['embeddings']
+    }
+  });
+  assert.strictEqual(embeddingsDisabledNotFound.status, 'success');
+  assert.strictEqual(embeddingsDisabledNotFound.embeddingsSummary, 'disabled (model not found)');
+  assert.strictEqual(embeddingsDisabledNotFound.embeddingsWarning, false);
+
+  const embeddingsDegraded = context.normalizeRunResult({
+    ok: true,
+    structuredResult: {
+      ok: true,
+      finalStatus: 'success',
+      message: 'ok',
+      embeddingsStatus: 'degraded',
       degradedFlags: ['embeddings']
     }
   });

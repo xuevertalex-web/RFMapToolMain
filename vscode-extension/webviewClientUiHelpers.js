@@ -267,12 +267,16 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
           : [];
         const embeddingsFlagged = flags.some(flag => flag.includes('embed'));
 
-        if (normalizedStatus === 'degraded' || normalizedStatus === 'notfound' || embeddingsFlagged) {
-          return { text: 'degraded (semantic retrieval limited)' };
-        }
-
         if (normalizedStatus === 'disabled' || normalizedStatus === 'unavailable') {
           return { text: normalizedStatus };
+        }
+
+        if (normalizedStatus === 'notfound') {
+          return { text: 'disabled (model not found)' };
+        }
+
+        if (normalizedStatus === 'degraded' || embeddingsFlagged) {
+          return { text: 'degraded (semantic retrieval limited)' };
         }
 
         if (normalizedStatus === 'ready' || normalizedStatus === 'ok' || normalizedStatus === 'active' || normalizedStatus === 'enabled') {
