@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Net;
+using System.Net.Http;
 using LocalCursorAgent.Configuration;
 using LocalCursorAgent.Context;
 using LocalCursorAgent.Core;
@@ -16,10 +18,12 @@ await RunAnalysisFallbackTimeoutRegression();
 await RunAnalysisFallbackLlmRequestFailedRegression();
 await RunAnalysisNormalResponseRegression();
 await RunAnalysisUsableErrorPrefixedResponse_NoFallbackRegression();
+await RunEmbeddingNotFound_DisablesTruthfullyRegression();
 await RunRuntimeProfileSelectionRegression();
 await RunRuntimeNormalizedClassificationRegression();
 await RunOllamaQwenProfileSelectionRegression();
 await RunOllamaUsableAnalysisClassificationRegression();
+await RunOllamaQwenInstructTerseAnalysis_NoFallbackRegression();
 await RunRuntimeProviderSelection_OpenAiGeminiRegression();
 await RunRuntimeNonOllamaClassificationRegression();
 
@@ -392,6 +396,33 @@ static async Task RunAnalysisUsableErrorPrefixedResponse_NoFallbackRegression()
     Console.WriteLine("PASS Analysis_UsableErrorPrefixedResponse_NoFallback");
 }
 
+static async Task RunEmbeddingNotFound_DisablesTruthfullyRegression()
+{
+    var handler = new FakeHttpMessageHandler(() =>
+        new HttpResponseMessage(HttpStatusCode.NotFound)
+        {
+            Content = new StringContent("{\"error\":\"model not found\"}")
+        });
+
+    using var client = new HttpClient(handler);
+    var service = new EmbeddingService(
+        endpoint: "http://localhost:11434",
+        model: "nomic-embed-text",
+        disabled: false,
+        httpClient: client);
+
+    var first = await service.GenerateEmbedding("sample text");
+    var second = await service.GenerateEmbedding("second sample");
+
+    AssertTrue(first is null, "Expected null embedding for NotFound response.");
+    AssertTrue(second is null, "Expected null embedding after session disable.");
+    AssertTrue(service.Status == EmbeddingRuntimeStatus.Disabled, "Expected embeddings service status to be Disabled after NotFound.");
+    AssertTrue(service.DescribeStatus() == "disabled", "Expected textual embedding status to be disabled.");
+    AssertTrue(handler.CallCount == 1, "Expected no additional embedding calls after session is disabled.");
+
+    Console.WriteLine("PASS EmbeddingsNotFound_TruthfulDisabledMode");
+}
+
 static JsonElement ExtractStructuredPayload(string output)
 {
     var jsonLine = output
@@ -556,9 +587,10 @@ static Task RunOllamaQwenProfileSelectionRegression()
     var instructPolicy = LlmProfiles.ResolvePolicy("ollama", "qwen2.5-coder:7b-instruct-q4_K_M");
 
     AssertTrue(baseProfile.ProfileId == "ollama/qwen2.5-coder", "Expected qwen base profile template.");
-    AssertTrue(instructProfile.ProfileId == "ollama/qwen2.5-coder", "Expected qwen instruct profile template.");
+    AssertTrue(instructProfile.ProfileId == "ollama/qwen2.5-coder-instruct-q4_k_m", "Expected qwen instruct profile template.");
     AssertTrue(baseProfile.UsableTextTolerance == "high", "Expected high usable text tolerance for local qwen profile.");
-    AssertTrue(baseProfile.ExpectedAnalysisResponseMode == "plain_text", "Expected plain text analysis mode for local qwen profile.");
+    AssertTrue(instructProfile.UsableTextTolerance == "very_high", "Expected very high usable text tolerance for local qwen instruct profile.");
+    AssertTrue(instructProfile.ExpectedAnalysisResponseMode == "plain_text_terse_ok", "Expected terse plain text analysis mode for qwen instruct profile.");
     AssertTrue(basePolicy.FirstResponseTimeout >= TimeSpan.FromSeconds(180), "Expected relaxed first-response timeout for local qwen profile.");
     AssertTrue(instructPolicy.StallTimeout >= TimeSpan.FromSeconds(90), "Expected relaxed stall timeout for local qwen instruct profile.");
     Console.WriteLine("PASS OllamaQwenProfileSelection_TwoModels_SharedTemplate");
@@ -588,6 +620,93 @@ static async Task RunOllamaUsableAnalysisClassificationRegression()
     AssertTrue(stallResult.TimeoutKind == LlmTimeoutKind.Stall, "Expected stall timeout kind.");
 
     Console.WriteLine("PASS OllamaQwenUsableAnalysis_NoPrematureFallbackClassification");
+}
+
+static async Task RunOllamaQwenInstructTerseAnalysis_NoFallbackRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    File.WriteAllText(Path.Combine(workspaceRoot, "Program.cs"), "namespace SampleApp; public static class Entry { public static void Hello() { } }");
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    tracer.StartRun(
+        "Analyze the project briefly",
+        "Analyze the project briefly",
+        workspaceRoot,
+        runtimeRoot,
+        AgentAccessMode.WorkspaceWrite.ToString(),
+        "LlmRuntimeClient",
+        "qwen2.5-coder:7b-instruct-q4_K_M");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var toolRegistry = new ToolRegistry();
+    var memory = new MemoryStore();
+    var permissionGuard = new PermissionGuard();
+    var safeProcessRunner = new SafeProcessRunner(session, permissionGuard, tracer);
+    var buildVerifier = new BuildVerifier(safeProcessRunner, tracer);
+    var sandboxManager = new SandboxManager(workspaceRoot, runtimeRoot);
+    var embeddingService = new EmbeddingService(disabled: true);
+    var vectorStore = new VectorStore();
+    var fileStateManager = new FileStateManager();
+    var projectIndexer = new ProjectIndexer(workspaceRoot, embeddingService, vectorStore, new AgentConfig(workspaceRoot), fileStateManager);
+    var contextBuilder = new ContextBuilder(workspaceRoot, vectorStore, fileStateManager, new ProjectSymbolDirectory(), tracer);
+
+    var profile = LlmProfiles.Resolve("ollama", "qwen2.5-coder:7b-instruct-q4_K_M");
+    var policy = LlmProfiles.ResolvePolicy("ollama", "qwen2.5-coder:7b-instruct-q4_K_M");
+    var llmClient = new LlmRuntimeClient(
+        new FakeAdapter("ollama", "qwen2.5-coder:7b-instruct-q4_K_M", "Error: Small project. One entry point. Build changes not required."),
+        profile,
+        policy);
+
+    var agent = new Agent(
+        llmClient,
+        toolRegistry,
+        memory,
+        buildVerifier,
+        sandboxManager,
+        projectIndexer,
+        contextBuilder,
+        fileStateManager,
+        session,
+        workspaceResolution: null);
+
+    var oldOut = Console.Out;
+    var capture = new StringWriter();
+    Console.SetOut(capture);
+
+    try
+    {
+        _ = await agent.RunTask("Analyze the project briefly");
+    }
+    finally
+    {
+        Console.SetOut(oldOut);
+    }
+
+    var structured = ExtractStructuredPayload(capture.ToString());
+    AssertTrue(structured.GetProperty("ok").GetBoolean(), "Expected successful analysis run for terse qwen instruct response.");
+    AssertTrue(string.IsNullOrEmpty(structured.GetProperty("fallbackReason").GetString()), "Expected empty fallbackReason for terse qwen instruct response.");
+    AssertTrue(string.IsNullOrEmpty(structured.GetProperty("fallbackMode").GetString()), "Expected empty fallbackMode for terse qwen instruct response.");
+    AssertTrue(structured.GetProperty("reasonCode").GetString() == "SUCCESS_ANALYSIS_RESPONSE", "Expected SUCCESS_ANALYSIS_RESPONSE reason code.");
+    AssertTrue(string.Equals(structured.GetProperty("finalStatus").GetString(), "success", StringComparison.OrdinalIgnoreCase), "Expected success final status.");
+
+    var timeline = structured.GetProperty("timeline");
+    var stages = timeline.EnumerateArray().Select(e => e.GetProperty("stage").GetString() ?? string.Empty).ToArray();
+    AssertNotContains(stages, "AnalysisFallbackStarted");
+    AssertNotContains(stages, "AnalysisFallbackCompleted");
+
+    Console.WriteLine("PASS OllamaQwenInstructTerseAnalysis_NoFallback");
 }
 
 sealed class FakeTimeoutLlmClient : ILLMClient
@@ -643,4 +762,22 @@ sealed class FakeAdapter : ILlmProviderAdapter
 
     public Task<bool> IsAvailable(CancellationToken cancellationToken = default)
         => Task.FromResult(true);
+}
+
+sealed class FakeHttpMessageHandler : HttpMessageHandler
+{
+    private readonly Func<HttpResponseMessage> _responseFactory;
+
+    public FakeHttpMessageHandler(Func<HttpResponseMessage> responseFactory)
+    {
+        _responseFactory = responseFactory;
+    }
+
+    public int CallCount { get; private set; }
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        CallCount++;
+        return Task.FromResult(_responseFactory());
+    }
 }

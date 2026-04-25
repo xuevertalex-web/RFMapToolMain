@@ -34,6 +34,21 @@ namespace LocalCursorAgent.LLM.Runtime
                 StallProfile: "local_ollama_progress_aware",
                 RetryPreference: "provider-fallback",
                 PreferFallbackOnHardFailure: true),
+            ["ollama/qwen2.5-coder-instruct-q4_k_m"] = new(
+                ProfileId: "ollama/qwen2.5-coder-instruct-q4_k_m",
+                Provider: "ollama",
+                ContextClass: "local-medium",
+                ExpectedLatencyClass: "slow-local",
+                StreamingSupported: false,
+                StructuredOutputReliability: "medium",
+                CodeStrength: "high",
+                ParsingStrictness: "lenient",
+                UsableTextTolerance: "very_high",
+                ExpectedAnalysisResponseMode: "plain_text_terse_ok",
+                TimeoutProfile: "local_ollama_relaxed",
+                StallProfile: "local_ollama_progress_aware",
+                RetryPreference: "provider-fallback",
+                PreferFallbackOnHardFailure: true),
             ["openai/default"] = new(
                 ProfileId: "openai/default",
                 Provider: "openai",
@@ -82,6 +97,12 @@ namespace LocalCursorAgent.LLM.Runtime
         public static LlmRuntimeProfile Resolve(string provider, string? model = null)
         {
             if (provider.Equals("ollama", StringComparison.OrdinalIgnoreCase) &&
+                IsQwen25CoderInstructQ4Km(model))
+            {
+                return Profiles["ollama/qwen2.5-coder-instruct-q4_k_m"];
+            }
+
+            if (provider.Equals("ollama", StringComparison.OrdinalIgnoreCase) &&
                 IsQwen25CoderFamily(model))
             {
                 return Profiles["ollama/qwen2.5-coder"];
@@ -112,6 +133,14 @@ namespace LocalCursorAgent.LLM.Runtime
                 return false;
 
             return model.Contains("qwen2.5-coder", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsQwen25CoderInstructQ4Km(string? model)
+        {
+            if (string.IsNullOrWhiteSpace(model))
+                return false;
+
+            return model.Contains("qwen2.5-coder:7b-instruct-q4_k_m", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

@@ -39,7 +39,7 @@ namespace LocalCursorAgent.LLM.Runtime
                     FailureMessage: null);
             }
 
-            if (LooksLikeUsableErrorPrefixedResponse(trimmed))
+            if (LooksLikeUsableErrorPrefixedResponse(trimmed, profile))
             {
                 return new LlmRuntimeResult(
                     Completion: trimmed,
@@ -91,18 +91,109 @@ namespace LocalCursorAgent.LLM.Runtime
             return text.StartsWith("Error:", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool LooksLikeUsableErrorPrefixedResponse(string text)
+        private static bool LooksLikeUsableErrorPrefixedResponse(string text, LlmRuntimeProfile profile)
         {
             if (!text.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
                 return false;
 
+            if (LooksLikeProviderFailureSignature(text))
+                return false;
+
+            var payload = text["Error:".Length..].Trim();
+            if (string.IsNullOrWhiteSpace(payload))
+                return false;
+
+            if (ContainsAny(
+                    text,
+                    "here is",
+                    "analysis:",
+                    "РєСЂР°С‚РєРёР№ РѕР±Р·РѕСЂ",
+                    "РїСЂРѕРµРєС‚",
+                    "based on indexed"))
+            {
+                return true;
+            }
+
+            if (!IsHighTolerancePlainTextAnalysisProfile(profile))
+                return false;
+
+            if (LooksLikeProviderFailureSignature(payload))
+                return false;
+
+            return HasTersePlainTextAnalysisSignal(payload);
+        }
+
+        private static bool IsHighTolerancePlainTextAnalysisProfile(LlmRuntimeProfile profile)
+        {
+            var highTolerance = profile.UsableTextTolerance.Equals("high", StringComparison.OrdinalIgnoreCase) ||
+                                profile.UsableTextTolerance.Equals("very_high", StringComparison.OrdinalIgnoreCase);
+            if (!highTolerance)
+                return false;
+
+            return profile.ExpectedAnalysisResponseMode.StartsWith("plain_text", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool HasTersePlainTextAnalysisSignal(string payload)
+        {
+            var tokenCount = CountWordLikeTokens(payload);
+            if (tokenCount < 5)
+                return false;
+
+            if (!ContainsAny(
+                    payload,
+                    "analysis",
+                    "summary",
+                    "overview",
+                    "project",
+                    "code",
+                    "entry",
+                    "build",
+                    "patch",
+                    "module",
+                    "class",
+                    "file",
+                    "\u0430\u043d\u0430\u043b\u0438\u0437",
+                    "\u043e\u0431\u0437\u043e\u0440",
+                    "\u043f\u0440\u043e\u0435\u043a\u0442",
+                    "\u043a\u043e\u0434",
+                    "\u0444\u0430\u0439\u043b",
+                    "\u0441\u0431\u043e\u0440\u043a"))
+            {
+                return false;
+            }
+
+            return payload.Contains('.', StringComparison.Ordinal) ||
+                   payload.Contains(':', StringComparison.Ordinal) ||
+                   payload.Contains(';', StringComparison.Ordinal);
+        }
+
+        private static int CountWordLikeTokens(string payload)
+        {
+            return payload
+                .Split(new[] { ' ', '\t', '\r', '\n', ',', ';', ':', '.', '!', '?', '(', ')', '[', ']', '{', '}', '"', '\'' }, StringSplitOptions.RemoveEmptyEntries)
+                .Count(token => token.Any(char.IsLetterOrDigit));
+        }
+
+        private static bool LooksLikeProviderFailureSignature(string text)
+        {
             return ContainsAny(
                 text,
-                "here is",
-                "analysis:",
-                "краткий обзор",
-                "проект",
-                "based on indexed");
+                "request failed",
+                "request timed out",
+                "timed out",
+                "timeout",
+                "unable to reach",
+                "returned status",
+                "unexpected response format",
+                "no response from",
+                "empty prompt",
+                "service unavailable",
+                "unavailable due to",
+                "connection refused",
+                "no such host",
+                "failed to connect",
+                "request canceled",
+                "request cancelled");
         }
 
         private static bool ContainsAny(string text, params string[] tokens)
