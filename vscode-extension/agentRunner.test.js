@@ -44,8 +44,26 @@ function testMalformedMarkedResultFallsBack() {
   });
 }
 
+function testFullBufferStructuredResultFallback() {
+  const stdout = [
+    'RuntimeRoot: C:\\agent',
+    'Some chunk before JSON {"not":"result"}',
+    '{"ok":true,"finalStatus":"success","summary":"done from full buffer","changedFiles":[]}',
+    'Latest manifest: C:\\agent\\.agent-runtime\\latest_manifest.json'
+  ].join('\n');
+
+  const result = extractStructuredResult([], stdout, '');
+  assert.deepStrictEqual(result, {
+    ok: true,
+    finalStatus: 'success',
+    summary: 'done from full buffer',
+    changedFiles: []
+  });
+}
+
 testMarkedStructuredResult();
 testLegacyStructuredResultFallback();
 testMalformedMarkedResultFallsBack();
+testFullBufferStructuredResultFallback();
 
 console.log('agentRunner tests passed');

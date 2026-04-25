@@ -261,6 +261,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         const fallbackReason = normalizeOptionalText(structured && structured.fallbackReason);
         const fallbackMode = normalizeOptionalText(structured && structured.fallbackMode);
         const finalStatus = normalizeOptionalText(structured && structured.finalStatus);
+        const embeddingsStatus = normalizeOptionalText(structured && (structured.embeddingsStatus || structured.EmbeddingsStatus));
         const timeline = normalizeFallbackTimelineConsistency(normalizeTraceEvents(structured), fallbackReason);
         const buildText = normalizeBuildText(structured, buildSucceeded, buildStarted);
         const derivedTimeline = timeline.length === 0
@@ -282,6 +283,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           fallbackReason,
           fallbackMode,
           finalStatus,
+          embeddingsStatus,
           degradedFlags: Array.isArray(structured && structured.degradedFlags) ? structured.degradedFlags.map(String) : [],
           summary,
           messageText: fallbackReason

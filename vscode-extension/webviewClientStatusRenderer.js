@@ -12,6 +12,7 @@ const webviewClientStatusRenderer = `function renderRunStatus(run) {
           ['provider', run.provider],
           ['model', run.model],
           ['build', run.buildText],
+          ['embeddings status', run.embeddingsStatus || 'not available'],
           ['degraded', run.degradedFlags.length ? run.degradedFlags.join(', ') : 'not available']
         ];
         for (const row of rows) {

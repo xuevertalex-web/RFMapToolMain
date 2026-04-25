@@ -95,6 +95,10 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
         for (const segment of segments) {
           if (segment.kind === 'structured') {
             appendLogLine('system', '[structured result received]');
+            const summaryLines = buildStructuredResultSummaryLines(segment.payload);
+            for (const summaryLine of summaryLines) {
+              appendLogLine('system', summaryLine);
+            }
             suppressPlainResultLog = true;
             continue;
           }
@@ -167,7 +171,22 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
             break;
           }
 
-          result.push({ kind: 'structured' });
+          const payloadText = remaining.slice(jsonStart, jsonEnd + 1);
+          let payload = null;
+          try {
+            const parsed = JSON.parse(payloadText);
+            if (parsed && typeof parsed === 'object' && typeof parsed.ok === 'boolean') {
+              payload = parsed;
+            }
+          } catch {
+            payload = null;
+          }
+
+          if (payload) {
+            result.push({ kind: 'structured', payload });
+          } else {
+            result.push({ kind: 'text', text: payloadText });
+          }
           remaining = remaining.slice(jsonEnd + 1);
         }
 
@@ -204,6 +223,60 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
         }
 
         return -1;
+      }
+
+      function buildStructuredResultSummaryLines(payload) {
+        if (!payload || typeof payload !== 'object') {
+          return [];
+        }
+
+        const fallbackReason = normalizeOptionalLogText(payload.fallbackReason);
+        const fallbackMode = normalizeOptionalLogText(payload.fallbackMode);
+        const finalStatus = normalizeOptionalLogText(payload.finalStatus);
+        const status = finalStatus || (payload.ok ? (fallbackReason || fallbackMode ? 'fallback-success' : 'success') : 'error');
+        const reasonCode = normalizeOptionalLogText(payload.reasonCode || payload.rootCauseCode || payload.failureCode);
+        const summary = normalizeOptionalLogText(payload.summary || payload.summaryText || payload.message);
+        const buildText = normalizeStructuredBuildText(payload);
+        const changedFiles = Array.isArray(payload.changedFiles) ? payload.changedFiles.filter(Boolean) : [];
+        const modelProvider = normalizeOptionalLogText(payload.provider || payload.modelProvider);
+        const model = normalizeOptionalLogText(payload.model);
+        const modelText = [modelProvider, model].filter(Boolean).join(' / ');
+        const embeddingsStatus = normalizeOptionalLogText(payload.embeddingsStatus || payload.EmbeddingsStatus);
+        const degradedFlags = Array.isArray(payload.degradedFlags)
+          ? payload.degradedFlags.map(item => normalizeOptionalLogText(item)).filter(Boolean)
+          : [];
+
+        const lines = [];
+        lines.push('Status: ' + (status || 'not available'));
+        if (finalStatus) lines.push('FinalStatus: ' + finalStatus);
+        if (reasonCode) lines.push('ReasonCode: ' + reasonCode);
+        if (summary) lines.push('Summary: ' + summary);
+        lines.push('Build: ' + buildText);
+        lines.push('ChangedFiles: ' + String(changedFiles.length));
+        if (fallbackReason || fallbackMode) lines.push('Fallback: ' + [fallbackReason, fallbackMode].filter(Boolean).join(' / '));
+        if (modelText) lines.push('Model: ' + modelText);
+        if (embeddingsStatus) lines.push('EmbeddingsStatus: ' + embeddingsStatus);
+        if (degradedFlags.length) lines.push('Degraded: ' + degradedFlags.join(', '));
+        return lines;
+      }
+
+      function normalizeStructuredBuildText(payload) {
+        const explicit = normalizeOptionalLogText(payload && payload.buildText);
+        if (explicit) {
+          return explicit;
+        }
+
+        if (payload && typeof payload.buildStarted === 'boolean') {
+          if (!payload.buildStarted) return 'not started';
+          if (payload.buildSucceeded === true) return 'succeeded';
+          if (payload.buildSucceeded === false) return 'failed';
+        }
+
+        return 'not run';
+      }
+
+      function normalizeOptionalLogText(value) {
+        return String(value === undefined || value === null ? '' : value).trim();
       }
 
       function clearChangedRangeDecoration(editor) {

@@ -243,6 +243,11 @@ function extractStructuredResult(lines, stdout, stderr) {
     return markedFromText;
   }
 
+  const trailingFromText = extractTrailingStructuredResultFromText(stdout, stderr);
+  if (trailingFromText) {
+    return trailingFromText;
+  }
+
   const markedResult = extractMarkedStructuredResult(lines);
   if (markedResult) {
     return markedResult;
@@ -265,6 +270,74 @@ function extractStructuredResult(lines, stdout, stderr) {
   }
 
   return null;
+}
+
+function extractTrailingStructuredResultFromText(stdout, stderr) {
+  const text = [String(stdout || ''), String(stderr || '')].filter(Boolean).join('\n');
+  if (!text) {
+    return null;
+  }
+
+  const marker = '{"ok":';
+  let searchStart = 0;
+  let lastParsed = null;
+  while (searchStart < text.length) {
+    const jsonStart = text.indexOf(marker, searchStart);
+    if (jsonStart < 0) {
+      break;
+    }
+
+    const jsonEnd = findJsonObjectEnd(text, jsonStart);
+    if (jsonEnd < 0) {
+      break;
+    }
+
+    const payload = text.slice(jsonStart, jsonEnd + 1);
+    try {
+      const parsed = JSON.parse(payload);
+      if (parsed && typeof parsed === 'object' && typeof parsed.ok === 'boolean') {
+        lastParsed = parsed;
+      }
+    } catch {
+      // Ignore parse failures and continue scanning.
+    }
+
+    searchStart = jsonEnd + 1;
+  }
+
+  return lastParsed;
+}
+
+function findJsonObjectEnd(text, startIndex) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = startIndex; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === '{') {
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        return i;
+      }
+    }
+  }
+
+  return -1;
 }
 
 function extractMarkedStructuredResultFromText(stdout, stderr) {
@@ -351,7 +424,13 @@ function appendStructuredResultSummary(output, structuredResult) {
   const fallbackReason = String(structuredResult.fallbackReason || '').trim();
   const fallbackMode = String(structuredResult.fallbackMode || '').trim();
   const summary = String(structuredResult.summary || '').trim();
-  const finalStatus = String(structuredResult.finalStatus || (structuredResult.ok ? 'success' : 'error')).trim();
+  const finalStatus = String(structuredResult.finalStatus || '').trim();
+  const status = String(
+    finalStatus ||
+    (structuredResult.ok
+      ? (fallbackReason || fallbackMode ? 'fallback-success' : 'success')
+      : 'error')
+  ).trim();
   const buildText = typeof structuredResult.buildText === 'string' && structuredResult.buildText.trim()
     ? structuredResult.buildText.trim()
     : typeof structuredResult.buildStarted === 'boolean'
@@ -363,19 +442,39 @@ function appendStructuredResultSummary(output, structuredResult) {
     structuredResult.failureCode ||
     ''
   ).trim();
+  const modelProvider = String(structuredResult.provider || structuredResult.modelProvider || '').trim();
+  const model = String(structuredResult.model || '').trim();
+  const modelText = [modelProvider, model].filter(Boolean).join(' / ');
+  const embeddingsStatus = String(structuredResult.embeddingsStatus || structuredResult.EmbeddingsStatus || '').trim();
+  const degradedFlags = Array.isArray(structuredResult.degradedFlags)
+    ? structuredResult.degradedFlags.map(item => String(item || '').trim()).filter(Boolean)
+    : [];
+  const summaryText = summary || String(structuredResult.summaryText || structuredResult.message || '').trim();
 
   output.appendLine('--- Structured result summary ---');
-  output.appendLine(`Status: ${finalStatus || 'not available'}`);
+  output.appendLine(`Status: ${status || 'not available'}`);
+  if (finalStatus) {
+    output.appendLine(`FinalStatus: ${finalStatus}`);
+  }
   if (reasonCode) {
     output.appendLine(`ReasonCode: ${reasonCode}`);
+  }
+  if (summaryText) {
+    output.appendLine(`Summary: ${summaryText}`);
   }
   output.appendLine(`Build: ${buildText}`);
   output.appendLine(`ChangedFiles: ${changedFiles.length}`);
   if (fallbackReason || fallbackMode) {
     output.appendLine(`Fallback: ${[fallbackReason, fallbackMode].filter(Boolean).join(' / ')}`);
   }
-  if (summary) {
-    output.appendLine(`Summary: ${summary}`);
+  if (modelText) {
+    output.appendLine(`Model: ${modelText}`);
+  }
+  if (embeddingsStatus) {
+    output.appendLine(`EmbeddingsStatus: ${embeddingsStatus}`);
+  }
+  if (degradedFlags.length) {
+    output.appendLine(`Degraded: ${degradedFlags.join(', ')}`);
   }
 }
 
