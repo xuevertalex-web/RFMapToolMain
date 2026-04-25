@@ -24,6 +24,7 @@ await RunRuntimeNormalizedClassificationRegression();
 await RunOllamaQwenProfileSelectionRegression();
 await RunOllamaUsableAnalysisClassificationRegression();
 await RunOllamaQwenInstructTerseAnalysis_NoFallbackRegression();
+await RunOllamaQwenInstructTerseNoKeywordAnalysis_NoFallbackRegression();
 await RunRuntimeProviderSelection_OpenAiGeminiRegression();
 await RunRuntimeNonOllamaClassificationRegression();
 
@@ -707,6 +708,93 @@ static async Task RunOllamaQwenInstructTerseAnalysis_NoFallbackRegression()
     AssertNotContains(stages, "AnalysisFallbackCompleted");
 
     Console.WriteLine("PASS OllamaQwenInstructTerseAnalysis_NoFallback");
+}
+
+static async Task RunOllamaQwenInstructTerseNoKeywordAnalysis_NoFallbackRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    File.WriteAllText(Path.Combine(workspaceRoot, "Program.cs"), "namespace SampleApp; public static class Entry { public static void Hello() { } }");
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    tracer.StartRun(
+        "Analyze the project briefly",
+        "Analyze the project briefly",
+        workspaceRoot,
+        runtimeRoot,
+        AgentAccessMode.WorkspaceWrite.ToString(),
+        "LlmRuntimeClient",
+        "qwen2.5-coder:7b-instruct-q4_K_M");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var toolRegistry = new ToolRegistry();
+    var memory = new MemoryStore();
+    var permissionGuard = new PermissionGuard();
+    var safeProcessRunner = new SafeProcessRunner(session, permissionGuard, tracer);
+    var buildVerifier = new BuildVerifier(safeProcessRunner, tracer);
+    var sandboxManager = new SandboxManager(workspaceRoot, runtimeRoot);
+    var embeddingService = new EmbeddingService(disabled: true);
+    var vectorStore = new VectorStore();
+    var fileStateManager = new FileStateManager();
+    var projectIndexer = new ProjectIndexer(workspaceRoot, embeddingService, vectorStore, new AgentConfig(workspaceRoot), fileStateManager);
+    var contextBuilder = new ContextBuilder(workspaceRoot, vectorStore, fileStateManager, new ProjectSymbolDirectory(), tracer);
+
+    var profile = LlmProfiles.Resolve("ollama", "qwen2.5-coder:7b-instruct-q4_K_M");
+    var policy = LlmProfiles.ResolvePolicy("ollama", "qwen2.5-coder:7b-instruct-q4_K_M");
+    var llmClient = new LlmRuntimeClient(
+        new FakeAdapter("ollama", "qwen2.5-coder:7b-instruct-q4_K_M", "Error: Single entrypoint only; no edits needed."),
+        profile,
+        policy);
+
+    var agent = new Agent(
+        llmClient,
+        toolRegistry,
+        memory,
+        buildVerifier,
+        sandboxManager,
+        projectIndexer,
+        contextBuilder,
+        fileStateManager,
+        session,
+        workspaceResolution: null);
+
+    var oldOut = Console.Out;
+    var capture = new StringWriter();
+    Console.SetOut(capture);
+
+    try
+    {
+        _ = await agent.RunTask("Analyze the project briefly");
+    }
+    finally
+    {
+        Console.SetOut(oldOut);
+    }
+
+    var structured = ExtractStructuredPayload(capture.ToString());
+    AssertTrue(structured.GetProperty("ok").GetBoolean(), "Expected successful analysis run for terse no-keyword instruct response.");
+    AssertTrue(string.IsNullOrEmpty(structured.GetProperty("fallbackReason").GetString()), "Expected empty fallbackReason for terse no-keyword instruct response.");
+    AssertTrue(string.IsNullOrEmpty(structured.GetProperty("fallbackMode").GetString()), "Expected empty fallbackMode for terse no-keyword instruct response.");
+    AssertTrue(structured.GetProperty("reasonCode").GetString() == "SUCCESS_ANALYSIS_RESPONSE", "Expected SUCCESS_ANALYSIS_RESPONSE reason code.");
+    AssertTrue(string.Equals(structured.GetProperty("finalStatus").GetString(), "success", StringComparison.OrdinalIgnoreCase), "Expected success final status.");
+
+    var timeline = structured.GetProperty("timeline");
+    var stages = timeline.EnumerateArray().Select(e => e.GetProperty("stage").GetString() ?? string.Empty).ToArray();
+    AssertNotContains(stages, "AnalysisFallbackStarted");
+    AssertNotContains(stages, "AnalysisFallbackCompleted");
+
+    Console.WriteLine("PASS OllamaQwenInstructTerseNoKeywordAnalysis_NoFallback");
 }
 
 sealed class FakeTimeoutLlmClient : ILLMClient

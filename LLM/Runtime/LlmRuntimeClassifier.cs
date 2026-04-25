@@ -120,7 +120,7 @@ namespace LocalCursorAgent.LLM.Runtime
             if (LooksLikeProviderFailureSignature(payload))
                 return false;
 
-            return HasTersePlainTextAnalysisSignal(payload);
+            return HasTersePlainTextAnalysisSignal(payload, profile);
         }
 
         private static bool IsHighTolerancePlainTextAnalysisProfile(LlmRuntimeProfile profile)
@@ -133,11 +133,37 @@ namespace LocalCursorAgent.LLM.Runtime
             return profile.ExpectedAnalysisResponseMode.StartsWith("plain_text", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool HasTersePlainTextAnalysisSignal(string payload)
+        private static bool HasTersePlainTextAnalysisSignal(string payload, LlmRuntimeProfile profile)
         {
             var tokenCount = CountWordLikeTokens(payload);
             if (tokenCount < 5)
                 return false;
+
+            if (IsTersePlainTextInstructProfile(profile))
+            {
+                if (ContainsAny(
+                        payload,
+                        "error",
+                        "failed",
+                        "failure",
+                        "exception",
+                        "timed out",
+                        "timeout",
+                        "stalled",
+                        "stall",
+                        "no progress",
+                        "http",
+                        "invalid",
+                        "forbidden",
+                        "unauthorized"))
+                {
+                    return false;
+                }
+
+                return payload.Contains('.', StringComparison.Ordinal) ||
+                       payload.Contains(':', StringComparison.Ordinal) ||
+                       payload.Contains(';', StringComparison.Ordinal);
+            }
 
             if (!ContainsAny(
                     payload,
@@ -165,6 +191,11 @@ namespace LocalCursorAgent.LLM.Runtime
             return payload.Contains('.', StringComparison.Ordinal) ||
                    payload.Contains(':', StringComparison.Ordinal) ||
                    payload.Contains(';', StringComparison.Ordinal);
+        }
+
+        private static bool IsTersePlainTextInstructProfile(LlmRuntimeProfile profile)
+        {
+            return profile.ExpectedAnalysisResponseMode.Equals("plain_text_terse_ok", StringComparison.OrdinalIgnoreCase);
         }
 
         private static int CountWordLikeTokens(string payload)
