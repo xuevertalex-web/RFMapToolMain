@@ -18,6 +18,8 @@ await RunAnalysisNormalResponseRegression();
 await RunAnalysisUsableErrorPrefixedResponse_NoFallbackRegression();
 await RunRuntimeProfileSelectionRegression();
 await RunRuntimeNormalizedClassificationRegression();
+await RunOllamaQwenProfileSelectionRegression();
+await RunOllamaUsableAnalysisClassificationRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -452,6 +454,48 @@ static async Task RunRuntimeNormalizedClassificationRegression()
     AssertTrue(failureResult.IsFailure, "Expected normalized failure=true.");
 
     Console.WriteLine("PASS RuntimeNormalizedClassification_TimeoutAndRequestFailed");
+}
+
+static Task RunOllamaQwenProfileSelectionRegression()
+{
+    var baseProfile = LlmProfiles.Resolve("ollama", "qwen2.5-coder:7b");
+    var instructProfile = LlmProfiles.Resolve("ollama", "qwen2.5-coder:7b-instruct-q4_K_M");
+    var basePolicy = LlmProfiles.ResolvePolicy("ollama", "qwen2.5-coder:7b");
+    var instructPolicy = LlmProfiles.ResolvePolicy("ollama", "qwen2.5-coder:7b-instruct-q4_K_M");
+
+    AssertTrue(baseProfile.ProfileId == "ollama/qwen2.5-coder", "Expected qwen base profile template.");
+    AssertTrue(instructProfile.ProfileId == "ollama/qwen2.5-coder", "Expected qwen instruct profile template.");
+    AssertTrue(baseProfile.UsableTextTolerance == "high", "Expected high usable text tolerance for local qwen profile.");
+    AssertTrue(baseProfile.ExpectedAnalysisResponseMode == "plain_text", "Expected plain text analysis mode for local qwen profile.");
+    AssertTrue(basePolicy.FirstResponseTimeout >= TimeSpan.FromSeconds(180), "Expected relaxed first-response timeout for local qwen profile.");
+    AssertTrue(instructPolicy.StallTimeout >= TimeSpan.FromSeconds(90), "Expected relaxed stall timeout for local qwen instruct profile.");
+    Console.WriteLine("PASS OllamaQwenProfileSelection_TwoModels_SharedTemplate");
+    return Task.CompletedTask;
+}
+
+static async Task RunOllamaUsableAnalysisClassificationRegression()
+{
+    var profile = LlmProfiles.Resolve("ollama", "qwen2.5-coder:7b-instruct-q4_K_M");
+    var policy = LlmProfiles.ResolvePolicy("ollama", "qwen2.5-coder:7b-instruct-q4_K_M");
+
+    var usableClient = new LlmRuntimeClient(
+        new FakeAdapter("ollama", "qwen2.5-coder:7b-instruct-q4_K_M", "Error: I cannot run tools, but here is analysis: code structure is coherent and no patch is required."),
+        profile,
+        policy);
+    var usableResult = await usableClient.GenerateNormalized("analyze");
+    AssertTrue(usableResult.IsUsable, "Expected usable analysis text for qwen instruct profile.");
+    AssertTrue(!usableResult.IsFailure, "Expected usable analysis text not to be hard failure.");
+    AssertTrue(usableResult.Status == LlmRuntimeStatus.Success, "Expected usable analysis text to normalize as success.");
+
+    var stallClient = new LlmRuntimeClient(
+        new FakeAdapter("ollama", "qwen2.5-coder:7b-instruct-q4_K_M", "Error: response stalled with no progress."),
+        profile,
+        policy);
+    var stallResult = await stallClient.GenerateNormalized("analyze");
+    AssertTrue(stallResult.Status == LlmRuntimeStatus.ModelTimeout, "Expected stall to map to model timeout class.");
+    AssertTrue(stallResult.TimeoutKind == LlmTimeoutKind.Stall, "Expected stall timeout kind.");
+
+    Console.WriteLine("PASS OllamaQwenUsableAnalysis_NoPrematureFallbackClassification");
 }
 
 sealed class FakeTimeoutLlmClient : ILLMClient

@@ -35,6 +35,10 @@ namespace LocalCursorAgent.LLM.Runtime
         string StructuredOutputReliability,
         string CodeStrength,
         string ParsingStrictness,
+        string UsableTextTolerance,
+        string ExpectedAnalysisResponseMode,
+        string TimeoutProfile,
+        string StallProfile,
         string RetryPreference,
         bool PreferFallbackOnHardFailure);
 
@@ -42,13 +46,15 @@ namespace LocalCursorAgent.LLM.Runtime
         TimeSpan ConnectStartTimeout,
         TimeSpan FirstResponseTimeout,
         TimeSpan StallTimeout,
-        TimeSpan OverallSafetyBudget)
+        TimeSpan OverallSafetyBudget,
+        bool TreatUsablePartialOutputAsSuccessForAnalysis)
     {
         public static LlmRuntimePolicy Default { get; } = new(
             ConnectStartTimeout: TimeSpan.FromSeconds(15),
             FirstResponseTimeout: TimeSpan.FromSeconds(90),
             StallTimeout: TimeSpan.FromSeconds(60),
-            OverallSafetyBudget: TimeSpan.FromMinutes(3));
+            OverallSafetyBudget: TimeSpan.FromMinutes(3),
+            TreatUsablePartialOutputAsSuccessForAnalysis: true);
     }
 
     public sealed record LlmRuntimeResult(

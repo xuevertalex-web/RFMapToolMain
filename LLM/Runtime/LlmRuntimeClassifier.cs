@@ -43,7 +43,9 @@ namespace LocalCursorAgent.LLM.Runtime
             {
                 return new LlmRuntimeResult(
                     Completion: trimmed,
-                    Status: LlmRuntimeStatus.PartialOutput,
+                    Status: policy.TreatUsablePartialOutputAsSuccessForAnalysis
+                        ? LlmRuntimeStatus.Success
+                        : LlmRuntimeStatus.PartialOutput,
                     Metadata: metadata,
                     Profile: profile,
                     Policy: policy,
@@ -69,6 +71,8 @@ namespace LocalCursorAgent.LLM.Runtime
         private static (LlmRuntimeStatus Status, LlmTimeoutKind TimeoutKind) ClassifyFailure(string text)
         {
             if (ContainsAny(text, "stall timeout", "no progress"))
+                return (LlmRuntimeStatus.ModelTimeout, LlmTimeoutKind.Stall);
+            if (ContainsAny(text, "stalled", "progress stalled", "response stalled"))
                 return (LlmRuntimeStatus.ModelTimeout, LlmTimeoutKind.Stall);
             if (ContainsAny(text, "connect timeout", "connection timeout", "failed to connect"))
                 return (LlmRuntimeStatus.ModelTimeout, LlmTimeoutKind.ConnectStart);

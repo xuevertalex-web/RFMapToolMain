@@ -37,7 +37,9 @@ namespace LocalCursorAgent.LLM.Runtime
             var adapter = new OllamaProviderAdapter(
                 string.IsNullOrWhiteSpace(endpoint) ? "http://localhost:11434" : endpoint,
                 model);
-            return new LlmRuntimeClient(adapter, LlmProfiles.Resolve("ollama"));
+            var profile = LlmProfiles.Resolve("ollama", model);
+            var policy = LlmProfiles.ResolvePolicy("ollama", model);
+            return new LlmRuntimeClient(adapter, profile, policy);
         }
 
         private static ILLMClient? TryCreateOpenAiClient(string appRoot)
@@ -50,7 +52,9 @@ namespace LocalCursorAgent.LLM.Runtime
             var model = Environment.GetEnvironmentVariable("OPENAI_MODEL")?.Trim();
             model = string.IsNullOrWhiteSpace(model) ? "gpt-4.1-mini" : model;
             var adapter = new OpenAiProviderAdapter(apiKey, model);
-            return new LlmRuntimeClient(adapter, LlmProfiles.Resolve("openai"));
+            var profile = LlmProfiles.Resolve("openai", model);
+            var policy = LlmProfiles.ResolvePolicy("openai", model);
+            return new LlmRuntimeClient(adapter, profile, policy);
         }
 
         private static string LoadOpenAiApiKeyFallback(string appRoot)
