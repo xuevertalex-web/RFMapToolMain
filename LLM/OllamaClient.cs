@@ -11,6 +11,7 @@ namespace LocalCursorAgent.LLM
         private readonly string _model;
         private readonly string _endpoint;
         private readonly string _keepAlive;
+        private string? _resolvedModel;
 
         public OllamaClient(string endpoint = "http://localhost:11434", string model = "qwen2.5-coder:7b")
         {
@@ -33,9 +34,10 @@ namespace LocalCursorAgent.LLM
 
             try
             {
+                var requestModel = await ResolveRequestModel(cancellationToken);
                 var requestPayload = new
                 {
-                    model = _model,
+                    model = requestModel,
                     prompt,
                     stream = false,
                     keep_alive = _keepAlive
@@ -47,7 +49,7 @@ namespace LocalCursorAgent.LLM
                 var response = await _httpClient.PostAsync($"{_endpoint}/api/generate", content, cancellationToken);
 
                 if (!response.IsSuccessStatusCode)
-                    return $"Error: LLM returned status {response.StatusCode}";
+                    return $"Error: LLM returned status {response.StatusCode} (model '{requestModel}' at '{_endpoint}')";
 
                 var responseBody = await response.Content.ReadAsStringAsync();
                 using var jsonDoc = JsonDocument.Parse(responseBody);
@@ -91,6 +93,87 @@ namespace LocalCursorAgent.LLM
             {
                 return false;
             }
+        }
+
+        private async Task<string> ResolveRequestModel(CancellationToken cancellationToken)
+        {
+            if (!string.IsNullOrWhiteSpace(_resolvedModel))
+                return _resolvedModel;
+
+            var requested = _model.Trim();
+            if (string.IsNullOrWhiteSpace(requested))
+            {
+                _resolvedModel = "qwen2.5-coder:7b";
+                return _resolvedModel;
+            }
+
+            try
+            {
+                using var tagsCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                tagsCts.CancelAfter(TimeSpan.FromSeconds(2));
+                var tagsResponse = await _httpClient.GetAsync($"{_endpoint}/api/tags", tagsCts.Token);
+                if (!tagsResponse.IsSuccessStatusCode)
+                {
+                    _resolvedModel = requested;
+                    return _resolvedModel;
+                }
+
+                var tagsBody = await tagsResponse.Content.ReadAsStringAsync();
+                using var tagsJson = JsonDocument.Parse(tagsBody);
+                if (!tagsJson.RootElement.TryGetProperty("models", out var models) || models.ValueKind != JsonValueKind.Array)
+                {
+                    _resolvedModel = requested;
+                    return _resolvedModel;
+                }
+
+                var available = new List<string>();
+                foreach (var item in models.EnumerateArray())
+                {
+                    if (item.TryGetProperty("name", out var nameElement))
+                    {
+                        var name = nameElement.GetString();
+                        if (!string.IsNullOrWhiteSpace(name))
+                            available.Add(name.Trim());
+                    }
+                }
+
+                _resolvedModel = ResolveModelAlias(requested, available);
+                return _resolvedModel;
+            }
+            catch
+            {
+                _resolvedModel = requested;
+                return _resolvedModel;
+            }
+        }
+
+        public static string ResolveModelAlias(string requestedModel, IReadOnlyList<string> availableModels)
+        {
+            var requested = string.IsNullOrWhiteSpace(requestedModel) ? "qwen2.5-coder:7b" : requestedModel.Trim();
+            if (availableModels is null || availableModels.Count == 0)
+                return requested;
+
+            var direct = availableModels.FirstOrDefault(x => string.Equals(x?.Trim(), requested, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(direct))
+                return direct.Trim();
+
+            if (requested.StartsWith("qwen2.5-coder:7b-instruct-q4_k_m", StringComparison.OrdinalIgnoreCase))
+            {
+                var matched = availableModels
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(x => x.Trim())
+                    .FirstOrDefault(x =>
+                        x.Contains("qwen2.5", StringComparison.OrdinalIgnoreCase) &&
+                        x.Contains("coder", StringComparison.OrdinalIgnoreCase) &&
+                        x.Contains("7b", StringComparison.OrdinalIgnoreCase) &&
+                        x.Contains("instruct", StringComparison.OrdinalIgnoreCase) &&
+                        x.Contains("q4_k_m", StringComparison.OrdinalIgnoreCase));
+
+                if (!string.IsNullOrWhiteSpace(matched))
+                    return matched;
+            }
+
+            return requested;
         }
 
         private static string ResolveKeepAlive()

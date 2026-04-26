@@ -23,6 +23,7 @@ await RunEmbeddingNotFound_DisablesTruthfullyRegression();
 await RunRuntimeProfileSelectionRegression();
 await RunRuntimeNormalizedClassificationRegression();
 await RunOllamaQwenProfileSelectionRegression();
+await RunOllamaModelAliasResolutionRegression();
 await RunOllamaUsableAnalysisClassificationRegression();
 await RunOllamaQwenInstructTerseAnalysis_NoFallbackRegression();
 await RunOllamaQwenInstructTerseNoKeywordAnalysis_NoFallbackRegression();
@@ -683,6 +684,27 @@ static Task RunOllamaQwenProfileSelectionRegression()
     AssertTrue(basePolicy.FirstResponseTimeout >= TimeSpan.FromSeconds(180), "Expected relaxed first-response timeout for local qwen profile.");
     AssertTrue(instructPolicy.StallTimeout >= TimeSpan.FromSeconds(90), "Expected relaxed stall timeout for local qwen instruct profile.");
     Console.WriteLine("PASS OllamaQwenProfileSelection_TwoModels_SharedTemplate");
+    return Task.CompletedTask;
+}
+
+static Task RunOllamaModelAliasResolutionRegression()
+{
+    var available = new[]
+    {
+        "zoyer2/Qwen2.5-Coder-7B-Instruct-Q4_K_M-64K-CLINE:latest",
+        "qwen2.5-coder:7b"
+    };
+    var resolved = OllamaClient.ResolveModelAlias("qwen2.5-coder:7b-instruct-q4_K_M", available);
+    AssertTrue(
+        string.Equals("zoyer2/Qwen2.5-Coder-7B-Instruct-Q4_K_M-64K-CLINE:latest", resolved, StringComparison.Ordinal),
+        "Expected instruct alias resolution to installed local model.");
+
+    var direct = OllamaClient.ResolveModelAlias("qwen2.5-coder:7b", available);
+    AssertTrue(
+        string.Equals("qwen2.5-coder:7b", direct, StringComparison.Ordinal),
+        "Expected direct model match to remain unchanged.");
+
+    Console.WriteLine("PASS OllamaModelAliasResolution_InstructMapping");
     return Task.CompletedTask;
 }
 
