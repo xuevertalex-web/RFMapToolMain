@@ -403,6 +403,13 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         const fallbackMode = normalizeOptionalText(structured && structured.fallbackMode);
         const reasonCode = normalizeReasonCode(structured);
         const finalStatus = normalizeOptionalText(structured && structured.finalStatus);
+        const continuationHint = normalizeOptionalText(structured && structured.continuationHint);
+        const sessionContinuation = structured && typeof structured.sessionContinuation === 'object' && structured.sessionContinuation
+          ? {
+              lastSuccessfulStep: normalizeOptionalText(structured.sessionContinuation.lastSuccessfulStep),
+              lastKnownAction: normalizeOptionalText(structured.sessionContinuation.lastKnownAction)
+            }
+          : { lastSuccessfulStep: '', lastKnownAction: '' };
         const embeddingsStatus = normalizeOptionalText(structured && (structured.embeddingsStatus || structured.EmbeddingsStatus));
         const degradedFlags = Array.isArray(structured && structured.degradedFlags) ? structured.degradedFlags.map(String) : [];
         const embeddingsSummary = normalizeEmbeddingsSummary(embeddingsStatus, degradedFlags);
@@ -415,6 +422,8 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           structured,
           finalStatus || status,
           reasonCode,
+          continuationHint,
+          sessionContinuation,
           fallbackReason,
           fallbackMode,
           modelUsed,
@@ -438,6 +447,8 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           model,
           modelUsed,
           reasonCode,
+          continuationHint,
+          sessionContinuation,
           fallbackReason,
           fallbackMode,
           finalStatus,

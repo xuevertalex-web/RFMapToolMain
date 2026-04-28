@@ -1244,6 +1244,8 @@ static async Task RunBroadIntentNoToolCallsRequiresActionRegression()
     var reasonCode = structured.GetProperty("reasonCode").GetString() ?? string.Empty;
     var finalStatus = structured.GetProperty("finalStatus").GetString() ?? string.Empty;
     AssertTrue(structured.TryGetProperty("planRequired", out var planRequired) && (planRequired.ValueKind == JsonValueKind.True || planRequired.ValueKind == JsonValueKind.False), "Expected typed planRequired field in structured result.");
+    AssertTrue(structured.TryGetProperty("continuationHint", out var continuationHint) && continuationHint.ValueKind == JsonValueKind.String, "Expected typed continuationHint field in structured result.");
+    AssertTrue(structured.TryGetProperty("sessionContinuation", out var sessionContinuation) && sessionContinuation.ValueKind == JsonValueKind.Object, "Expected typed sessionContinuation object in structured result.");
     AssertTrue(!string.Equals(reasonCode, "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase), "Broad engineering intent must not end as SUCCESS_NO_TOOL_CALLS.");
     AssertTrue(!string.Equals(finalStatus, "success", StringComparison.OrdinalIgnoreCase), "Broad engineering intent with no actions must not end as success.");
     Console.WriteLine("PASS BroadIntentNoToolCalls_RequiresAction");

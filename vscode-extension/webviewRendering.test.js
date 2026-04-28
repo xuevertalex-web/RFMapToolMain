@@ -220,6 +220,9 @@ function testRunNormalizationContracts() {
   assert.strictEqual(success.deniedActions, 0);
   assert.strictEqual(success.blockedActions, 0);
   assert.strictEqual(success.planRequired, false);
+  assert.strictEqual(success.continuationHint, '');
+  assert.strictEqual(success.sessionContinuation.lastSuccessfulStep, '');
+  assert.strictEqual(success.sessionContinuation.lastKnownAction, '');
   assert.strictEqual(success.hostBoundaryPreserved, true);
   assert.strictEqual(success.buildText, 'not started');
   assert.strictEqual(success.embeddingsSummary, 'not available');
@@ -323,6 +326,8 @@ function testRunNormalizationContracts() {
       externalAttempts: 1,
       deniedActions: 1,
       blockedActions: 0,
+      continuationHint: 'Continue from: inspect denied action and apply a safe workspace-local edit',
+      sessionContinuation: { lastSuccessfulStep: 'ToolCallsExecuted', lastKnownAction: 'Executed 1 tool calls' },
       hostBoundaryPreserved: true
     }
   });
@@ -330,6 +335,9 @@ function testRunNormalizationContracts() {
   assert.strictEqual(approvalRun.externalAttempts, 1);
   assert.strictEqual(approvalRun.deniedActions, 1);
   assert.strictEqual(approvalRun.blockedActions, 0);
+  assert.ok(String(approvalRun.continuationHint).toLowerCase().includes('continue'));
+  assert.strictEqual(approvalRun.sessionContinuation.lastSuccessfulStep, 'ToolCallsExecuted');
+  assert.strictEqual(approvalRun.sessionContinuation.lastKnownAction, 'Executed 1 tool calls');
   assert.strictEqual(approvalRun.hostBoundaryPreserved, true);
   assert.strictEqual(approvalRun.actionLifecycleCounts.requested, 0);
   assert.strictEqual(approvalRun.actionLifecycleCounts.approvalRequired, 0);
@@ -404,6 +412,7 @@ function testStatusAndSummaryRendering() {
   assert.ok(successRows.some(([key, value]) => key === 'approval required' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'blocked actions' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'plan required' && value === 'false'));
+  assert.ok(successRows.some(([key, value]) => key === 'continuation hint' && value === 'not available'));
   assert.ok(successRows.some(([key, value]) => key === 'host boundary preserved' && value === 'true'));
   assert.ok(successRows.some(([key, value]) => key === 'lifecycle executed' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'model used' && value === 'ollama / qwen2.5-coder:7b'));
@@ -426,6 +435,7 @@ function testStatusAndSummaryRendering() {
     deniedActions: 2,
     blockedActions: 1,
     planRequired: true,
+    continuationHint: 'Provide a step-by-step implementation plan and execute the first concrete edit.',
     hostBoundaryPreserved: true,
     actionLifecycleCounts: {
       requested: 3,
@@ -445,6 +455,7 @@ function testStatusAndSummaryRendering() {
   assert.ok(fallbackRows.some(([key, value]) => key === 'denied actions' && value === '2'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'blocked actions' && value === '1'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'plan required' && value === 'true'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'continuation hint' && value.includes('step-by-step implementation plan')));
   assert.ok(fallbackRows.some(([key, value]) => key === 'lifecycle requested' && value === '3'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'lifecycle approval_required' && value === '2'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'lifecycle blocked' && value === '1'));

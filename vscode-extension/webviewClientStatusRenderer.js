@@ -15,7 +15,8 @@ const webviewClientStatusRenderer = `function renderRunStatus(run) {
 
         const rows = [
           ['status', run.status || 'not available'],
-          ['reason code', normalizeStatusCell(run.reasonCode, 'not available')]
+          ['reason code', normalizeStatusCell(run.reasonCode, 'not available')],
+          ['continuation hint', normalizeStatusCell(run.continuationHint, 'not available')]
         ];
 
         if (finalStatus && normalizedFinalStatus !== String(run.status || '').toLowerCase()) {

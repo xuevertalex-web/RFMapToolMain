@@ -2008,6 +2008,11 @@ Write the final project overview now.";
             int tracerDeniedActions,
             IReadOnlyList<ActionLifecycleEntry> actionLifecycleEntries)
         {
+            var effectiveReasonCode = (failure?.ReasonCode ?? reasonCode) ?? string.Empty;
+            var planRequired = string.Equals(effectiveReasonCode, "NO_ACTIONABLE_STEPS", StringComparison.OrdinalIgnoreCase);
+            var continuationHint = BuildContinuationHint(planRequired, effectiveReasonCode, failure?.LastKnownAction ?? string.Empty);
+            var continuationStep = failure?.LastSuccessfulStep ?? string.Empty;
+            var continuationAction = failure?.LastKnownAction ?? string.Empty;
             var normalizedChangedFiles = changedFiles
                 .Where(p => !string.IsNullOrWhiteSpace(p))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -2074,7 +2079,13 @@ Write the final project overview now.";
                 FinalStatus = finalStatus ?? string.Empty,
                 BuildSucceeded = buildSucceeded,
                 BuildStarted = buildStarted,
-                PlanRequired = string.Equals((failure?.ReasonCode ?? reasonCode) ?? string.Empty, "NO_ACTIONABLE_STEPS", StringComparison.OrdinalIgnoreCase),
+                PlanRequired = planRequired,
+                ContinuationHint = continuationHint,
+                SessionContinuation = new SessionContinuationPayload
+                {
+                    LastSuccessfulStep = continuationStep,
+                    LastKnownAction = continuationAction
+                },
                 RootCauseCode = failure?.RootCauseCode ?? (!ok ? reasonCode : string.Empty),
                 FailedStage = failure?.FailedStage ?? string.Empty,
                 LastSuccessfulStep = failure?.LastSuccessfulStep ?? string.Empty,
@@ -2157,6 +2168,10 @@ Write the final project overview now.";
 
             [JsonPropertyName("planRequired")]
             public bool PlanRequired { get; init; }
+            [JsonPropertyName("continuationHint")]
+            public string ContinuationHint { get; init; } = string.Empty;
+            [JsonPropertyName("sessionContinuation")]
+            public SessionContinuationPayload SessionContinuation { get; init; } = new();
 
             [JsonPropertyName("rootCauseCode")]
             public string RootCauseCode { get; init; } = string.Empty;
@@ -2220,6 +2235,34 @@ Write the final project overview now.";
 
             [JsonPropertyName("actionLifecycle")]
             public ActionLifecyclePayload[] ActionLifecycle { get; init; } = Array.Empty<ActionLifecyclePayload>();
+        }
+
+        private sealed class SessionContinuationPayload
+        {
+            [JsonPropertyName("lastSuccessfulStep")]
+            public string LastSuccessfulStep { get; init; } = string.Empty;
+            [JsonPropertyName("lastKnownAction")]
+            public string LastKnownAction { get; init; } = string.Empty;
+        }
+
+        private static string BuildContinuationHint(bool planRequired, string reasonCode, string lastKnownAction)
+        {
+            if (planRequired)
+            {
+                return "Provide a step-by-step implementation plan and execute the first concrete edit.";
+            }
+
+            if (string.Equals(reasonCode, "MAX_ITERATIONS_REACHED", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Continue from the last successful step and focus on one concrete blocking issue.";
+            }
+
+            if (!string.IsNullOrWhiteSpace(lastKnownAction))
+            {
+                return $"Continue from: {lastKnownAction}";
+            }
+
+            return string.Empty;
         }
 
         private static bool IsBroadEngineeringIntent(string task)
