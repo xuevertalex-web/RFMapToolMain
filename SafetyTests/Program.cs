@@ -1050,6 +1050,24 @@ static async Task RunActionLifecycleLedgerRegression()
     _ = await guarded.Execute("read:a.txt");
 
     AssertTrue(tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.Executed && x.ActionType == ToolActionKind.ReadFile.ToString()), "Expected executed ledger state for allowed inside action.");
+
+    var payloadJson = JsonSerializer.Serialize(new
+    {
+        actionLifecycle = tracer.GetActionLedger().Select(x => new
+        {
+            x.Sequence,
+            x.ActionType,
+            LifecycleState = x.LifecycleState.ToString(),
+            x.ReasonCode,
+            x.ApprovalStatus
+        }).ToArray()
+    });
+    using var doc = JsonDocument.Parse(payloadJson);
+    var lifecycle = doc.RootElement.GetProperty("actionLifecycle");
+    AssertTrue(lifecycle.ValueKind == JsonValueKind.Array && lifecycle.GetArrayLength() >= 2, "Expected actionLifecycle array in structured payload.");
+    var states = lifecycle.EnumerateArray().Select(x => x.GetProperty("LifecycleState").GetString() ?? string.Empty).ToArray();
+    AssertTrue(states.Contains("ApprovalRequired", StringComparer.Ordinal), "Expected ApprovalRequired state in actionLifecycle payload.");
+    AssertTrue(states.Contains("Executed", StringComparer.Ordinal), "Expected Executed state in actionLifecycle payload.");
     Console.WriteLine("PASS ActionLifecycleLedger_RequestedBlockedExecuted");
 }
 
