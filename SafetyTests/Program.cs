@@ -1147,6 +1147,7 @@ static async Task RunStructuredActionLifecycleReportingRegression()
     AssertTrue(deniedActions == 0, "Expected deniedActions=0 for approval-required flow without explicit deny.");
     var blockedActions = root.GetProperty("blockedActions").GetInt32();
     AssertTrue(blockedActions == 0, "Expected blockedActions=0 for approval-required flow without explicit deny.");
+    AssertTrue(deniedActions == blockedActions, "Expected deniedActions and blockedActions to stay aligned for pure approval-required flow.");
 
     AssertTrue(root.GetProperty("hostBoundaryPreserved").GetBoolean(), "Expected hostBoundaryPreserved=true for blocked outside action.");
 
