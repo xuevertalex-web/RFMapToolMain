@@ -215,6 +215,10 @@ function testRunNormalizationContracts() {
   assert.strictEqual(success.reasonCode, '');
   assert.strictEqual(success.modelUsed, 'ollama / qwen2.5-coder:7b');
   assert.strictEqual(success.changedFilesCount, 0);
+  assert.strictEqual(success.approvalRequiredCount, 0);
+  assert.strictEqual(success.externalAttempts, 0);
+  assert.strictEqual(success.deniedActions, 0);
+  assert.strictEqual(success.hostBoundaryPreserved, true);
   assert.strictEqual(success.buildText, 'not started');
   assert.strictEqual(success.embeddingsSummary, 'not available');
   assert.strictEqual(success.embeddingsWarning, false);
@@ -296,6 +300,33 @@ function testRunNormalizationContracts() {
   });
   assert.strictEqual(failure.status, 'error');
   assert.ok(failure.failure, 'failure block should be populated');
+
+  const approvalRun = context.normalizeRunResult({
+    ok: false,
+    structuredResult: {
+      ok: false,
+      finalStatus: 'error',
+      message: 'approval required',
+      approvalRequiredActions: [
+        {
+          actionType: 'ReadFile',
+          path: 'C:/outside.txt',
+          command: '',
+          normalizedTarget: 'C:/outside.txt',
+          riskLevel: 'high',
+          reason: 'Target is outside active workspace',
+          approvalStatus: 'ApprovalRequired'
+        }
+      ],
+      externalAttempts: 1,
+      deniedActions: 1,
+      hostBoundaryPreserved: true
+    }
+  });
+  assert.strictEqual(approvalRun.approvalRequiredCount, 1);
+  assert.strictEqual(approvalRun.externalAttempts, 1);
+  assert.strictEqual(approvalRun.deniedActions, 1);
+  assert.strictEqual(approvalRun.hostBoundaryPreserved, true);
 }
 
 function readStatusRows(grid) {
@@ -340,6 +371,8 @@ function testStatusAndSummaryRendering() {
   const successRows = readStatusRows(context.runStatusGrid);
   assert.ok(successRows.some(([key, value]) => key === 'status' && value === 'success'));
   assert.ok(successRows.some(([key, value]) => key === 'build' && value === 'not started'));
+  assert.ok(successRows.some(([key, value]) => key === 'approval required' && value === '0'));
+  assert.ok(successRows.some(([key, value]) => key === 'host boundary preserved' && value === 'true'));
   assert.ok(successRows.some(([key, value]) => key === 'model used' && value === 'ollama / qwen2.5-coder:7b'));
   assert.ok(!successRows.some(([key]) => key === 'fallback reason'));
 
@@ -354,13 +387,20 @@ function testStatusAndSummaryRendering() {
     fallbackReason: 'MODEL_TIMEOUT',
     fallbackMode: 'indexed_context',
     reasonCode: 'ANALYSIS_FALLBACK_USED',
-    messageText: 'Local model timed out; indexed-context fallback was used.'
+    messageText: 'Local model timed out; indexed-context fallback was used.',
+    approvalRequiredCount: 2,
+    externalAttempts: 2,
+    deniedActions: 2,
+    hostBoundaryPreserved: true
   };
 
   context.renderRunStatus(fallbackRun);
   const fallbackRows = readStatusRows(context.runStatusGrid);
   assert.ok(fallbackRows.some(([key, value]) => key === 'fallback reason' && value === 'MODEL_TIMEOUT'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'fallback mode' && value === 'indexed_context'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'approval required' && value === '2'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'external attempts' && value === '2'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'denied actions' && value === '2'));
 
   context.renderRunSummary(fallbackRun);
   assert.strictEqual(context.resultBadge.textContent, 'fallback-success');

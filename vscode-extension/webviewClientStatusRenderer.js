@@ -29,6 +29,10 @@ const webviewClientStatusRenderer = `function renderRunStatus(run) {
 
         rows.push(['build', normalizeStatusCell(run.buildText, 'not run')]);
         rows.push(['changed files', String(Math.max(0, changedFilesCount))]);
+        rows.push(['approval required', String(Math.max(0, Number.isFinite(run.approvalRequiredCount) ? run.approvalRequiredCount : 0))]);
+        rows.push(['external attempts', String(Math.max(0, Number.isFinite(run.externalAttempts) ? run.externalAttempts : 0))]);
+        rows.push(['denied actions', String(Math.max(0, Number.isFinite(run.deniedActions) ? run.deniedActions : 0))]);
+        rows.push(['host boundary preserved', String(run.hostBoundaryPreserved !== false)]);
         rows.push(['model used', modelUsed]);
         rows.push(['embeddings', embeddingsSummary]);
         rows.push(['duration', normalizeStatusCell(run.duration, 'not available')]);

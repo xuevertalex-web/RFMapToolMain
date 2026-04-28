@@ -178,6 +178,24 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           }));
       }
 
+      function normalizeApprovalRequiredActions(structured) {
+        if (!structured || typeof structured !== 'object' || !Array.isArray(structured.approvalRequiredActions)) {
+          return [];
+        }
+
+        return structured.approvalRequiredActions
+          .filter(item => item && typeof item === 'object')
+          .map(item => ({
+            actionType: normalizeText(item.actionType, 'not available'),
+            path: normalizeOptionalText(item.path),
+            command: normalizeOptionalText(item.command),
+            normalizedTarget: normalizeText(item.normalizedTarget, ''),
+            riskLevel: normalizeText(item.riskLevel, 'not available'),
+            reason: normalizeText(item.reason, 'not available'),
+            approvalStatus: normalizeText(item.approvalStatus, 'not available')
+          }));
+      }
+
       function isTimeoutFallbackReason(fallbackReason) {
         return String(fallbackReason || '').trim().toUpperCase() === 'MODEL_TIMEOUT';
       }
@@ -318,6 +336,16 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         const buildSucceeded = structured ? structured.buildSucceeded : null;
         const buildStarted = structured && typeof structured.buildStarted === 'boolean' ? structured.buildStarted : null;
         const changedFiles = normalizeChangedFilesForRun(structured);
+        const approvalRequiredActions = normalizeApprovalRequiredActions(structured);
+        const externalAttempts = Number.isFinite(structured && structured.externalAttempts)
+          ? Math.max(0, Math.floor(structured.externalAttempts))
+          : approvalRequiredActions.length;
+        const deniedActions = Number.isFinite(structured && structured.deniedActions)
+          ? Math.max(0, Math.floor(structured.deniedActions))
+          : approvalRequiredActions.length;
+        const hostBoundaryPreserved = typeof (structured && structured.hostBoundaryPreserved) === 'boolean'
+          ? structured.hostBoundaryPreserved
+          : true;
         const changedHints = structured && Array.isArray(structured.changedHints) ? structured.changedHints : [];
         const changedRanges = structured && Array.isArray(structured.changedRanges) ? structured.changedRanges : [];
         const changedKinds = structured && Array.isArray(structured.changedKinds) ? structured.changedKinds : [];
@@ -381,6 +409,11 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           buildText,
           changedFiles,
           changedFilesCount: changedFiles.length,
+          approvalRequiredActions,
+          approvalRequiredCount: approvalRequiredActions.length,
+          externalAttempts,
+          deniedActions,
+          hostBoundaryPreserved,
           changedHints,
           changedRanges,
           changedKinds,
