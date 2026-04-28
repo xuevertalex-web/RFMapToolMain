@@ -2062,6 +2062,7 @@ Write the final project overview now.";
                 ApprovalRequiredActions = MapApprovalProposals(approvalRequiredActions),
                 ExternalAttempts = approvalRequiredActions.Count,
                 DeniedActions = tracerDeniedActions,
+                BlockedActions = actionLifecycleEntries.Count(e => e.LifecycleState == ActionLifecycleState.Blocked),
                 HostBoundaryPreserved = true,
                 ActionLifecycle = MapActionLifecycle(actionLifecycleEntries)
             };
@@ -2176,6 +2177,9 @@ Write the final project overview now.";
 
             [JsonPropertyName("deniedActions")]
             public int DeniedActions { get; init; }
+
+            [JsonPropertyName("blockedActions")]
+            public int BlockedActions { get; init; }
 
             [JsonPropertyName("hostBoundaryPreserved")]
             public bool HostBoundaryPreserved { get; init; }

@@ -1119,6 +1119,7 @@ static async Task RunStructuredActionLifecycleReportingRegression()
         }).ToArray(),
         externalAttempts = tracer.GetApprovalRequiredActions().Count,
         deniedActions = tracer.GetDeniedPermissionDecisionCount(),
+        blockedActions = tracer.GetActionLedger().Count(x => x.LifecycleState == ActionLifecycleState.Blocked),
         hostBoundaryPreserved = true,
         actionLifecycle = tracer.GetActionLedger().Select(x => new
         {
@@ -1143,6 +1144,8 @@ static async Task RunStructuredActionLifecycleReportingRegression()
 
     var deniedActions = root.GetProperty("deniedActions").GetInt32();
     AssertTrue(deniedActions >= approvalRequired.GetArrayLength(), "Expected deniedActions to include at least approval-required blocked attempts.");
+    var blockedActions = root.GetProperty("blockedActions").GetInt32();
+    AssertTrue(blockedActions == 0, "Expected blockedActions=0 for approval-required flow without explicit deny.");
 
     AssertTrue(root.GetProperty("hostBoundaryPreserved").GetBoolean(), "Expected hostBoundaryPreserved=true for blocked outside action.");
 

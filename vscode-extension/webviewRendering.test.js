@@ -218,6 +218,7 @@ function testRunNormalizationContracts() {
   assert.strictEqual(success.approvalRequiredCount, 0);
   assert.strictEqual(success.externalAttempts, 0);
   assert.strictEqual(success.deniedActions, 0);
+  assert.strictEqual(success.blockedActions, 0);
   assert.strictEqual(success.hostBoundaryPreserved, true);
   assert.strictEqual(success.buildText, 'not started');
   assert.strictEqual(success.embeddingsSummary, 'not available');
@@ -320,12 +321,14 @@ function testRunNormalizationContracts() {
       ],
       externalAttempts: 1,
       deniedActions: 1,
+      blockedActions: 0,
       hostBoundaryPreserved: true
     }
   });
   assert.strictEqual(approvalRun.approvalRequiredCount, 1);
   assert.strictEqual(approvalRun.externalAttempts, 1);
   assert.strictEqual(approvalRun.deniedActions, 1);
+  assert.strictEqual(approvalRun.blockedActions, 0);
   assert.strictEqual(approvalRun.hostBoundaryPreserved, true);
   assert.strictEqual(approvalRun.actionLifecycleCounts.requested, 0);
   assert.strictEqual(approvalRun.actionLifecycleCounts.approvalRequired, 0);
