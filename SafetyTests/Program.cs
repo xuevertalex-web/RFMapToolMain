@@ -33,6 +33,7 @@ await RunPatchApplyDiagnosticsClassificationRegression();
 await RunExternalActionApprovalProposalRegression();
 await RunActionLifecycleLedgerRegression();
 await RunStructuredActionLifecycleReportingRegression();
+await RunBroadIntentNoToolCallsRequiresActionRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1166,6 +1167,85 @@ static async Task RunStructuredActionLifecycleReportingRegression()
     AssertTrue(hasCorrelationId, "Expected non-empty actionCorrelationId in all lifecycle entries.");
 
     Console.WriteLine("PASS StructuredActionLifecycleReporting_ApprovalRequiredAndExecutedSeparation");
+}
+
+static async Task RunBroadIntentNoToolCallsRequiresActionRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    File.WriteAllText(Path.Combine(workspaceRoot, "Program.cs"), "namespace SampleApp; public static class Entry { public static void Hello() { } }");
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    tracer.StartRun(
+        "Implement a full converter and proceed step by step",
+        "Implement a full converter and proceed step by step",
+        workspaceRoot,
+        runtimeRoot,
+        AgentAccessMode.WorkspaceWrite.ToString(),
+        "LlmRuntimeClient",
+        "qwen2.5-coder:7b-instruct-q4_K_M");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var toolRegistry = new ToolRegistry();
+    var memory = new MemoryStore();
+    var permissionGuard = new PermissionGuard();
+    var safeProcessRunner = new SafeProcessRunner(session, permissionGuard, tracer);
+    var buildVerifier = new BuildVerifier(safeProcessRunner, tracer);
+    var sandboxManager = new SandboxManager(workspaceRoot, runtimeRoot);
+    var embeddingService = new EmbeddingService(disabled: true);
+    var vectorStore = new VectorStore();
+    var fileStateManager = new FileStateManager();
+    var projectIndexer = new ProjectIndexer(workspaceRoot, embeddingService, vectorStore, new AgentConfig(workspaceRoot), fileStateManager);
+    var contextBuilder = new ContextBuilder(workspaceRoot, vectorStore, fileStateManager, new ProjectSymbolDirectory(), tracer);
+    var profile = LlmProfiles.Resolve("ollama", "qwen2.5-coder:7b-instruct-q4_K_M");
+    var policy = LlmProfiles.ResolvePolicy("ollama", "qwen2.5-coder:7b-instruct-q4_K_M");
+    var llmClient = new LlmRuntimeClient(
+        new FakeAdapter("ollama", "qwen2.5-coder:7b-instruct-q4_K_M", "I can help with this task."),
+        profile,
+        policy);
+
+    var agent = new Agent(
+        llmClient,
+        toolRegistry,
+        memory,
+        buildVerifier,
+        sandboxManager,
+        projectIndexer,
+        contextBuilder,
+        fileStateManager,
+        session,
+        workspaceResolution: null);
+
+    var oldOut = Console.Out;
+    var capture = new StringWriter();
+    Console.SetOut(capture);
+    try
+    {
+        _ = await agent.RunTask("Implement a full converter and proceed step by step");
+    }
+    finally
+    {
+        Console.SetOut(oldOut);
+    }
+
+    var structured = ExtractStructuredPayload(capture.ToString());
+    AssertTrue(!structured.GetProperty("ok").GetBoolean(), "Expected broad engineering intent with no actions to be non-success.");
+    var reasonCode = structured.GetProperty("reasonCode").GetString() ?? string.Empty;
+    var finalStatus = structured.GetProperty("finalStatus").GetString() ?? string.Empty;
+    AssertTrue(!string.Equals(reasonCode, "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase), "Broad engineering intent must not end as SUCCESS_NO_TOOL_CALLS.");
+    AssertTrue(!string.Equals(finalStatus, "success", StringComparison.OrdinalIgnoreCase), "Broad engineering intent with no actions must not end as success.");
+    Console.WriteLine("PASS BroadIntentNoToolCalls_RequiresAction");
 }
 
 sealed class FakeNoopTool : ITool

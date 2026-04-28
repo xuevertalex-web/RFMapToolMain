@@ -398,6 +398,21 @@ namespace LocalCursorAgent.Core
                                 continue;
                             }
 
+                            if (!analysisOnlyTask && IsBroadEngineeringIntent(task))
+                            {
+                                _memory.Add("task_status", "needs_action_plan");
+                                return FinalizeRunResult(
+                                    false,
+                                    "The task requires an actionable engineering plan or concrete edits, but no tool/action step was produced.",
+                                    "No actionable steps produced for broad engineering intent",
+                                    "NO_ACTIONABLE_STEPS",
+                                    Array.Empty<string>(),
+                                    Array.Empty<ChangedHint>(),
+                                    Array.Empty<ChangedRange>(),
+                                    Array.Empty<ChangedKind>(),
+                                    false);
+                            }
+
                             _memory.Add("final_response", currentResponse);
                             return FinalizeRunResult(
                                 true,
@@ -651,6 +666,21 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                         }
 
                         _memory.Add("final_response", currentResponse);
+                        if (IsBroadEngineeringIntent(task))
+                        {
+                            _memory.Add("task_status", "needs_action_plan");
+                            return FinalizeRunResult(
+                                false,
+                                "The task requires an actionable engineering plan or concrete edits, but no tool/action step was produced.",
+                                "No actionable steps produced for broad engineering intent",
+                                "NO_ACTIONABLE_STEPS",
+                                Array.Empty<string>(),
+                                Array.Empty<ChangedHint>(),
+                                Array.Empty<ChangedRange>(),
+                                Array.Empty<ChangedKind>(),
+                                false);
+                        }
+
                         return FinalizeRunResult(
                             true,
                             string.IsNullOrWhiteSpace(currentResponse) ? "Agent run completed successfully." : currentResponse,
@@ -2186,6 +2216,23 @@ Write the final project overview now.";
 
             [JsonPropertyName("actionLifecycle")]
             public ActionLifecyclePayload[] ActionLifecycle { get; init; } = Array.Empty<ActionLifecyclePayload>();
+        }
+
+        private static bool IsBroadEngineeringIntent(string task)
+        {
+            var value = (task ?? string.Empty).Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            return value.Contains("implement") ||
+                   value.Contains("build ") ||
+                   value.Contains("create ") ||
+                   value.Contains("converter") ||
+                   value.Contains("поэтап") ||
+                   value.Contains("разбор") ||
+                   value.Contains("приступ");
         }
 
         private static ApprovalRequiredActionPayload[] MapApprovalProposals(IReadOnlyList<ActionApprovalProposal> proposals)
