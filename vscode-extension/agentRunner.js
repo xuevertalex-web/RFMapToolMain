@@ -179,10 +179,18 @@ function composeTaskWithContinuation(task, previousResult) {
   }
 
   const normalized = rawTask.toLowerCase();
+  const asciiNormalized = normalized
+    .replace(/[^\x00-\x7F]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   const isContinueIntent =
     normalized === 'continue' ||
     normalized === 'continue.' ||
-    normalized === 'продолжай' ||
+    normalized === 'next' ||
+    normalized === 'resume' ||
+    asciiNormalized === 'go on' ||
+    asciiNormalized === 'continue' ||
+    normalized === 'продолжай' || // backward-compat for existing mojibake input
     normalized === 'продолжай.' ||
     normalized === 'давай дальше' ||
     normalized === 'дальше';

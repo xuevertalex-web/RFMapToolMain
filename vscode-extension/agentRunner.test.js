@@ -62,7 +62,7 @@ function testFullBufferStructuredResultFallback() {
 }
 
 function testComposeTaskWithContinuation() {
-  const composed = composeTaskWithContinuation('давай дальше', {
+  const composed = composeTaskWithContinuation('continue', {
     continuationHint: 'Provide a step-by-step implementation plan and execute the first concrete edit.',
     nextActionCandidates: ['Draft a 3-step implementation plan.', 'Select target file and symbol.'],
     sessionContinuation: {
