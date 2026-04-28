@@ -1239,7 +1239,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 fallbackMode,
                 payloadFinalStatus,
                 timeline,
-                _contextBuilder.Tracer.GetApprovalRequiredActions());
+                _contextBuilder.Tracer.GetApprovalRequiredActions(),
+                _contextBuilder.Tracer.GetDeniedPermissionDecisionCount());
         }
 
         private string FinalizeStructuredDiagnosticResult(string reasonCode, StructuredDiagnostic diagnostic, IEnumerable<string> changedFiles, IEnumerable<ChangedHint> changedHints, IEnumerable<ChangedRange> changedRanges, IEnumerable<ChangedKind> changedKinds)
@@ -1278,7 +1279,8 @@ next_safe_action: {diagnostic.NextSafeAction}";
                 fallbackMode: null,
                 finalStatus: null,
                 timeline: null,
-                approvalRequiredActions: Array.Empty<ActionApprovalProposal>());
+                approvalRequiredActions: Array.Empty<ActionApprovalProposal>(),
+                tracerDeniedActions: 0);
         }
 
         private static TimelinePayload[] BuildMaxIterationsTimeline(int iterationsUsed, string lastSuccessfulStep, string lastKnownAction)
@@ -1970,7 +1972,8 @@ Write the final project overview now.";
             string? fallbackMode,
             string? finalStatus,
             TimelinePayload[]? timeline,
-            IReadOnlyList<ActionApprovalProposal> approvalRequiredActions)
+            IReadOnlyList<ActionApprovalProposal> approvalRequiredActions,
+            int tracerDeniedActions)
         {
             var normalizedChangedFiles = changedFiles
                 .Where(p => !string.IsNullOrWhiteSpace(p))
@@ -2055,7 +2058,7 @@ Write the final project overview now.";
                 Timeline = timeline ?? failure?.Timeline ?? Array.Empty<TimelinePayload>(),
                 ApprovalRequiredActions = MapApprovalProposals(approvalRequiredActions),
                 ExternalAttempts = approvalRequiredActions.Count,
-                DeniedActions = approvalRequiredActions.Count,
+                DeniedActions = tracerDeniedActions,
                 HostBoundaryPreserved = true
             };
 

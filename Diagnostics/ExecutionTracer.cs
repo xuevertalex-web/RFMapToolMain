@@ -31,6 +31,7 @@ public class ExecutionTracer
     private readonly List<MemoryInfluence> _memoryInfluences = new();
     private readonly List<PatchDecision> _patchDecisions = new();
     private readonly List<ActionApprovalProposal> _approvalRequiredActions = new();
+    private int _deniedPermissionDecisions;
     private readonly List<BuildResult> _buildResults = new();
     private readonly List<MemoryUpdate> _memoryUpdates = new();
     private SessionHeader? _lastSessionHeader;
@@ -94,6 +95,8 @@ public class ExecutionTracer
             SessionId = _lastSessionHeader?.SessionId ?? string.Empty,
             FinalStatus = "running"
         };
+        _approvalRequiredActions.Clear();
+        _deniedPermissionDecisions = 0;
 
         LogActionEvent("RunRequested", "Program", ActionLogLevel.Info, "started", metadata: new Dictionary<string, object?>
         {
@@ -381,6 +384,9 @@ public class ExecutionTracer
 
     public void LogPermissionDecision(AgentSessionContext session, string toolName, ToolAction action, PermissionDecision decision)
     {
+        if (!decision.Allowed)
+            _deniedPermissionDecisions++;
+
         if (decision.RequiresApproval && decision.ApprovalProposal is not null)
         {
             _approvalRequiredActions.Add(decision.ApprovalProposal);
@@ -422,6 +428,7 @@ public class ExecutionTracer
         }
 
         public IReadOnlyList<ActionApprovalProposal> GetApprovalRequiredActions() => _approvalRequiredActions.ToArray();
+        public int GetDeniedPermissionDecisionCount() => _deniedPermissionDecisions;
 
         public void LogDestructiveOperation(DestructiveTraceRecord record)
         {
