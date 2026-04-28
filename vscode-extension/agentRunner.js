@@ -519,6 +519,10 @@ function appendStructuredResultSummary(output, structuredResult) {
   const model = String(structuredResult.model || '').trim();
   const modelText = [modelProvider, model].filter(Boolean).join(' / ');
   const embeddingsStatus = String(structuredResult.embeddingsStatus || structuredResult.EmbeddingsStatus || '').trim();
+  const continuationHint = String(structuredResult.continuationHint || '').trim();
+  const nextActionCandidates = Array.isArray(structuredResult.nextActionCandidates)
+    ? structuredResult.nextActionCandidates.map(item => String(item || '').trim()).filter(Boolean).slice(0, 3)
+    : [];
   const degradedFlags = Array.isArray(structuredResult.degradedFlags)
     ? structuredResult.degradedFlags.map(item => String(item || '').trim()).filter(Boolean)
     : [];
@@ -545,6 +549,12 @@ function appendStructuredResultSummary(output, structuredResult) {
   }
   if (embeddingsStatus) {
     output.appendLine(`EmbeddingsStatus: ${embeddingsStatus}`);
+  }
+  if (continuationHint) {
+    output.appendLine(`ContinuationHint: ${continuationHint}`);
+  }
+  if (nextActionCandidates.length) {
+    output.appendLine(`NextActions: ${nextActionCandidates.join(' | ')}`);
   }
   if (degradedFlags.length) {
     output.appendLine(`Degraded: ${degradedFlags.join(', ')}`);

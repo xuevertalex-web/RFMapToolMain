@@ -7,7 +7,9 @@ const webviewClientSummaryRenderer = `function renderRunSummary(run) {
         const buildFailed = run.buildStarted === true && run.buildSucceeded === false;
         const buildNotStarted = run.buildStarted === false || String(run.buildText || '').trim().toLowerCase() === 'not started';
         resultBadge.className = 'result-badge ' + (badgeStatus === 'error' ? 'error' : (badgeStatus === 'running' || isFallbackSuccess) ? 'running' : 'ok');
-        summary.textContent = run.summary || 'not available';
+        const baseSummary = run.summary || 'not available';
+        const nextActions = Array.isArray(run.nextActionCandidates) ? run.nextActionCandidates.filter(Boolean).slice(0, 3) : [];
+        summary.textContent = nextActions.length ? (baseSummary + '\\nNext actions: ' + nextActions.join(' | ')) : baseSummary;
         summary.className = 'summary-box ' + (
           badgeStatus === 'error'
             ? 'error'
