@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const http = require('http');
 
 let currentAgentProcess = null;
 let stopRequested = false;
@@ -46,20 +47,22 @@ function runAgent(panel, workspaceRoot, task, output, extensionRoot, configuredP
     output.appendLine(`WorkspaceRoot: ${workspaceRoot}`);
     output.appendLine(`ProjectPath: ${projectPath}`);
     output.appendLine(`Command: ${commandLine}`);
-    output.appendLine('--- Agent output start ---');
+    ensureOllamaLazyResume(output, normalizedModel)
+      .then(() => {
+        output.appendLine('--- Agent output start ---');
 
-    const child = spawn('dotnet', args, {
-      cwd,
-      shell: false,
-      windowsHide: true
-    });
-    currentAgentProcess = child;
+        const child = spawn('dotnet', args, {
+          cwd,
+          shell: false,
+          windowsHide: true
+        });
+        currentAgentProcess = child;
 
     const logs = [];
     let stdout = '';
     let stderr = '';
 
-    child.stdout.on('data', chunk => {
+        child.stdout.on('data', chunk => {
       const text = chunk.toString();
       stdout += text;
       logs.push(...text.split(/\r?\n/).filter(Boolean));
@@ -71,9 +74,9 @@ function runAgent(panel, workspaceRoot, task, output, extensionRoot, configuredP
           text
         });
       }
-    });
+        });
 
-    child.stderr.on('data', chunk => {
+        child.stderr.on('data', chunk => {
       const text = chunk.toString();
       stderr += text;
       logs.push(...text.split(/\r?\n/).filter(Boolean));
@@ -85,17 +88,17 @@ function runAgent(panel, workspaceRoot, task, output, extensionRoot, configuredP
           text
         });
       }
-    });
+        });
 
-    child.on('error', err => {
+        child.on('error', err => {
       currentAgentProcess = null;
       stopRequested = false;
       const message = err instanceof Error ? err.message : String(err);
       output.appendLine(`--- Agent output failed: spawn error ---`);
       output.appendLine(message);
       reject(new Error(`Failed to start agent process: ${message}`));
-    });
-    child.on('close', (code, signal) => {
+        });
+        child.on('close', (code, signal) => {
       currentAgentProcess = null;
       output.appendLine(`--- Agent output end ---`);
       output.appendLine(`ExitCode: ${formatExitCode(code)}`);
@@ -150,15 +153,85 @@ function runAgent(panel, workspaceRoot, task, output, extensionRoot, configuredP
       }
 
       stopRequested = false;
-      resolve({
+          resolve({
         text: structuredResult
           ? JSON.stringify(structuredResult, null, 2)
           : `Agent run completed successfully (exit code ${code}).`,
         logs: logs.length > 0 ? logs : [stdout || stderr || 'No output'],
         result: structuredResult
-      });
-    });
+          });
+        });
+      })
+      .catch(reject);
   });
+}
+
+function shouldTryOllamaLazyResume(model) {
+  const autoStart = String(process.env.LOCAL_CURSOR_AGENT_OLLAMA_AUTOSTART || '1').trim().toLowerCase();
+  if (autoStart === '0' || autoStart === 'false') {
+    return false;
+  }
+
+  const value = String(model || '').trim().toLowerCase();
+  if (!value) {
+    return true;
+  }
+
+  return !value.includes('openai') && !value.includes('gemini');
+}
+
+async function ensureOllamaLazyResume(output, selectedModel) {
+  if (!shouldTryOllamaLazyResume(selectedModel)) {
+    return;
+  }
+
+  if (await isOllamaReady()) {
+    return;
+  }
+
+  output.appendLine('Ollama not reachable, trying lazy-resume via `ollama serve`...');
+  try {
+    const child = spawn('ollama', ['serve'], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      shell: false
+    });
+    child.unref();
+  } catch {
+    output.appendLine('Ollama lazy-resume spawn failed; continuing with normal agent run.');
+    return;
+  }
+
+  const ready = await waitForOllamaReady(8000);
+  output.appendLine(ready ? 'Ollama lazy-resume succeeded.' : 'Ollama still unavailable after lazy-resume wait.');
+}
+
+function isOllamaReady() {
+  return new Promise(resolve => {
+    const req = http.get('http://127.0.0.1:11434/api/tags', res => {
+      const ok = typeof res.statusCode === 'number' && res.statusCode >= 200 && res.statusCode < 500;
+      res.resume();
+      resolve(ok);
+    });
+
+    req.setTimeout(700, () => {
+      req.destroy();
+      resolve(false);
+    });
+    req.on('error', () => resolve(false));
+  });
+}
+
+async function waitForOllamaReady(timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await isOllamaReady()) {
+      return true;
+    }
+    await new Promise(resolve => setTimeout(resolve, 400));
+  }
+  return false;
 }
 
 function buildProcessFailureMessage(code, signal, stdout, stderr) {
