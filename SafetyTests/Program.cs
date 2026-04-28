@@ -1042,6 +1042,7 @@ static async Task RunActionLifecycleLedgerRegression()
 
     AssertTrue(outsideDecision.RequiresApproval, "Expected outside action to require approval.");
     AssertTrue(tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.ApprovalRequired), "Expected ApprovalRequired state in ledger.");
+    AssertTrue(!tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.Blocked && x.Target.Contains("outside.txt", StringComparison.OrdinalIgnoreCase)), "Approval-required outside action must not be classified as Blocked.");
     AssertTrue(!tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.Executed && x.Target.Contains("outside.txt", StringComparison.OrdinalIgnoreCase)), "Outside approval-required action must not be executed.");
 
     var guarded = new GuardedTool(new FakeNoopTool(), guard, session, _ => new ToolAction
@@ -1148,6 +1149,7 @@ static async Task RunStructuredActionLifecycleReportingRegression()
     var blockedActions = root.GetProperty("blockedActions").GetInt32();
     AssertTrue(blockedActions == 0, "Expected blockedActions=0 for approval-required flow without explicit deny.");
     AssertTrue(deniedActions == blockedActions, "Expected deniedActions and blockedActions to stay aligned for pure approval-required flow.");
+    AssertTrue(externalAttempts > deniedActions, "Expected approval-required attempts not to be merged into deniedActions.");
 
     AssertTrue(root.GetProperty("hostBoundaryPreserved").GetBoolean(), "Expected hostBoundaryPreserved=true for blocked outside action.");
 
