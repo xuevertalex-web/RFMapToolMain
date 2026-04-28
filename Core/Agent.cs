@@ -2074,6 +2074,7 @@ Write the final project overview now.";
                 FinalStatus = finalStatus ?? string.Empty,
                 BuildSucceeded = buildSucceeded,
                 BuildStarted = buildStarted,
+                PlanRequired = string.Equals((failure?.ReasonCode ?? reasonCode) ?? string.Empty, "NO_ACTIONABLE_STEPS", StringComparison.OrdinalIgnoreCase),
                 RootCauseCode = failure?.RootCauseCode ?? (!ok ? reasonCode : string.Empty),
                 FailedStage = failure?.FailedStage ?? string.Empty,
                 LastSuccessfulStep = failure?.LastSuccessfulStep ?? string.Empty,
@@ -2153,6 +2154,9 @@ Write the final project overview now.";
 
             [JsonPropertyName("buildStarted")]
             public bool BuildStarted { get; init; }
+
+            [JsonPropertyName("planRequired")]
+            public bool PlanRequired { get; init; }
 
             [JsonPropertyName("rootCauseCode")]
             public string RootCauseCode { get; init; } = string.Empty;
