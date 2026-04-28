@@ -2230,6 +2230,7 @@ Write the final project overview now.";
             return entries.Select(e => new ActionLifecyclePayload
             {
                 Sequence = e.Sequence,
+                ActionCorrelationId = e.ActionCorrelationId,
                 ActionType = e.ActionType,
                 Target = e.Target,
                 Command = e.Command,
@@ -2248,6 +2249,8 @@ Write the final project overview now.";
             public int Sequence { get; init; }
             [JsonPropertyName("actionType")]
             public string ActionType { get; init; } = string.Empty;
+            [JsonPropertyName("actionCorrelationId")]
+            public string ActionCorrelationId { get; init; } = string.Empty;
             [JsonPropertyName("target")]
             public string Target { get; init; } = string.Empty;
             [JsonPropertyName("command")]

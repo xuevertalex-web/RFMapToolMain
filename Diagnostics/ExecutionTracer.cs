@@ -32,6 +32,7 @@ public class ExecutionTracer
     private readonly List<PatchDecision> _patchDecisions = new();
     private readonly List<ActionApprovalProposal> _approvalRequiredActions = new();
     private readonly List<ActionLifecycleEntry> _actionLedger = new();
+    private readonly Dictionary<string, string> _pendingActionCorrelations = new(StringComparer.Ordinal);
     private int _deniedPermissionDecisions;
     private readonly List<BuildResult> _buildResults = new();
     private readonly List<MemoryUpdate> _memoryUpdates = new();
@@ -98,6 +99,7 @@ public class ExecutionTracer
         };
         _approvalRequiredActions.Clear();
         _actionLedger.Clear();
+        _pendingActionCorrelations.Clear();
         _deniedPermissionDecisions = 0;
 
         LogActionEvent("RunRequested", "Program", ActionLogLevel.Info, "started", metadata: new Dictionary<string, object?>
@@ -447,9 +449,12 @@ public class ExecutionTracer
     private void AppendActionLifecycle(string toolName, ToolAction action, PermissionDecision? decision, ActionLifecycleState state, string reasonCode, string reason)
     {
         var normalizedTarget = decision?.NormalizedTargetPath ?? action.TargetPath ?? action.SourcePath ?? action.DestinationPath ?? action.WorkingDirectory ?? string.Empty;
+        var actionSignature = BuildActionSignature(toolName, action, normalizedTarget);
+        var correlationId = ResolveActionCorrelationId(actionSignature, state);
         _actionLedger.Add(new ActionLifecycleEntry
         {
             Sequence = _actionLedger.Count + 1,
+            ActionCorrelationId = correlationId,
             ToolName = toolName ?? string.Empty,
             ActionType = action.Kind.ToString(),
             Target = action.TargetPath ?? action.SourcePath ?? action.DestinationPath ?? action.WorkingDirectory ?? string.Empty,
@@ -462,6 +467,37 @@ public class ExecutionTracer
             IsInsideSandbox = decision?.Allowed == true,
             TimestampUtc = DateTime.UtcNow
         });
+    }
+
+    private string ResolveActionCorrelationId(string actionSignature, ActionLifecycleState state)
+    {
+        if (state == ActionLifecycleState.Requested)
+        {
+            var created = $"act-{Guid.NewGuid():N}";
+            _pendingActionCorrelations[actionSignature] = created;
+            return created;
+        }
+
+        if (_pendingActionCorrelations.TryGetValue(actionSignature, out var existing))
+        {
+            if (state is ActionLifecycleState.Executed or ActionLifecycleState.Failed or ActionLifecycleState.Blocked)
+            {
+                _pendingActionCorrelations.Remove(actionSignature);
+            }
+
+            return existing;
+        }
+
+        return $"act-{Guid.NewGuid():N}";
+    }
+
+    private static string BuildActionSignature(string toolName, ToolAction action, string normalizedTarget)
+    {
+        return string.Concat(
+            toolName ?? string.Empty, "|",
+            action.Kind.ToString(), "|",
+            normalizedTarget ?? string.Empty, "|",
+            action.Payload ?? string.Empty);
     }
 
         public void LogDestructiveOperation(DestructiveTraceRecord record)
@@ -1520,6 +1556,7 @@ public enum ActionLifecycleState
 public sealed class ActionLifecycleEntry
 {
     public int Sequence { get; init; }
+    public string ActionCorrelationId { get; init; } = string.Empty;
     public string ToolName { get; init; } = string.Empty;
     public string ActionType { get; init; } = string.Empty;
     public string Target { get; init; } = string.Empty;

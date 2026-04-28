@@ -339,11 +339,11 @@ function testRunNormalizationContracts() {
       ok: true,
       finalStatus: 'success',
       actionLifecycle: [
-        { actionType: 'ReadFile', lifecycleState: 'Requested' },
-        { actionType: 'ReadFile', lifecycleState: 'ApprovalRequired' },
-        { actionType: 'ReadFile', lifecycleState: 'Blocked' },
-        { actionType: 'WriteFile', lifecycleState: 'Executed' },
-        { actionType: 'Build', lifecycleState: 'Failed' }
+        { actionType: 'ReadFile', lifecycleState: 'Requested', actionCorrelationId: 'act-1' },
+        { actionType: 'ReadFile', lifecycleState: 'ApprovalRequired', actionCorrelationId: 'act-1' },
+        { actionType: 'ReadFile', lifecycleState: 'Blocked', actionCorrelationId: 'act-1' },
+        { actionType: 'WriteFile', lifecycleState: 'Executed', actionCorrelationId: 'act-2' },
+        { actionType: 'Build', lifecycleState: 'Failed', actionCorrelationId: 'act-3' }
       ]
     }
   });
@@ -352,6 +352,7 @@ function testRunNormalizationContracts() {
   assert.strictEqual(lifecycleRun.actionLifecycleCounts.blocked, 1);
   assert.strictEqual(lifecycleRun.actionLifecycleCounts.executed, 1);
   assert.strictEqual(lifecycleRun.actionLifecycleCounts.failed, 1);
+  assert.strictEqual(lifecycleRun.actionLifecycle[0].actionCorrelationId, 'act-1');
 }
 
 function readStatusRows(grid) {

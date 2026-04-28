@@ -204,6 +204,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         return structured.actionLifecycle
           .filter(item => item && typeof item === 'object')
           .map(item => ({
+            actionCorrelationId: normalizeOptionalText(item.actionCorrelationId),
             actionType: normalizeText(item.actionType, 'not available'),
             lifecycleState: normalizeText(item.lifecycleState, 'not available'),
             reasonCode: normalizeOptionalText(item.reasonCode),

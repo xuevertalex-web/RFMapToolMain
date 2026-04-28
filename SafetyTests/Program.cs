@@ -1123,6 +1123,7 @@ static async Task RunStructuredActionLifecycleReportingRegression()
         actionLifecycle = tracer.GetActionLedger().Select(x => new
         {
             x.Sequence,
+            x.ActionCorrelationId,
             x.ActionType,
             x.Target,
             x.NormalizedTarget,
@@ -1155,6 +1156,11 @@ static async Task RunStructuredActionLifecycleReportingRegression()
         return normalizedTarget.Contains("outside.txt", StringComparison.OrdinalIgnoreCase) && string.Equals(state, "Executed", StringComparison.Ordinal);
     });
     AssertTrue(!hasOutsideExecuted, "Outside approval-required action must not be reported as executed.");
+
+    var hasCorrelationId = lifecycle.EnumerateArray().All(x =>
+        (x.TryGetProperty("actionCorrelationId", out var id) || x.TryGetProperty("ActionCorrelationId", out id)) &&
+        !string.IsNullOrWhiteSpace(id.GetString()));
+    AssertTrue(hasCorrelationId, "Expected non-empty actionCorrelationId in all lifecycle entries.");
 
     Console.WriteLine("PASS StructuredActionLifecycleReporting_ApprovalRequiredAndExecutedSeparation");
 }
