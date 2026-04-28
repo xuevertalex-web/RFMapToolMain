@@ -324,7 +324,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         return events;
       }
 
-      function buildDerivedSummary(structured, status, reasonCode, fallbackReason, fallbackMode, modelUsed, duration, buildText, embeddingsSummary, embeddingsWarning, planRequired) {
+      function buildDerivedSummary(structured, status, reasonCode, fallbackReason, fallbackMode, modelUsed, duration, buildText, embeddingsSummary, embeddingsWarning, planRequired, nextActionCandidates) {
         const summaryText = fallbackReason ? '' : normalizeOptionalText(structured && structured.summaryText);
         const summary = fallbackReason ? '' : normalizeOptionalText(structured && structured.summary);
         const details = [];
@@ -338,6 +338,9 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         details.push('Build: ' + (buildText || 'not run'));
         if (embeddingsWarning) details.push('Embeddings: ' + embeddingsSummary);
         if (planRequired) details.push('Next step required: provide an actionable step-by-step plan or execute the first concrete edit.');
+        if (Array.isArray(nextActionCandidates) && nextActionCandidates.length) {
+          details.push('Next actions: ' + nextActionCandidates.join(' | '));
+        }
         return [summaryText, summary, details.join('; ')].filter(Boolean).join('\\n');
       }
 
@@ -435,7 +438,8 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           buildText,
           embeddingsSummary.text,
           embeddingsSummary.isWarning,
-          planRequired
+          planRequired,
+          nextActionCandidates
         );
 
         return {
