@@ -46,6 +46,16 @@ public sealed class PatchSafetyGate
             }
         }
 
+        if (!string.IsNullOrWhiteSpace(patchText))
+        {
+            var previewReason = ClassifyPatchText(patchText);
+            if (!string.Equals(previewReason, PermissionReasonCodes.Allowed, StringComparison.Ordinal))
+            {
+                Trace("PatchPreviewRejected", resolvedTarget, null, false, false, false, false, false, previewReason, 2);
+                return Reject(previewReason, "Patch text failed validation.", resolvedTarget);
+            }
+        }
+
         var targetExists = File.Exists(resolvedTarget) || Directory.Exists(resolvedTarget);
         if (!targetExists)
         {
@@ -173,7 +183,8 @@ public sealed class PatchSafetyGate
         }
         catch (Exception ex)
         {
-            Trace("PatchApplyFailed", preview.TargetPath, preview.SnapshotHashBeforeApply, true, false, true, false, false, PermissionReasonCodes.PatchApplyFailed, 2);
+            var reasonCode = ClassifyApplyException(ex);
+            Trace("PatchApplyFailed", preview.TargetPath, preview.SnapshotHashBeforeApply, true, false, true, false, false, reasonCode, 2);
             var rollbackSucceeded = false;
             if (rollbackAction != null)
             {
@@ -196,11 +207,49 @@ public sealed class PatchSafetyGate
                 ApplyFailed = true,
                 RollbackSucceeded = rollbackSucceeded,
                 RollbackFailed = !rollbackSucceeded,
-                ReasonCode = rollbackSucceeded ? PermissionReasonCodes.PatchApplyFailed : PermissionReasonCodes.PatchRollbackFailed,
+                ReasonCode = rollbackSucceeded ? reasonCode : PermissionReasonCodes.PatchRollbackFailed,
                 Message = ex.Message,
                 TargetPath = preview.TargetPath
             };
         }
+    }
+
+    private static string ClassifyPatchText(string patchText)
+    {
+        var text = patchText.Trim();
+        if (text.Length == 0)
+            return PermissionReasonCodes.PatchInvalidFormat;
+
+        var hasBegin = text.Contains("*** Begin Patch", StringComparison.Ordinal);
+        var hasEnd = text.Contains("*** End Patch", StringComparison.Ordinal);
+        if (hasBegin && !hasEnd)
+            return PermissionReasonCodes.PatchUnexpectedEndOfPatch;
+        if (hasEnd && !hasBegin)
+            return PermissionReasonCodes.PatchInvalidFormat;
+
+        return PermissionReasonCodes.Allowed;
+    }
+
+    private static string ClassifyApplyException(Exception ex)
+    {
+        var msg = ex.Message ?? string.Empty;
+        if (msg.IndexOf("context", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            msg.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0)
+            return PermissionReasonCodes.PatchContextNotFound;
+        if (msg.IndexOf("ambiguous", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            msg.IndexOf("multiple matches", StringComparison.OrdinalIgnoreCase) >= 0)
+            return PermissionReasonCodes.PatchAmbiguousMatch;
+        if (msg.IndexOf("hunk", StringComparison.OrdinalIgnoreCase) >= 0 &&
+            (msg.IndexOf("invalid", StringComparison.OrdinalIgnoreCase) >= 0 || msg.IndexOf("failed", StringComparison.OrdinalIgnoreCase) >= 0))
+            return PermissionReasonCodes.PatchInvalidHunk;
+        if (msg.IndexOf("unexpected end", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            msg.IndexOf("eof", StringComparison.OrdinalIgnoreCase) >= 0)
+            return PermissionReasonCodes.PatchUnexpectedEndOfPatch;
+        if (msg.IndexOf("format", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            msg.IndexOf("parse", StringComparison.OrdinalIgnoreCase) >= 0)
+            return PermissionReasonCodes.PatchInvalidFormat;
+
+        return PermissionReasonCodes.PatchApplyFailed;
     }
 
     private PatchPreviewResult Reject(string reasonCode, string message, string targetPath, string hash = "")

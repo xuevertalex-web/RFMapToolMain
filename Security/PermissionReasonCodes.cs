@@ -32,6 +32,11 @@ public static class PermissionReasonCodes
     public const string PatchAnchorNotFound = "PATCH_ANCHOR_NOT_FOUND";
     public const string PatchFileChangedSinceRead = "PATCH_FILE_CHANGED_SINCE_READ";
     public const string PatchApplyFailed = "PATCH_APPLY_FAILED";
+    public const string PatchInvalidFormat = "PATCH_INVALID_FORMAT";
+    public const string PatchContextNotFound = "PATCH_CONTEXT_NOT_FOUND";
+    public const string PatchAmbiguousMatch = "PATCH_AMBIGUOUS_MATCH";
+    public const string PatchInvalidHunk = "PATCH_INVALID_HUNK";
+    public const string PatchUnexpectedEndOfPatch = "PATCH_UNEXPECTED_END_OF_PATCH";
     public const string PatchRollbackFailed = "PATCH_ROLLBACK_FAILED";
     public const string BackupCaptureFailed = "BACKUP_CAPTURE_FAILED";
     public const string IntentConfirmed = "INTENT_CONFIRMED";

@@ -29,6 +29,7 @@ await RunOllamaQwenInstructTerseAnalysis_NoFallbackRegression();
 await RunOllamaQwenInstructTerseNoKeywordAnalysis_NoFallbackRegression();
 await RunRuntimeProviderSelection_OpenAiGeminiRegression();
 await RunRuntimeNonOllamaClassificationRegression();
+await RunPatchApplyDiagnosticsClassificationRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -905,6 +906,62 @@ static async Task RunOllamaQwenInstructTerseNoKeywordAnalysis_NoFallbackRegressi
     AssertNotContains(stages, "AnalysisFallbackCompleted");
 
     Console.WriteLine("PASS OllamaQwenInstructTerseNoKeywordAnalysis_NoFallback");
+}
+
+static async Task RunPatchApplyDiagnosticsClassificationRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+
+    var targetPath = Path.Combine(workspaceRoot, "target.txt");
+    await File.WriteAllTextAsync(targetPath, "line-1\nline-2\n");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var gate = new PatchSafetyGate(session, new PermissionGuard());
+
+    var invalidFormatPreview = gate.Preview(targetPath, targetPath, "*** Begin Patch\n*** Update File: target.txt\n+line-3");
+    AssertTrue(invalidFormatPreview.PreviewRejected, "Expected malformed patch preview to be rejected.");
+    AssertTrue(invalidFormatPreview.ReasonCode == PermissionReasonCodes.PatchUnexpectedEndOfPatch, "Expected PATCH_UNEXPECTED_END_OF_PATCH reason.");
+
+    var preview = gate.Preview(targetPath, targetPath, "*** Begin Patch\n*** Update File: target.txt\n*** End Patch");
+    AssertTrue(!preview.PreviewRejected, "Expected baseline preview acceptance for apply-classification scenarios.");
+
+    var contextResult = await gate.ApplyAsync(
+        preview,
+        () => throw new InvalidOperationException("Patch context not found at target file."),
+        () => Task.CompletedTask);
+    AssertTrue(contextResult.ApplyFailed, "Expected apply failure for context-not-found scenario.");
+    AssertTrue(contextResult.ReasonCode == PermissionReasonCodes.PatchContextNotFound, "Expected PATCH_CONTEXT_NOT_FOUND reason.");
+
+    var ambiguousResult = await gate.ApplyAsync(
+        preview,
+        () => throw new InvalidOperationException("Ambiguous patch target: multiple matches found."),
+        () => Task.CompletedTask);
+    AssertTrue(ambiguousResult.ApplyFailed, "Expected apply failure for ambiguous-match scenario.");
+    AssertTrue(ambiguousResult.ReasonCode == PermissionReasonCodes.PatchAmbiguousMatch, "Expected PATCH_AMBIGUOUS_MATCH reason.");
+
+    var outsideWorkspacePath = Path.Combine(tempRoot, "outside.txt");
+    await File.WriteAllTextAsync(outsideWorkspacePath, "outside");
+    var outsidePreview = gate.Preview(outsideWorkspacePath, outsideWorkspacePath, "*** Begin Patch\n*** Update File: outside.txt\n*** End Patch");
+    AssertTrue(outsidePreview.PreviewRejected, "Expected outside-workspace preview rejection.");
+    AssertTrue(
+        outsidePreview.ReasonCode != PermissionReasonCodes.Allowed &&
+        (outsidePreview.ReasonCode == PermissionReasonCodes.PathOutsideWorkspace ||
+         outsidePreview.ReasonCode == PermissionReasonCodes.AccessDeniedOutsideWorkspace),
+        "Expected outside-workspace guard reason.");
+
+    Console.WriteLine("PASS PatchApplyDiagnostics_ClassificationAndGuarding");
 }
 
 sealed class FakeTimeoutLlmClient : ILLMClient
