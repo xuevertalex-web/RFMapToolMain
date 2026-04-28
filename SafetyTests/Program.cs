@@ -32,6 +32,7 @@ await RunRuntimeNonOllamaClassificationRegression();
 await RunPatchApplyDiagnosticsClassificationRegression();
 await RunExternalActionApprovalProposalRegression();
 await RunActionLifecycleLedgerRegression();
+await RunStructuredActionLifecycleReportingRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1069,6 +1070,93 @@ static async Task RunActionLifecycleLedgerRegression()
     AssertTrue(states.Contains("ApprovalRequired", StringComparer.Ordinal), "Expected ApprovalRequired state in actionLifecycle payload.");
     AssertTrue(states.Contains("Executed", StringComparer.Ordinal), "Expected Executed state in actionLifecycle payload.");
     Console.WriteLine("PASS ActionLifecycleLedger_RequestedBlockedExecuted");
+}
+
+static async Task RunStructuredActionLifecycleReportingRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "a.txt"), "ok");
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    tracer.StartRun("ledger-structured", "ledger-structured", workspaceRoot, runtimeRoot, AgentAccessMode.WorkspaceWrite.ToString(), "test", "test");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var guard = new PermissionGuard();
+    var outsideAction = new ToolAction { Kind = ToolActionKind.ReadFile, TargetPath = Path.Combine(tempRoot, "outside.txt") };
+    var outsideDecision = guard.Evaluate(session, outsideAction);
+    tracer.LogPermissionDecision(session, "file", outsideAction, outsideDecision);
+
+    var guarded = new GuardedTool(new FakeNoopTool(), guard, session, _ => new ToolAction
+    {
+        Kind = ToolActionKind.ReadFile,
+        TargetPath = Path.Combine(workspaceRoot, "a.txt")
+    }, tracer);
+    _ = await guarded.Execute("read:a.txt");
+
+    var summaryJson = JsonSerializer.Serialize(new
+    {
+        approvalRequiredActions = tracer.GetApprovalRequiredActions().Select(x => new
+        {
+            x.ActionType,
+            x.Command,
+            x.Path,
+            x.NormalizedTarget,
+            x.RiskLevel,
+            x.Reason,
+            ApprovalStatus = x.ApprovalStatus.ToString()
+        }).ToArray(),
+        externalAttempts = tracer.GetApprovalRequiredActions().Count,
+        deniedActions = tracer.GetDeniedPermissionDecisionCount(),
+        hostBoundaryPreserved = true,
+        actionLifecycle = tracer.GetActionLedger().Select(x => new
+        {
+            x.Sequence,
+            x.ActionType,
+            x.Target,
+            x.NormalizedTarget,
+            LifecycleState = x.LifecycleState.ToString(),
+            x.ReasonCode,
+            x.ApprovalStatus
+        }).ToArray()
+    });
+    using var doc = JsonDocument.Parse(summaryJson);
+    var root = doc.RootElement;
+
+    var approvalRequired = root.GetProperty("approvalRequiredActions");
+    AssertTrue(approvalRequired.ValueKind == JsonValueKind.Array && approvalRequired.GetArrayLength() == 1, "Expected single approval-required action.");
+
+    var externalAttempts = root.GetProperty("externalAttempts").GetInt32();
+    AssertTrue(externalAttempts == 1, "Expected externalAttempts to equal approval-required attempts.");
+
+    var deniedActions = root.GetProperty("deniedActions").GetInt32();
+    AssertTrue(deniedActions >= approvalRequired.GetArrayLength(), "Expected deniedActions to include at least approval-required blocked attempts.");
+
+    AssertTrue(root.GetProperty("hostBoundaryPreserved").GetBoolean(), "Expected hostBoundaryPreserved=true for blocked outside action.");
+
+    var lifecycle = root.GetProperty("actionLifecycle");
+    AssertTrue(lifecycle.ValueKind == JsonValueKind.Array && lifecycle.GetArrayLength() >= 2, "Expected non-empty actionLifecycle.");
+
+    var hasOutsideExecuted = lifecycle.EnumerateArray().Any(x =>
+    {
+        var normalizedTarget = x.TryGetProperty("normalizedTarget", out var n) ? n.GetString() ?? string.Empty : string.Empty;
+        var state = x.TryGetProperty("lifecycleState", out var s) ? s.GetString() ?? string.Empty : string.Empty;
+        return normalizedTarget.Contains("outside.txt", StringComparison.OrdinalIgnoreCase) && string.Equals(state, "Executed", StringComparison.Ordinal);
+    });
+    AssertTrue(!hasOutsideExecuted, "Outside approval-required action must not be reported as executed.");
+
+    Console.WriteLine("PASS StructuredActionLifecycleReporting_ApprovalRequiredAndExecutedSeparation");
 }
 
 sealed class FakeNoopTool : ITool
