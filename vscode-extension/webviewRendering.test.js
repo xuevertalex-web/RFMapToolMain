@@ -391,7 +391,29 @@ function testRunNormalizationContracts() {
   assert.strictEqual(lifecycleRun.actionLifecycleCounts.executed, 1);
   assert.strictEqual(lifecycleRun.actionLifecycleCounts.failed, 1);
   assert.strictEqual(lifecycleRun.deniedActions, 1);
+  assert.strictEqual(lifecycleRun.blockedActions, 1);
   assert.strictEqual(lifecycleRun.actionLifecycle[0].actionCorrelationId, 'act-1');
+
+  const approvalShapeRun = context.normalizeRunResult({
+    ok: false,
+    structuredResult: {
+      ok: false,
+      finalStatus: 'error',
+      approvalRequiredActions: [
+        {
+          actionType: 'ReadFile',
+          path: 'C:/outside.txt',
+          normalizedTarget: 'C:/outside.txt',
+          riskLevel: 'high',
+          reason: 'Target is outside active workspace',
+          approvalStatus: 'ApprovalRequired',
+          hiddenThought: 'must not leak'
+        }
+      ]
+    }
+  });
+  assert.strictEqual(approvalShapeRun.approvalRequiredActions.length, 1);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(approvalShapeRun.approvalRequiredActions[0], 'hiddenThought'), false);
 }
 
 function readStatusRows(grid) {
