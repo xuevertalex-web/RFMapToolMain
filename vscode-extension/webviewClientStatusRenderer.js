@@ -33,6 +33,11 @@ const webviewClientStatusRenderer = `function renderRunStatus(run) {
         rows.push(['external attempts', String(Math.max(0, Number.isFinite(run.externalAttempts) ? run.externalAttempts : 0))]);
         rows.push(['denied actions', String(Math.max(0, Number.isFinite(run.deniedActions) ? run.deniedActions : 0))]);
         rows.push(['host boundary preserved', String(run.hostBoundaryPreserved !== false)]);
+        rows.push(['lifecycle requested', String(Math.max(0, Number(run.actionLifecycleCounts && run.actionLifecycleCounts.requested) || 0))]);
+        rows.push(['lifecycle approval_required', String(Math.max(0, Number(run.actionLifecycleCounts && run.actionLifecycleCounts.approvalRequired) || 0))]);
+        rows.push(['lifecycle blocked', String(Math.max(0, Number(run.actionLifecycleCounts && run.actionLifecycleCounts.blocked) || 0))]);
+        rows.push(['lifecycle executed', String(Math.max(0, Number(run.actionLifecycleCounts && run.actionLifecycleCounts.executed) || 0))]);
+        rows.push(['lifecycle failed', String(Math.max(0, Number(run.actionLifecycleCounts && run.actionLifecycleCounts.failed) || 0))]);
         rows.push(['model used', modelUsed]);
         rows.push(['embeddings', embeddingsSummary]);
         rows.push(['duration', normalizeStatusCell(run.duration, 'not available')]);

@@ -327,6 +327,31 @@ function testRunNormalizationContracts() {
   assert.strictEqual(approvalRun.externalAttempts, 1);
   assert.strictEqual(approvalRun.deniedActions, 1);
   assert.strictEqual(approvalRun.hostBoundaryPreserved, true);
+  assert.strictEqual(approvalRun.actionLifecycleCounts.requested, 0);
+  assert.strictEqual(approvalRun.actionLifecycleCounts.approvalRequired, 0);
+  assert.strictEqual(approvalRun.actionLifecycleCounts.blocked, 0);
+  assert.strictEqual(approvalRun.actionLifecycleCounts.executed, 0);
+  assert.strictEqual(approvalRun.actionLifecycleCounts.failed, 0);
+
+  const lifecycleRun = context.normalizeRunResult({
+    ok: true,
+    structuredResult: {
+      ok: true,
+      finalStatus: 'success',
+      actionLifecycle: [
+        { actionType: 'ReadFile', lifecycleState: 'Requested' },
+        { actionType: 'ReadFile', lifecycleState: 'ApprovalRequired' },
+        { actionType: 'ReadFile', lifecycleState: 'Blocked' },
+        { actionType: 'WriteFile', lifecycleState: 'Executed' },
+        { actionType: 'Build', lifecycleState: 'Failed' }
+      ]
+    }
+  });
+  assert.strictEqual(lifecycleRun.actionLifecycleCounts.requested, 1);
+  assert.strictEqual(lifecycleRun.actionLifecycleCounts.approvalRequired, 1);
+  assert.strictEqual(lifecycleRun.actionLifecycleCounts.blocked, 1);
+  assert.strictEqual(lifecycleRun.actionLifecycleCounts.executed, 1);
+  assert.strictEqual(lifecycleRun.actionLifecycleCounts.failed, 1);
 }
 
 function readStatusRows(grid) {
@@ -373,6 +398,7 @@ function testStatusAndSummaryRendering() {
   assert.ok(successRows.some(([key, value]) => key === 'build' && value === 'not started'));
   assert.ok(successRows.some(([key, value]) => key === 'approval required' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'host boundary preserved' && value === 'true'));
+  assert.ok(successRows.some(([key, value]) => key === 'lifecycle executed' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'model used' && value === 'ollama / qwen2.5-coder:7b'));
   assert.ok(!successRows.some(([key]) => key === 'fallback reason'));
 
@@ -391,7 +417,14 @@ function testStatusAndSummaryRendering() {
     approvalRequiredCount: 2,
     externalAttempts: 2,
     deniedActions: 2,
-    hostBoundaryPreserved: true
+    hostBoundaryPreserved: true,
+    actionLifecycleCounts: {
+      requested: 3,
+      approvalRequired: 2,
+      blocked: 1,
+      executed: 1,
+      failed: 0
+    }
   };
 
   context.renderRunStatus(fallbackRun);
@@ -401,6 +434,9 @@ function testStatusAndSummaryRendering() {
   assert.ok(fallbackRows.some(([key, value]) => key === 'approval required' && value === '2'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'external attempts' && value === '2'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'denied actions' && value === '2'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'lifecycle requested' && value === '3'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'lifecycle approval_required' && value === '2'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'lifecycle blocked' && value === '1'));
 
   context.renderRunSummary(fallbackRun);
   assert.strictEqual(context.resultBadge.textContent, 'fallback-success');
