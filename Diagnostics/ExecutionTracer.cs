@@ -30,6 +30,7 @@ public class ExecutionTracer
     private readonly List<ScoringBreakdown> _scoringBreakdowns = new();
     private readonly List<MemoryInfluence> _memoryInfluences = new();
     private readonly List<PatchDecision> _patchDecisions = new();
+    private readonly List<ActionApprovalProposal> _approvalRequiredActions = new();
     private readonly List<BuildResult> _buildResults = new();
     private readonly List<MemoryUpdate> _memoryUpdates = new();
     private SessionHeader? _lastSessionHeader;
@@ -378,10 +379,15 @@ public class ExecutionTracer
             });
         }
 
-        public void LogPermissionDecision(AgentSessionContext session, string toolName, ToolAction action, PermissionDecision decision)
+    public void LogPermissionDecision(AgentSessionContext session, string toolName, ToolAction action, PermissionDecision decision)
+    {
+        if (decision.RequiresApproval && decision.ApprovalProposal is not null)
         {
-            LogEvent("PermissionDecision", "Tool permission evaluated", new Dictionary<string, object>
-            {
+            _approvalRequiredActions.Add(decision.ApprovalProposal);
+        }
+
+        LogEvent("PermissionDecision", "Tool permission evaluated", new Dictionary<string, object>
+        {
                 { "SessionId", session.SessionId },
                 { "ToolName", toolName },
                 { "ActionKind", action.Kind.ToString() },
@@ -395,9 +401,27 @@ public class ExecutionTracer
                 { "Message", decision.Message },
                 { "NormalizedTargetPath", decision.NormalizedTargetPath ?? string.Empty },
                 { "NormalizedWorkspaceRoot", decision.NormalizedWorkspaceRoot ?? string.Empty },
+                { "RequiresApproval", decision.RequiresApproval },
+                { "ApprovalStatus", decision.ApprovalStatus.ToString() },
+                { "ApprovalProposal", decision.ApprovalProposal is null ? string.Empty : JsonSerializer.Serialize(new Dictionary<string, string>
+                    {
+                        { "actionType", decision.ApprovalProposal.ActionType },
+                        { "command", decision.ApprovalProposal.Command ?? string.Empty },
+                        { "path", decision.ApprovalProposal.Path ?? string.Empty },
+                        { "normalizedTarget", decision.ApprovalProposal.NormalizedTarget ?? string.Empty },
+                        { "sandboxRoot", decision.ApprovalProposal.SandboxRoot },
+                        { "projectRoot", decision.ApprovalProposal.ProjectRoot },
+                        { "worktreeRoot", decision.ApprovalProposal.WorktreeRoot },
+                        { "riskLevel", decision.ApprovalProposal.RiskLevel },
+                        { "reason", decision.ApprovalProposal.Reason },
+                        { "approvalStatus", decision.ApprovalProposal.ApprovalStatus.ToString() }
+                    })
+                },
                 { "AccessMode", session.AccessMode.ToString() }
             });
         }
+
+        public IReadOnlyList<ActionApprovalProposal> GetApprovalRequiredActions() => _approvalRequiredActions.ToArray();
 
         public void LogDestructiveOperation(DestructiveTraceRecord record)
         {

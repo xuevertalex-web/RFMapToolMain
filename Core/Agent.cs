@@ -1238,7 +1238,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 fallbackReason,
                 fallbackMode,
                 payloadFinalStatus,
-                timeline);
+                timeline,
+                _contextBuilder.Tracer.GetApprovalRequiredActions());
         }
 
         private string FinalizeStructuredDiagnosticResult(string reasonCode, StructuredDiagnostic diagnostic, IEnumerable<string> changedFiles, IEnumerable<ChangedHint> changedHints, IEnumerable<ChangedRange> changedRanges, IEnumerable<ChangedKind> changedKinds)
@@ -1276,7 +1277,8 @@ next_safe_action: {diagnostic.NextSafeAction}";
                 fallbackReason: null,
                 fallbackMode: null,
                 finalStatus: null,
-                timeline: null);
+                timeline: null,
+                approvalRequiredActions: Array.Empty<ActionApprovalProposal>());
         }
 
         private static TimelinePayload[] BuildMaxIterationsTimeline(int iterationsUsed, string lastSuccessfulStep, string lastKnownAction)
@@ -1967,7 +1969,8 @@ Write the final project overview now.";
             string? fallbackReason,
             string? fallbackMode,
             string? finalStatus,
-            TimelinePayload[]? timeline)
+            TimelinePayload[]? timeline,
+            IReadOnlyList<ActionApprovalProposal> approvalRequiredActions)
         {
             var normalizedChangedFiles = changedFiles
                 .Where(p => !string.IsNullOrWhiteSpace(p))
@@ -2049,7 +2052,11 @@ Write the final project overview now.";
                 LastKnownAction = failure?.LastKnownAction ?? string.Empty,
                 ModelCallStarted = failure?.ModelCallStarted,
                 PatchStarted = failure?.PatchStarted,
-                Timeline = timeline ?? failure?.Timeline ?? Array.Empty<TimelinePayload>()
+                Timeline = timeline ?? failure?.Timeline ?? Array.Empty<TimelinePayload>(),
+                ApprovalRequiredActions = MapApprovalProposals(approvalRequiredActions),
+                ExternalAttempts = approvalRequiredActions.Count,
+                DeniedActions = approvalRequiredActions.Count,
+                HostBoundaryPreserved = true
             };
 
             Console.WriteLine(JsonSerializer.Serialize(payload));
@@ -2153,6 +2160,59 @@ Write the final project overview now.";
 
             [JsonPropertyName("timeline")]
             public TimelinePayload[] Timeline { get; init; } = Array.Empty<TimelinePayload>();
+
+            [JsonPropertyName("approvalRequiredActions")]
+            public ApprovalRequiredActionPayload[] ApprovalRequiredActions { get; init; } = Array.Empty<ApprovalRequiredActionPayload>();
+
+            [JsonPropertyName("externalAttempts")]
+            public int ExternalAttempts { get; init; }
+
+            [JsonPropertyName("deniedActions")]
+            public int DeniedActions { get; init; }
+
+            [JsonPropertyName("hostBoundaryPreserved")]
+            public bool HostBoundaryPreserved { get; init; }
+        }
+
+        private static ApprovalRequiredActionPayload[] MapApprovalProposals(IReadOnlyList<ActionApprovalProposal> proposals)
+        {
+            return proposals.Select(p => new ApprovalRequiredActionPayload
+            {
+                ActionType = p.ActionType,
+                Command = p.Command ?? string.Empty,
+                Path = p.Path ?? string.Empty,
+                NormalizedTarget = p.NormalizedTarget ?? string.Empty,
+                SandboxRoot = p.SandboxRoot,
+                ProjectRoot = p.ProjectRoot,
+                WorktreeRoot = p.WorktreeRoot,
+                RiskLevel = p.RiskLevel,
+                Reason = p.Reason,
+                ApprovalStatus = p.ApprovalStatus.ToString()
+            }).ToArray();
+        }
+
+        private sealed class ApprovalRequiredActionPayload
+        {
+            [JsonPropertyName("actionType")]
+            public string ActionType { get; init; } = string.Empty;
+            [JsonPropertyName("command")]
+            public string Command { get; init; } = string.Empty;
+            [JsonPropertyName("path")]
+            public string Path { get; init; } = string.Empty;
+            [JsonPropertyName("normalizedTarget")]
+            public string NormalizedTarget { get; init; } = string.Empty;
+            [JsonPropertyName("sandboxRoot")]
+            public string SandboxRoot { get; init; } = string.Empty;
+            [JsonPropertyName("projectRoot")]
+            public string ProjectRoot { get; init; } = string.Empty;
+            [JsonPropertyName("worktreeRoot")]
+            public string WorktreeRoot { get; init; } = string.Empty;
+            [JsonPropertyName("riskLevel")]
+            public string RiskLevel { get; init; } = string.Empty;
+            [JsonPropertyName("reason")]
+            public string Reason { get; init; } = string.Empty;
+            [JsonPropertyName("approvalStatus")]
+            public string ApprovalStatus { get; init; } = string.Empty;
         }
 
         private sealed class FailurePayload
