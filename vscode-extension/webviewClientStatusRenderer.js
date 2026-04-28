@@ -33,6 +33,7 @@ const webviewClientStatusRenderer = `function renderRunStatus(run) {
         rows.push(['external attempts', String(Math.max(0, Number.isFinite(run.externalAttempts) ? run.externalAttempts : 0))]);
         rows.push(['denied actions', String(Math.max(0, Number.isFinite(run.deniedActions) ? run.deniedActions : 0))]);
         rows.push(['blocked actions', String(Math.max(0, Number.isFinite(run.blockedActions) ? run.blockedActions : 0))]);
+        rows.push(['plan required', String(run.planRequired === true)]);
         rows.push(['host boundary preserved', String(run.hostBoundaryPreserved !== false)]);
         rows.push(['lifecycle requested', String(Math.max(0, Number(run.actionLifecycleCounts && run.actionLifecycleCounts.requested) || 0))]);
         rows.push(['lifecycle approval_required', String(Math.max(0, Number(run.actionLifecycleCounts && run.actionLifecycleCounts.approvalRequired) || 0))]);

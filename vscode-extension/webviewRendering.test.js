@@ -219,6 +219,7 @@ function testRunNormalizationContracts() {
   assert.strictEqual(success.externalAttempts, 0);
   assert.strictEqual(success.deniedActions, 0);
   assert.strictEqual(success.blockedActions, 0);
+  assert.strictEqual(success.planRequired, false);
   assert.strictEqual(success.hostBoundaryPreserved, true);
   assert.strictEqual(success.buildText, 'not started');
   assert.strictEqual(success.embeddingsSummary, 'not available');
@@ -402,6 +403,7 @@ function testStatusAndSummaryRendering() {
   assert.ok(successRows.some(([key, value]) => key === 'build' && value === 'not started'));
   assert.ok(successRows.some(([key, value]) => key === 'approval required' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'blocked actions' && value === '0'));
+  assert.ok(successRows.some(([key, value]) => key === 'plan required' && value === 'false'));
   assert.ok(successRows.some(([key, value]) => key === 'host boundary preserved' && value === 'true'));
   assert.ok(successRows.some(([key, value]) => key === 'lifecycle executed' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'model used' && value === 'ollama / qwen2.5-coder:7b'));
@@ -423,6 +425,7 @@ function testStatusAndSummaryRendering() {
     externalAttempts: 2,
     deniedActions: 2,
     blockedActions: 1,
+    planRequired: true,
     hostBoundaryPreserved: true,
     actionLifecycleCounts: {
       requested: 3,
@@ -441,6 +444,7 @@ function testStatusAndSummaryRendering() {
   assert.ok(fallbackRows.some(([key, value]) => key === 'external attempts' && value === '2'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'denied actions' && value === '2'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'blocked actions' && value === '1'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'plan required' && value === 'true'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'lifecycle requested' && value === '3'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'lifecycle approval_required' && value === '2'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'lifecycle blocked' && value === '1'));

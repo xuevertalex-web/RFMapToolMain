@@ -386,6 +386,9 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         const hostBoundaryPreserved = typeof (structured && structured.hostBoundaryPreserved) === 'boolean'
           ? structured.hostBoundaryPreserved
           : true;
+        const planRequired = typeof (structured && structured.planRequired) === 'boolean'
+          ? structured.planRequired
+          : false;
         const changedHints = structured && Array.isArray(structured.changedHints) ? structured.changedHints : [];
         const changedRanges = structured && Array.isArray(structured.changedRanges) ? structured.changedRanges : [];
         const changedKinds = structured && Array.isArray(structured.changedKinds) ? structured.changedKinds : [];
@@ -454,6 +457,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           externalAttempts,
           deniedActions,
           blockedActions,
+          planRequired,
           hostBoundaryPreserved,
           actionLifecycle,
           actionLifecycleCounts,
