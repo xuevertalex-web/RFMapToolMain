@@ -9,9 +9,6 @@ public sealed class PermissionGuard
         if (string.IsNullOrWhiteSpace(session.RuntimeRoot) || string.IsNullOrWhiteSpace(session.ActiveWorkspaceRoot))
             return PermissionDecision.Deny(PermissionReasonCode.WorkspaceNotResolved, "Workspace root not resolved");
 
-        if (action.Kind == ToolActionKind.RunCommand)
-            return PermissionDecision.Deny(PermissionReasonCode.ToolDeniedByPolicy, "RunCommand is denied by policy");
-
         if (HasExtendedLengthPrefix(action.TargetPath))
             return PermissionDecision.Deny(PermissionReasonCode.ExtendedLengthPathDenied, "Target uses extended-length path prefix", action.TargetPath, session.ActiveWorkspaceRoot);
 
@@ -81,13 +78,16 @@ public sealed class PermissionGuard
             return PermissionDecision.Deny(PermissionReasonCode.NetworkPathDenied, "Destination is a network path", normalizedDestination, normalizedWorkspace);
 
         if (normalizedTarget is not null && !IsWithinWorkspace(normalizedTarget, normalizedWorkspace))
-            return PermissionDecision.Deny(PermissionReasonCode.PathOutsideWorkspace, "Target is outside active workspace", normalizedTarget, normalizedWorkspace);
+            return CreateApprovalRequired(action, "Target is outside active workspace", normalizedTarget, normalizedWorkspace);
 
         if (normalizedSource is not null && !IsWithinWorkspace(normalizedSource, normalizedWorkspace))
-            return PermissionDecision.Deny(PermissionReasonCode.PathOutsideWorkspace, "Source is outside active workspace", normalizedSource, normalizedWorkspace);
+            return CreateApprovalRequired(action, "Source is outside active workspace", normalizedSource, normalizedWorkspace);
 
         if (normalizedDestination is not null && !IsWithinWorkspace(normalizedDestination, normalizedWorkspace))
-            return PermissionDecision.Deny(PermissionReasonCode.PathOutsideWorkspace, "Destination is outside active workspace", normalizedDestination, normalizedWorkspace);
+            return CreateApprovalRequired(action, "Destination is outside active workspace", normalizedDestination, normalizedWorkspace);
+
+        if (action.Kind == ToolActionKind.RunCommand)
+            return PermissionDecision.Allow(normalizedTarget ?? normalizedWorkspace, normalizedWorkspace);
 
         if (normalizedTarget is not null && session.ProtectedPathPolicy.IsProtected(normalizedTarget))
             return PermissionDecision.Deny(PermissionReasonCode.ProtectedPathDenied, "Target is protected", normalizedTarget, normalizedWorkspace);
@@ -221,5 +221,31 @@ public sealed class PermissionGuard
         }
 
         return false;
+    }
+
+    private static PermissionDecision CreateApprovalRequired(ToolAction action, string message, string normalizedTarget, string normalizedWorkspace)
+    {
+        var proposal = new ActionApprovalProposal
+        {
+            ActionType = action.Kind.ToString(),
+            Command = action.Kind == ToolActionKind.RunCommand ? action.Payload : null,
+            Path = action.TargetPath ?? action.SourcePath ?? action.DestinationPath ?? action.WorkingDirectory,
+            NormalizedTarget = normalizedTarget,
+            SandboxRoot = normalizedWorkspace,
+            ProjectRoot = normalizedWorkspace,
+            WorktreeRoot = normalizedWorkspace,
+            IsInsideSandbox = false,
+            RiskLevel = "high",
+            Reason = message,
+            RequiresApproval = true,
+            ApprovalStatus = ApprovalStatus.ApprovalRequired
+        };
+
+        return PermissionDecision.ApprovalRequired(
+            PermissionReasonCode.PathOutsideWorkspace,
+            message,
+            proposal,
+            normalizedTarget,
+            normalizedWorkspace);
     }
 }

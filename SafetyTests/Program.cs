@@ -30,6 +30,7 @@ await RunOllamaQwenInstructTerseNoKeywordAnalysis_NoFallbackRegression();
 await RunRuntimeProviderSelection_OpenAiGeminiRegression();
 await RunRuntimeNonOllamaClassificationRegression();
 await RunPatchApplyDiagnosticsClassificationRegression();
+await RunExternalActionApprovalProposalRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -962,6 +963,52 @@ static async Task RunPatchApplyDiagnosticsClassificationRegression()
         "Expected outside-workspace guard reason.");
 
     Console.WriteLine("PASS PatchApplyDiagnostics_ClassificationAndGuarding");
+}
+
+static async Task RunExternalActionApprovalProposalRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "a.txt"), "ok");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var guard = new PermissionGuard();
+    var inside = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.ReadFile, TargetPath = Path.Combine(workspaceRoot, "a.txt") });
+    AssertTrue(inside.Allowed, "Expected inside-workspace file action to be allowed.");
+
+    var outsidePath = Path.Combine(tempRoot, "outside.txt");
+    var outside = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.ReadFile, TargetPath = outsidePath });
+    AssertTrue(!outside.Allowed, "Expected outside-workspace file action to be blocked.");
+    AssertTrue(outside.RequiresApproval, "Expected outside-workspace file action to require approval.");
+    AssertTrue(outside.ApprovalStatus == ApprovalStatus.ApprovalRequired, "Expected ApprovalRequired status.");
+    AssertTrue(outside.ApprovalProposal is not null && !outside.ApprovalProposal.IsInsideSandbox, "Expected structured outside-sandbox proposal.");
+
+    var runner = new SafeProcessRunner(session, guard);
+    var cmdResult = await runner.RunAsync(new SafeProcessRequest
+    {
+        Kind = ToolActionKind.RunCommand,
+        Command = "dotnet",
+        Args = new[] { "--info" },
+        WorkingDirectory = tempRoot
+    });
+    AssertTrue(!cmdResult.Success, "Expected outside-workspace command not to execute.");
+    AssertTrue(cmdResult.ReasonCode == PermissionReasonCodes.AccessDeniedOutsideWorkspace, "Expected outside-workspace command denial reason.");
+
+    var protectedDecision = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.ReadFile, TargetPath = runtimeRoot });
+    AssertTrue(!protectedDecision.Allowed, "Expected protected/system-like path to be non-success.");
+
+    Console.WriteLine("PASS ExternalActionApprovalProposal_OutsideSandbox");
 }
 
 sealed class FakeTimeoutLlmClient : ILLMClient

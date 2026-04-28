@@ -3,6 +3,8 @@ namespace LocalCursorAgent.Security;
 public sealed class PermissionDecision
 {
     public bool Allowed { get; init; }
+    public bool RequiresApproval { get; init; }
+    public ApprovalStatus ApprovalStatus { get; init; } = ApprovalStatus.NotApplicable;
     public PermissionReasonCode ReasonCode { get; init; }
     public string ReasonCodeName => ReasonCode.ToString();
     public string ReasonCodeString => ReasonCode switch
@@ -27,10 +29,13 @@ public sealed class PermissionDecision
     public string Message { get; init; } = string.Empty;
     public string? NormalizedTargetPath { get; init; }
     public string? NormalizedWorkspaceRoot { get; init; }
+    public ActionApprovalProposal? ApprovalProposal { get; init; }
 
     public static PermissionDecision Allow(string? target, string? workspace) => new()
     {
         Allowed = true,
+        RequiresApproval = false,
+        ApprovalStatus = ApprovalStatus.Allowed,
         ReasonCode = PermissionReasonCode.Allowed,
         Message = "Allowed",
         NormalizedTargetPath = target,
@@ -40,9 +45,28 @@ public sealed class PermissionDecision
     public static PermissionDecision Deny(PermissionReasonCode code, string message, string? target = null, string? workspace = null) => new()
     {
         Allowed = false,
+        RequiresApproval = false,
+        ApprovalStatus = ApprovalStatus.Denied,
         ReasonCode = code,
         Message = message,
         NormalizedTargetPath = target,
         NormalizedWorkspaceRoot = workspace
+    };
+
+    public static PermissionDecision ApprovalRequired(
+        PermissionReasonCode code,
+        string message,
+        ActionApprovalProposal proposal,
+        string? target = null,
+        string? workspace = null) => new()
+    {
+        Allowed = false,
+        RequiresApproval = true,
+        ApprovalStatus = ApprovalStatus.ApprovalRequired,
+        ReasonCode = code,
+        Message = message,
+        NormalizedTargetPath = target,
+        NormalizedWorkspaceRoot = workspace,
+        ApprovalProposal = proposal
     };
 }
