@@ -1044,6 +1044,15 @@ static async Task RunActionLifecycleLedgerRegression()
     AssertTrue(tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.ApprovalRequired), "Expected ApprovalRequired state in ledger.");
     AssertTrue(!tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.Blocked && x.Target.Contains("outside.txt", StringComparison.OrdinalIgnoreCase)), "Approval-required outside action must not be classified as Blocked.");
     AssertTrue(!tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.Executed && x.Target.Contains("outside.txt", StringComparison.OrdinalIgnoreCase)), "Outside approval-required action must not be executed.");
+    var outsideStates = tracer.GetActionLedger()
+        .Where(x => x.Target.Contains("outside.txt", StringComparison.OrdinalIgnoreCase))
+        .ToArray();
+    var outsideRequested = outsideStates.FirstOrDefault(x => x.LifecycleState == ActionLifecycleState.Requested);
+    var outsideApprovalRequired = outsideStates.FirstOrDefault(x => x.LifecycleState == ActionLifecycleState.ApprovalRequired);
+    AssertTrue(outsideRequested is not null && outsideApprovalRequired is not null, "Expected Requested and ApprovalRequired lifecycle entries for outside action.");
+    if (outsideRequested is null || outsideApprovalRequired is null)
+        throw new InvalidOperationException("Missing expected lifecycle entries for outside action.");
+    AssertTrue(string.Equals(outsideRequested.ActionCorrelationId, outsideApprovalRequired.ActionCorrelationId, StringComparison.Ordinal), "Expected Requested and ApprovalRequired to share actionCorrelationId.");
 
     var guarded = new GuardedTool(new FakeNoopTool(), guard, session, _ => new ToolAction
     {

@@ -480,7 +480,7 @@ public class ExecutionTracer
 
         if (_pendingActionCorrelations.TryGetValue(actionSignature, out var existing))
         {
-            if (state is ActionLifecycleState.Executed or ActionLifecycleState.Failed or ActionLifecycleState.Blocked)
+            if (state is ActionLifecycleState.Executed or ActionLifecycleState.Failed or ActionLifecycleState.Blocked or ActionLifecycleState.ApprovalRequired)
             {
                 _pendingActionCorrelations.Remove(actionSignature);
             }
