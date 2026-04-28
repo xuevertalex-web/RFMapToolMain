@@ -31,6 +31,7 @@ public class ExecutionTracer
     private readonly List<MemoryInfluence> _memoryInfluences = new();
     private readonly List<PatchDecision> _patchDecisions = new();
     private readonly List<ActionApprovalProposal> _approvalRequiredActions = new();
+    private readonly List<ActionLifecycleEntry> _actionLedger = new();
     private int _deniedPermissionDecisions;
     private readonly List<BuildResult> _buildResults = new();
     private readonly List<MemoryUpdate> _memoryUpdates = new();
@@ -96,6 +97,7 @@ public class ExecutionTracer
             FinalStatus = "running"
         };
         _approvalRequiredActions.Clear();
+        _actionLedger.Clear();
         _deniedPermissionDecisions = 0;
 
         LogActionEvent("RunRequested", "Program", ActionLogLevel.Info, "started", metadata: new Dictionary<string, object?>
@@ -384,12 +386,18 @@ public class ExecutionTracer
 
     public void LogPermissionDecision(AgentSessionContext session, string toolName, ToolAction action, PermissionDecision decision)
     {
+        AppendActionLifecycle(toolName, action, decision, ActionLifecycleState.Requested, decision.ReasonCodeString, decision.Message);
         if (!decision.Allowed)
             _deniedPermissionDecisions++;
 
         if (decision.RequiresApproval && decision.ApprovalProposal is not null)
         {
             _approvalRequiredActions.Add(decision.ApprovalProposal);
+            AppendActionLifecycle(toolName, action, decision, ActionLifecycleState.ApprovalRequired, decision.ReasonCodeString, decision.Message);
+        }
+        else if (!decision.Allowed)
+        {
+            AppendActionLifecycle(toolName, action, decision, ActionLifecycleState.Blocked, decision.ReasonCodeString, decision.Message);
         }
 
         LogEvent("PermissionDecision", "Tool permission evaluated", new Dictionary<string, object>
@@ -429,6 +437,32 @@ public class ExecutionTracer
 
         public IReadOnlyList<ActionApprovalProposal> GetApprovalRequiredActions() => _approvalRequiredActions.ToArray();
         public int GetDeniedPermissionDecisionCount() => _deniedPermissionDecisions;
+        public IReadOnlyList<ActionLifecycleEntry> GetActionLedger() => _actionLedger.ToArray();
+
+        public void LogActionExecution(string toolName, ToolAction action, PermissionDecision? decision, bool succeeded, string reasonCode, string reason)
+        {
+            AppendActionLifecycle(toolName, action, decision, succeeded ? ActionLifecycleState.Executed : ActionLifecycleState.Failed, reasonCode, reason);
+        }
+
+    private void AppendActionLifecycle(string toolName, ToolAction action, PermissionDecision? decision, ActionLifecycleState state, string reasonCode, string reason)
+    {
+        var normalizedTarget = decision?.NormalizedTargetPath ?? action.TargetPath ?? action.SourcePath ?? action.DestinationPath ?? action.WorkingDirectory ?? string.Empty;
+        _actionLedger.Add(new ActionLifecycleEntry
+        {
+            Sequence = _actionLedger.Count + 1,
+            ToolName = toolName ?? string.Empty,
+            ActionType = action.Kind.ToString(),
+            Target = action.TargetPath ?? action.SourcePath ?? action.DestinationPath ?? action.WorkingDirectory ?? string.Empty,
+            Command = action.Kind == ToolActionKind.RunCommand ? action.Payload ?? string.Empty : string.Empty,
+            NormalizedTarget = normalizedTarget,
+            LifecycleState = state,
+            ReasonCode = reasonCode ?? string.Empty,
+            Reason = reason ?? string.Empty,
+            ApprovalStatus = decision?.ApprovalStatus.ToString() ?? ApprovalStatus.NotApplicable.ToString(),
+            IsInsideSandbox = decision?.Allowed == true,
+            TimestampUtc = DateTime.UtcNow
+        });
+    }
 
         public void LogDestructiveOperation(DestructiveTraceRecord record)
         {
@@ -1472,4 +1506,29 @@ public sealed class PatchTraceRecord
     public string? ReasonCode { get; init; }
     public DateTime TimestampUtc { get; init; } = DateTime.UtcNow;
     public int StepOrder { get; init; }
+}
+
+public enum ActionLifecycleState
+{
+    Requested,
+    ApprovalRequired,
+    Blocked,
+    Executed,
+    Failed
+}
+
+public sealed class ActionLifecycleEntry
+{
+    public int Sequence { get; init; }
+    public string ToolName { get; init; } = string.Empty;
+    public string ActionType { get; init; } = string.Empty;
+    public string Target { get; init; } = string.Empty;
+    public string Command { get; init; } = string.Empty;
+    public string NormalizedTarget { get; init; } = string.Empty;
+    public ActionLifecycleState LifecycleState { get; init; }
+    public string ReasonCode { get; init; } = string.Empty;
+    public string Reason { get; init; } = string.Empty;
+    public string ApprovalStatus { get; init; } = string.Empty;
+    public bool IsInsideSandbox { get; init; }
+    public DateTime TimestampUtc { get; init; }
 }

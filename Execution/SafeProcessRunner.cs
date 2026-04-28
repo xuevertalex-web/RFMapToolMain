@@ -59,6 +59,7 @@ public sealed class SafeProcessRunner
         };
 
         var decision = _permissionGuard.Evaluate(_session, action);
+        _tracer?.LogPermissionDecision(_session, "process", action, decision);
         if (!decision.Allowed)
         {
             _tracer?.LogActionEvent("ProcessSpawn", "SafeProcessRunner", ExecutionTracer.ActionLogLevel.Warning, "denied", decision.ReasonCodeString, new Dictionary<string, object?>

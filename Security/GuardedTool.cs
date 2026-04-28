@@ -32,6 +32,16 @@ public sealed class GuardedTool : ITool
         if (!decision.Allowed)
             return $"DENIED [{decision.ReasonCodeName}]: {decision.Message}";
 
-        return await _inner.Execute(input);
+        try
+        {
+            var result = await _inner.Execute(input);
+            _tracer?.LogActionExecution(_inner.Name, action, decision, succeeded: true, PermissionReasonCodes.Allowed, "Action executed.");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _tracer?.LogActionExecution(_inner.Name, action, decision, succeeded: false, PermissionReasonCodes.ToolDeniedByPolicy, ex.Message);
+            throw;
+        }
     }
 }

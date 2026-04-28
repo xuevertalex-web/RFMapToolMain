@@ -31,6 +31,7 @@ await RunRuntimeProviderSelection_OpenAiGeminiRegression();
 await RunRuntimeNonOllamaClassificationRegression();
 await RunPatchApplyDiagnosticsClassificationRegression();
 await RunExternalActionApprovalProposalRegression();
+await RunActionLifecycleLedgerRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1009,6 +1010,54 @@ static async Task RunExternalActionApprovalProposalRegression()
     AssertTrue(!protectedDecision.Allowed, "Expected protected/system-like path to be non-success.");
 
     Console.WriteLine("PASS ExternalActionApprovalProposal_OutsideSandbox");
+}
+
+static async Task RunActionLifecycleLedgerRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "a.txt"), "ok");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    tracer.StartRun("ledger", "ledger", workspaceRoot, runtimeRoot, AgentAccessMode.WorkspaceWrite.ToString(), "test", "test");
+    var guard = new PermissionGuard();
+
+    var outsideAction = new ToolAction { Kind = ToolActionKind.ReadFile, TargetPath = Path.Combine(tempRoot, "outside.txt") };
+    var outsideDecision = guard.Evaluate(session, outsideAction);
+    tracer.LogPermissionDecision(session, "file", outsideAction, outsideDecision);
+
+    AssertTrue(outsideDecision.RequiresApproval, "Expected outside action to require approval.");
+    AssertTrue(tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.ApprovalRequired), "Expected ApprovalRequired state in ledger.");
+    AssertTrue(!tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.Executed && x.Target.Contains("outside.txt", StringComparison.OrdinalIgnoreCase)), "Outside approval-required action must not be executed.");
+
+    var guarded = new GuardedTool(new FakeNoopTool(), guard, session, _ => new ToolAction
+    {
+        Kind = ToolActionKind.ReadFile,
+        TargetPath = Path.Combine(workspaceRoot, "a.txt")
+    }, tracer);
+    _ = await guarded.Execute("read:a.txt");
+
+    AssertTrue(tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.Executed && x.ActionType == ToolActionKind.ReadFile.ToString()), "Expected executed ledger state for allowed inside action.");
+    Console.WriteLine("PASS ActionLifecycleLedger_RequestedBlockedExecuted");
+}
+
+sealed class FakeNoopTool : ITool
+{
+    public string Name => "fake";
+    public string Description => "noop";
+    public Task<string> Execute(string input) => Task.FromResult("ok");
 }
 
 sealed class FakeTimeoutLlmClient : ILLMClient
