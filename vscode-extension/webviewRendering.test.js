@@ -349,6 +349,28 @@ function testRunNormalizationContracts() {
   assert.strictEqual(approvalRun.actionLifecycleCounts.executed, 0);
   assert.strictEqual(approvalRun.actionLifecycleCounts.failed, 0);
 
+  const approvalOnlyRun = context.normalizeRunResult({
+    ok: false,
+    structuredResult: {
+      ok: false,
+      finalStatus: 'error',
+      approvalRequiredActions: [
+        {
+          actionType: 'RunCommand',
+          command: 'type C:/outside.txt',
+          normalizedTarget: 'C:/outside.txt',
+          riskLevel: 'high',
+          reason: 'Target is outside active workspace',
+          approvalStatus: 'ApprovalRequired'
+        }
+      ]
+    }
+  });
+  assert.strictEqual(approvalOnlyRun.approvalRequiredCount, 1);
+  assert.strictEqual(approvalOnlyRun.externalAttempts, 1);
+  assert.strictEqual(approvalOnlyRun.deniedActions, 0);
+  assert.strictEqual(approvalOnlyRun.blockedActions, 0);
+
   const lifecycleRun = context.normalizeRunResult({
     ok: true,
     structuredResult: {
