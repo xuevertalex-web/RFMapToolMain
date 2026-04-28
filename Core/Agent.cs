@@ -163,12 +163,23 @@ namespace LocalCursorAgent.Core
                 var analysisOnlyTask = IsAnalysisOnlyTask(task);
                 var runtimeClient = _llmClient as ILlmRuntimeClient;
                 var runtimeMetadata = runtimeClient?.Metadata;
+                var unrestrictedSandboxMode = AgentExecutionProfile.IsUnrestrictedInsideSandbox(_sessionContext);
                 var actualIterationsUsed = 0;
                 var lastSuccessfulStep = "Indexing";
                 var lastKnownAction = "Indexing completed";
                 var modelCallStarted = false;
                 var patchStarted = false;
                 var buildStarted = false;
+
+                if (unrestrictedSandboxMode)
+                {
+                    _memory.Add("execution_profile", "UNRESTRICTED_INSIDE_SANDBOX");
+                    tracer.LogActionEvent("ExecutionProfile", "Agent", ExecutionTracer.ActionLogLevel.Warning, "unrestricted_inside_sandbox", metadata: new Dictionary<string, object?>
+                    {
+                        { "access_mode", _sessionContext?.AccessMode.ToString() ?? string.Empty },
+                        { "env_flag", "LOCALCURSOR_UNRESTRICTED_SANDBOX" }
+                    });
+                }
 
                 tracer.LogActionEvent("IterationLoopStarted", "AgentIterationLoop", ExecutionTracer.ActionLogLevel.Info, "started", metadata: new Dictionary<string, object?>
                 {
