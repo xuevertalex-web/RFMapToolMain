@@ -5,6 +5,7 @@ const http = require('http');
 
 let currentAgentProcess = null;
 let stopRequested = false;
+let lastStructuredResult = null;
 
 function resolveAgentProjectPath(workspaceRoot, extensionRoot, configuredProjectPath) {
   const candidates = [
@@ -34,7 +35,8 @@ function runAgent(panel, workspaceRoot, task, output, extensionRoot, configuredP
 
     stopRequested = false;
     console.log('WorkspaceRoot:', workspaceRoot);
-    const args = ['run', '--project', projectPath, '--', '--workspace', workspaceRoot, '--task', task];
+    const composedTask = composeTaskWithContinuation(task, lastStructuredResult);
+    const args = ['run', '--project', projectPath, '--', '--workspace', workspaceRoot, '--task', composedTask];
     const normalizedModel = String(selectedModel || '').trim();
     if (normalizedModel) {
       args.push('--ollama-model', normalizedModel);
@@ -43,6 +45,9 @@ function runAgent(panel, workspaceRoot, task, output, extensionRoot, configuredP
     const commandLine = `dotnet ${args.join(' ')}`;
 
     output.appendLine(`Task: ${task}`);
+    if (composedTask !== task) {
+      output.appendLine(`TaskComposedWithContinuation: yes`);
+    }
     output.appendLine(`Model: ${normalizedModel || '(default)'}`);
     output.appendLine(`WorkspaceRoot: ${workspaceRoot}`);
     output.appendLine(`ProjectPath: ${projectPath}`);
@@ -108,6 +113,7 @@ function runAgent(panel, workspaceRoot, task, output, extensionRoot, configuredP
 
       const structuredResult = extractStructuredResult(logs, stdout, stderr);
       if (structuredResult) {
+        lastStructuredResult = structuredResult;
         appendStructuredResultSummary(output, structuredResult);
       }
 
@@ -164,6 +170,49 @@ function runAgent(panel, workspaceRoot, task, output, extensionRoot, configuredP
       })
       .catch(reject);
   });
+}
+
+function composeTaskWithContinuation(task, previousResult) {
+  const rawTask = String(task || '').trim();
+  if (!rawTask) {
+    return rawTask;
+  }
+
+  const normalized = rawTask.toLowerCase();
+  const isContinueIntent =
+    normalized === 'continue' ||
+    normalized === 'continue.' ||
+    normalized === 'продолжай' ||
+    normalized === 'продолжай.' ||
+    normalized === 'давай дальше' ||
+    normalized === 'дальше';
+
+  if (!isContinueIntent || !previousResult || typeof previousResult !== 'object') {
+    return rawTask;
+  }
+
+  const continuationHint = String(previousResult.continuationHint || '').trim();
+  const candidates = Array.isArray(previousResult.nextActionCandidates)
+    ? previousResult.nextActionCandidates.map(x => String(x || '').trim()).filter(Boolean).slice(0, 3)
+    : [];
+  const lastStep = previousResult.sessionContinuation && typeof previousResult.sessionContinuation === 'object'
+    ? String(previousResult.sessionContinuation.lastSuccessfulStep || '').trim()
+    : '';
+  const lastAction = previousResult.sessionContinuation && typeof previousResult.sessionContinuation === 'object'
+    ? String(previousResult.sessionContinuation.lastKnownAction || '').trim()
+    : '';
+
+  const contextLines = [];
+  if (continuationHint) contextLines.push(`Continuation hint: ${continuationHint}`);
+  if (lastStep) contextLines.push(`Last successful step: ${lastStep}`);
+  if (lastAction) contextLines.push(`Last known action: ${lastAction}`);
+  if (candidates.length) contextLines.push(`Next action candidates: ${candidates.join(' | ')}`);
+
+  if (contextLines.length === 0) {
+    return rawTask;
+  }
+
+  return `Continue from previous run.\n${contextLines.join('\n')}\nNow execute the next concrete engineering step.`;
 }
 
 function shouldTryOllamaLazyResume(model) {
@@ -579,4 +628,4 @@ function stopCurrentAgent(output) {
   return true;
 }
 
-module.exports = { runAgent, hasRunningProcess, stopCurrentAgent, extractStructuredResult };
+module.exports = { runAgent, hasRunningProcess, stopCurrentAgent, extractStructuredResult, composeTaskWithContinuation };

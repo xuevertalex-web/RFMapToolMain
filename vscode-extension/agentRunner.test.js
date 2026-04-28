@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { extractStructuredResult } = require('./agentRunner');
+const { extractStructuredResult, composeTaskWithContinuation } = require('./agentRunner');
 
 function testMarkedStructuredResult() {
   const result = extractStructuredResult([
@@ -61,9 +61,25 @@ function testFullBufferStructuredResultFallback() {
   });
 }
 
+function testComposeTaskWithContinuation() {
+  const composed = composeTaskWithContinuation('давай дальше', {
+    continuationHint: 'Provide a step-by-step implementation plan and execute the first concrete edit.',
+    nextActionCandidates: ['Draft a 3-step implementation plan.', 'Select target file and symbol.'],
+    sessionContinuation: {
+      lastSuccessfulStep: 'ToolCallsExecuted',
+      lastKnownAction: 'Executed 1 tool calls'
+    }
+  });
+
+  assert.ok(composed.includes('Continue from previous run.'));
+  assert.ok(composed.includes('Continuation hint:'));
+  assert.ok(composed.includes('Next action candidates:'));
+}
+
 testMarkedStructuredResult();
 testLegacyStructuredResultFallback();
 testMalformedMarkedResultFallsBack();
 testFullBufferStructuredResultFallback();
+testComposeTaskWithContinuation();
 
 console.log('agentRunner tests passed');
