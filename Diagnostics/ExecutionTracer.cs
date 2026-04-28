@@ -389,7 +389,7 @@ public class ExecutionTracer
     public void LogPermissionDecision(AgentSessionContext session, string toolName, ToolAction action, PermissionDecision decision)
     {
         AppendActionLifecycle(toolName, action, decision, ActionLifecycleState.Requested, decision.ReasonCodeString, decision.Message);
-        if (!decision.Allowed)
+        if (!decision.Allowed && !decision.RequiresApproval)
             _deniedPermissionDecisions++;
 
         if (decision.RequiresApproval && decision.ApprovalProposal is not null)

@@ -1144,7 +1144,7 @@ static async Task RunStructuredActionLifecycleReportingRegression()
     AssertTrue(externalAttempts == 1, "Expected externalAttempts to equal approval-required attempts.");
 
     var deniedActions = root.GetProperty("deniedActions").GetInt32();
-    AssertTrue(deniedActions >= approvalRequired.GetArrayLength(), "Expected deniedActions to include at least approval-required blocked attempts.");
+    AssertTrue(deniedActions == 0, "Expected deniedActions=0 for approval-required flow without explicit deny.");
     var blockedActions = root.GetProperty("blockedActions").GetInt32();
     AssertTrue(blockedActions == 0, "Expected blockedActions=0 for approval-required flow without explicit deny.");
 
