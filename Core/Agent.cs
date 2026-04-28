@@ -2013,6 +2013,7 @@ Write the final project overview now.";
             var continuationHint = BuildContinuationHint(planRequired, effectiveReasonCode, failure?.LastKnownAction ?? string.Empty);
             var continuationStep = failure?.LastSuccessfulStep ?? string.Empty;
             var continuationAction = failure?.LastKnownAction ?? string.Empty;
+            var nextActionCandidates = BuildNextActionCandidates(planRequired, effectiveReasonCode, continuationHint, continuationAction);
             var normalizedChangedFiles = changedFiles
                 .Where(p => !string.IsNullOrWhiteSpace(p))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -2086,6 +2087,7 @@ Write the final project overview now.";
                     LastSuccessfulStep = continuationStep,
                     LastKnownAction = continuationAction
                 },
+                NextActionCandidates = nextActionCandidates,
                 RootCauseCode = failure?.RootCauseCode ?? (!ok ? reasonCode : string.Empty),
                 FailedStage = failure?.FailedStage ?? string.Empty,
                 LastSuccessfulStep = failure?.LastSuccessfulStep ?? string.Empty,
@@ -2172,6 +2174,8 @@ Write the final project overview now.";
             public string ContinuationHint { get; init; } = string.Empty;
             [JsonPropertyName("sessionContinuation")]
             public SessionContinuationPayload SessionContinuation { get; init; } = new();
+            [JsonPropertyName("nextActionCandidates")]
+            public string[] NextActionCandidates { get; init; } = Array.Empty<string>();
 
             [JsonPropertyName("rootCauseCode")]
             public string RootCauseCode { get; init; } = string.Empty;
@@ -2263,6 +2267,37 @@ Write the final project overview now.";
             }
 
             return string.Empty;
+        }
+
+        private static string[] BuildNextActionCandidates(bool planRequired, string reasonCode, string continuationHint, string lastKnownAction)
+        {
+            var items = new List<string>();
+            if (planRequired)
+            {
+                items.Add("Draft a 3-step implementation plan.");
+                items.Add("Select the first target file and symbol.");
+                items.Add("Apply one concrete edit and rerun verification.");
+            }
+            else if (string.Equals(reasonCode, "MAX_ITERATIONS_REACHED", StringComparison.OrdinalIgnoreCase))
+            {
+                items.Add("Focus on one unresolved blocker from the previous run.");
+                items.Add("Apply one narrow fix and verify immediately.");
+            }
+            else if (!string.IsNullOrWhiteSpace(lastKnownAction))
+            {
+                items.Add($"Continue from previous action: {lastKnownAction}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(continuationHint) && items.Count < 3)
+            {
+                items.Add(continuationHint);
+            }
+
+            return items
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(3)
+                .ToArray();
         }
 
         private static bool IsBroadEngineeringIntent(string task)

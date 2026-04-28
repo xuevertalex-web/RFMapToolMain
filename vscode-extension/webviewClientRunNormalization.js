@@ -410,6 +410,9 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
               lastKnownAction: normalizeOptionalText(structured.sessionContinuation.lastKnownAction)
             }
           : { lastSuccessfulStep: '', lastKnownAction: '' };
+        const nextActionCandidates = structured && Array.isArray(structured.nextActionCandidates)
+          ? structured.nextActionCandidates.map(item => normalizeOptionalText(item)).filter(Boolean).slice(0, 3)
+          : [];
         const embeddingsStatus = normalizeOptionalText(structured && (structured.embeddingsStatus || structured.EmbeddingsStatus));
         const degradedFlags = Array.isArray(structured && structured.degradedFlags) ? structured.degradedFlags.map(String) : [];
         const embeddingsSummary = normalizeEmbeddingsSummary(embeddingsStatus, degradedFlags);
@@ -424,6 +427,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           reasonCode,
           continuationHint,
           sessionContinuation,
+          nextActionCandidates,
           fallbackReason,
           fallbackMode,
           modelUsed,
@@ -449,6 +453,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           reasonCode,
           continuationHint,
           sessionContinuation,
+          nextActionCandidates,
           fallbackReason,
           fallbackMode,
           finalStatus,
