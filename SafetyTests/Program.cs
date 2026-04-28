@@ -1062,6 +1062,14 @@ static async Task RunActionLifecycleLedgerRegression()
     _ = await guarded.Execute("read:a.txt");
 
     AssertTrue(tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.Executed && x.ActionType == ToolActionKind.ReadFile.ToString()), "Expected executed ledger state for allowed inside action.");
+    var deniedAction = new ToolAction { Kind = ToolActionKind.DeleteFile, TargetPath = Path.Combine(workspaceRoot, "a.txt") };
+    var deniedDecision = guard.Evaluate(session, deniedAction);
+    tracer.LogPermissionDecision(session, "file", deniedAction, deniedDecision);
+    AssertTrue(!deniedDecision.Allowed, "Expected destructive delete action to be denied.");
+    AssertTrue(!deniedDecision.RequiresApproval, "Expected explicit deny path without approval requirement.");
+    AssertTrue(tracer.GetDeniedPermissionDecisionCount() >= 1, "Expected denied decision count to increase for explicit deny.");
+    AssertTrue(tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.Blocked && x.ActionType == ToolActionKind.DeleteFile.ToString()), "Expected blocked lifecycle entry for explicit deny.");
+    AssertTrue(!tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.ApprovalRequired && x.ActionType == ToolActionKind.DeleteFile.ToString()), "Explicit deny must not be classified as ApprovalRequired.");
 
     var payloadJson = JsonSerializer.Serialize(new
     {
