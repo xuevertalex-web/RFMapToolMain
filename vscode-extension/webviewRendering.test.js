@@ -368,6 +368,7 @@ function testRunNormalizationContracts() {
   assert.strictEqual(lifecycleRun.actionLifecycleCounts.blocked, 1);
   assert.strictEqual(lifecycleRun.actionLifecycleCounts.executed, 1);
   assert.strictEqual(lifecycleRun.actionLifecycleCounts.failed, 1);
+  assert.strictEqual(lifecycleRun.deniedActions, 1);
   assert.strictEqual(lifecycleRun.actionLifecycle[0].actionCorrelationId, 'act-1');
 }
 

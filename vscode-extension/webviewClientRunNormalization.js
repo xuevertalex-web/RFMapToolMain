@@ -383,7 +383,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           : approvalRequiredActions.length;
         const deniedActions = Number.isFinite(structured && structured.deniedActions)
           ? Math.max(0, Math.floor(structured.deniedActions))
-          : approvalRequiredActions.length;
+          : actionLifecycleCounts.blocked;
         const blockedActions = Number.isFinite(structured && structured.blockedActions)
           ? Math.max(0, Math.floor(structured.blockedActions))
           : actionLifecycleCounts.blocked;
