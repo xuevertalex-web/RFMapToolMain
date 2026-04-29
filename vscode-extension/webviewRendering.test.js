@@ -341,6 +341,8 @@ function testRunNormalizationContracts() {
   });
   assert.strictEqual(approvalRun.approvalRequiredCount, 1);
   assert.strictEqual(approvalRun.externalAttempts, 1);
+  assert.strictEqual(approvalRun.outsideBoundaryAttempts, 1);
+  assert.strictEqual(approvalRun.highRiskApprovalRequiredActions, 1);
   assert.strictEqual(approvalRun.deniedActions, 1);
   assert.strictEqual(approvalRun.blockedActions, 0);
   assert.ok(String(approvalRun.continuationHint).toLowerCase().includes('continue'));
@@ -470,6 +472,8 @@ function testStatusAndSummaryRendering() {
   assert.ok(successRows.some(([key, value]) => key === 'build' && value === 'not started'));
   assert.ok(successRows.some(([key, value]) => key === 'approval required' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'blocked actions' && value === '0'));
+  assert.ok(successRows.some(([key, value]) => key === 'outside boundary attempts' && value === '0'));
+  assert.ok(successRows.some(([key, value]) => key === 'high-risk approval required' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'plan required' && value === 'false'));
   assert.ok(successRows.some(([key, value]) => key === 'continuation hint' && value === 'not available'));
   assert.ok(successRows.some(([key, value]) => key === 'next actions' && value === 'not available'));

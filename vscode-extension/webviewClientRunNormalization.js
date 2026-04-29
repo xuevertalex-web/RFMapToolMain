@@ -381,6 +381,12 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         const externalAttempts = Number.isFinite(structured && structured.externalAttempts)
           ? Math.max(0, Math.floor(structured.externalAttempts))
           : approvalRequiredActions.length;
+        const outsideBoundaryAttempts = Number.isFinite(structured && structured.outsideBoundaryAttempts)
+          ? Math.max(0, Math.floor(structured.outsideBoundaryAttempts))
+          : approvalRequiredActions.filter(item => item && item.normalizedTarget).length;
+        const highRiskApprovalRequiredActions = Number.isFinite(structured && structured.highRiskApprovalRequiredActions)
+          ? Math.max(0, Math.floor(structured.highRiskApprovalRequiredActions))
+          : approvalRequiredActions.filter(item => String(item && item.riskLevel || '').toLowerCase() === 'high').length;
         const deniedActions = Number.isFinite(structured && structured.deniedActions)
           ? Math.max(0, Math.floor(structured.deniedActions))
           : actionLifecycleCounts.blocked;
@@ -489,6 +495,8 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           approvalRequiredActions,
           approvalRequiredCount: approvalRequiredActions.length,
           externalAttempts,
+          outsideBoundaryAttempts,
+          highRiskApprovalRequiredActions,
           deniedActions,
           blockedActions,
           planRequired,

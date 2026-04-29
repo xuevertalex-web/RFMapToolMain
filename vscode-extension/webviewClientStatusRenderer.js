@@ -33,6 +33,8 @@ const webviewClientStatusRenderer = `function renderRunStatus(run) {
         rows.push(['changed files', String(Math.max(0, changedFilesCount))]);
         rows.push(['approval required', String(Math.max(0, Number.isFinite(run.approvalRequiredCount) ? run.approvalRequiredCount : 0))]);
         rows.push(['external attempts', String(Math.max(0, Number.isFinite(run.externalAttempts) ? run.externalAttempts : 0))]);
+        rows.push(['outside boundary attempts', String(Math.max(0, Number.isFinite(run.outsideBoundaryAttempts) ? run.outsideBoundaryAttempts : 0))]);
+        rows.push(['high-risk approval required', String(Math.max(0, Number.isFinite(run.highRiskApprovalRequiredActions) ? run.highRiskApprovalRequiredActions : 0))]);
         rows.push(['denied actions', String(Math.max(0, Number.isFinite(run.deniedActions) ? run.deniedActions : 0))]);
         rows.push(['blocked actions', String(Math.max(0, Number.isFinite(run.blockedActions) ? run.blockedActions : 0))]);
         rows.push(['plan required', String(run.planRequired === true)]);

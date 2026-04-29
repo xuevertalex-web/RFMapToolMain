@@ -2111,6 +2111,8 @@ Write the final project overview now.";
                 Timeline = timeline ?? failure?.Timeline ?? Array.Empty<TimelinePayload>(),
                 ApprovalRequiredActions = MapApprovalProposals(approvalRequiredActions),
                 ExternalAttempts = approvalRequiredActions.Count,
+                OutsideBoundaryAttempts = approvalRequiredActions.Count(x => x is not null && !x.IsInsideSandbox),
+                HighRiskApprovalRequiredActions = approvalRequiredActions.Count(x => x is not null && string.Equals(x.RiskLevel, "high", StringComparison.OrdinalIgnoreCase)),
                 DeniedActions = tracerDeniedActions,
                 BlockedActions = actionLifecycleEntries.Count(e => e.LifecycleState == ActionLifecycleState.Blocked),
                 HostBoundaryPreserved = true,
@@ -2251,6 +2253,12 @@ Write the final project overview now.";
 
             [JsonPropertyName("externalAttempts")]
             public int ExternalAttempts { get; init; }
+
+            [JsonPropertyName("outsideBoundaryAttempts")]
+            public int OutsideBoundaryAttempts { get; init; }
+
+            [JsonPropertyName("highRiskApprovalRequiredActions")]
+            public int HighRiskApprovalRequiredActions { get; init; }
 
             [JsonPropertyName("deniedActions")]
             public int DeniedActions { get; init; }
