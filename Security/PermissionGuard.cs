@@ -128,7 +128,10 @@ public sealed class PermissionGuard
         if (session.AccessMode == AgentAccessMode.WorkspaceWrite)
         {
             if (IsDeleteLike(action.Kind) || IsRenameLike(action.Kind) || IsMoveLike(action.Kind))
-                return PermissionDecision.Deny(PermissionReasonCode.WriteModeDeleteDenied, "Destructive operations denied in WorkspaceWrite mode", normalizedTarget, normalizedWorkspace);
+            {
+                if (!HasExplicitApprovalMarker(action.Payload))
+                    return CreateApprovalRequired(action, PermissionReasonCode.WriteModeDeleteDenied, "Destructive operation requires explicit approval in WorkspaceWrite mode", normalizedTarget ?? normalizedSource ?? normalizedDestination ?? normalizedWorkspace, normalizedWorkspace, "high");
+            }
         }
 
         if ((action.Kind == ToolActionKind.Build || action.Kind == ToolActionKind.Test) &&

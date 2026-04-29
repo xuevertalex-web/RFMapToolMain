@@ -36,6 +36,7 @@ await RunStructuredActionLifecycleReportingRegression();
 await RunBroadIntentNoToolCallsRequiresActionRegression();
 await RunHostDiagnosticsCommandApprovalRegression();
 await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
+await RunDestructiveFileApprovalMarkerRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1068,10 +1069,8 @@ static async Task RunActionLifecycleLedgerRegression()
     var deniedDecision = guard.Evaluate(session, deniedAction);
     tracer.LogPermissionDecision(session, "file", deniedAction, deniedDecision);
     AssertTrue(!deniedDecision.Allowed, "Expected destructive delete action to be denied.");
-    AssertTrue(!deniedDecision.RequiresApproval, "Expected explicit deny path without approval requirement.");
-    AssertTrue(tracer.GetDeniedPermissionDecisionCount() >= 1, "Expected denied decision count to increase for explicit deny.");
-    AssertTrue(tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.Blocked && x.ActionType == ToolActionKind.DeleteFile.ToString()), "Expected blocked lifecycle entry for explicit deny.");
-    AssertTrue(!tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.ApprovalRequired && x.ActionType == ToolActionKind.DeleteFile.ToString()), "Explicit deny must not be classified as ApprovalRequired.");
+    AssertTrue(deniedDecision.RequiresApproval, "Expected destructive delete action to require explicit approval.");
+    AssertTrue(tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.ApprovalRequired && x.ActionType == ToolActionKind.DeleteFile.ToString()), "Expected approval-required lifecycle entry for destructive delete.");
 
     var payloadJson = JsonSerializer.Serialize(new
     {
@@ -1363,6 +1362,43 @@ static async Task RunRuntimeGpuDiagnosticsTruthfulReportingRegression()
     AssertTrue(root.GetProperty("provider").GetString() == "ollama", "Expected provider=ollama.");
     AssertTrue(root.GetProperty("gpuUsageMeasured").GetBoolean() == false, "Expected gpuUsageMeasured=false without measured diagnostics output.");
     Console.WriteLine("PASS RuntimeGpuDiagnostics_TruthfulReporting");
+}
+
+static async Task RunDestructiveFileApprovalMarkerRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    var filePath = Path.Combine(workspaceRoot, "delete-me.txt");
+    await File.WriteAllTextAsync(filePath, "x");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var guard = new PermissionGuard();
+    var noApprovalDecision = guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.DeleteFile,
+        TargetPath = filePath
+    });
+    AssertTrue(!noApprovalDecision.Allowed && noApprovalDecision.RequiresApproval, "Expected delete without marker to require approval.");
+
+    var approvedDecision = guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.DeleteFile,
+        TargetPath = filePath,
+        Payload = "APPROVED:true"
+    });
+    AssertTrue(approvedDecision.Allowed, "Expected delete with approval marker to pass guard.");
+    Console.WriteLine("PASS DestructiveFileApprovalMarker");
 }
 
 sealed class FakeNoopTool : ITool

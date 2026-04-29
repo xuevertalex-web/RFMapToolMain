@@ -218,7 +218,19 @@ namespace LocalCursorAgent.Tools
 
         private async Task<string> DeletePath(string path)
         {
-            var resolvedPath = ResolvePath(path);
+            var hasApproval = HasApprovalMarker(path, out var normalizedPathInput);
+            path = normalizedPathInput;
+            var action = new ToolAction
+            {
+                Kind = ToolActionKind.DeleteFile,
+                TargetPath = ResolvePath(path),
+                Payload = hasApproval ? "APPROVED:true" : null
+            };
+            var decision = _permissionGuard.Evaluate(_session, action);
+            if (!decision.Allowed)
+                return FormatDenied(decision);
+
+            var resolvedPath = action.TargetPath!;
             var backupCapture = await _sandboxManager.CapturePathAsync(resolvedPath);
             if (!backupCapture.Succeeded)
                 return $"DENIED [{PermissionReasonCodes.BackupCaptureFailed}]: {backupCapture.Message}";
@@ -233,6 +245,8 @@ namespace LocalCursorAgent.Tools
 
         private async Task<string> RenameOrMove(string payload, bool isMove)
         {
+            var hasApproval = HasApprovalMarker(payload, out var normalizedPayload);
+            payload = normalizedPayload;
             var separator = FindCommandSeparator(payload);
             if (separator < 0)
                 return isMove
@@ -248,7 +262,8 @@ namespace LocalCursorAgent.Tools
             {
                 Kind = isMove ? ToolActionKind.MoveFile : ToolActionKind.RenameFile,
                 SourcePath = ResolvePath(source),
-                DestinationPath = ResolvePath(destination)
+                DestinationPath = ResolvePath(destination),
+                Payload = hasApproval ? "APPROVED:true" : null
             };
 
             var decision = _permissionGuard.Evaluate(_session, action);
@@ -321,6 +336,18 @@ namespace LocalCursorAgent.Tools
                 .Replace("\\r\\n", "\r\n", StringComparison.Ordinal)
                 .Replace("\\n", "\n", StringComparison.Ordinal)
                 .Replace("\\r", "\r", StringComparison.Ordinal);
+        }
+
+        private static bool HasApprovalMarker(string input, out string normalized)
+        {
+            normalized = input ?? string.Empty;
+            var marker = "APPROVED:true";
+            var idx = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0)
+                return false;
+
+            normalized = normalized.Remove(idx, marker.Length).Trim();
+            return true;
         }
 
         private static SanitizedWriteContent SanitizeWriteContent(string path, string content)
