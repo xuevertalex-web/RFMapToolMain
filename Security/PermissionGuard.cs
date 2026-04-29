@@ -87,7 +87,12 @@ public sealed class PermissionGuard
             return CreateApprovalRequired(action, "Destination is outside active workspace", normalizedDestination, normalizedWorkspace);
 
         if (action.Kind == ToolActionKind.RunCommand)
+        {
+            if (IsHighRiskCommand(action.Payload))
+                return CreateApprovalRequired(action, "High-risk host diagnostic/system command requires explicit approval", normalizedTarget ?? normalizedWorkspace, normalizedWorkspace);
+
             return PermissionDecision.Allow(normalizedTarget ?? normalizedWorkspace, normalizedWorkspace);
+        }
 
         if (normalizedTarget is not null && session.ProtectedPathPolicy.IsProtected(normalizedTarget))
             return PermissionDecision.Deny(PermissionReasonCode.ProtectedPathDenied, "Target is protected", normalizedTarget, normalizedWorkspace);
@@ -151,6 +156,22 @@ public sealed class PermissionGuard
     private static bool IsWithinWorkspace(string path, string workspaceRoot) =>
         path.Equals(workspaceRoot, StringComparison.OrdinalIgnoreCase) ||
         path.StartsWith(workspaceRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsHighRiskCommand(string? payload)
+    {
+        var text = payload?.Trim() ?? string.Empty;
+        if (text.Length == 0)
+            return false;
+
+        var lowered = text.ToLowerInvariant();
+        return lowered.Contains("nvidia-smi", StringComparison.Ordinal) ||
+               lowered.Contains("netstat", StringComparison.Ordinal) ||
+               lowered.Contains("tcpdump", StringComparison.Ordinal) ||
+               lowered.Contains("wireshark", StringComparison.Ordinal) ||
+               lowered.Contains("tasklist", StringComparison.Ordinal) ||
+               lowered.Contains("get-process", StringComparison.Ordinal) ||
+               lowered.Contains("wmic", StringComparison.Ordinal);
+    }
 
     private static bool IsWriteLike(ToolActionKind kind) =>
         kind is ToolActionKind.WriteFile or ToolActionKind.CreateFile or ToolActionKind.PatchFile;

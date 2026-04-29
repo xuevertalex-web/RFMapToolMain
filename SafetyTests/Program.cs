@@ -34,6 +34,7 @@ await RunExternalActionApprovalProposalRegression();
 await RunActionLifecycleLedgerRegression();
 await RunStructuredActionLifecycleReportingRegression();
 await RunBroadIntentNoToolCallsRequiresActionRegression();
+await RunHostDiagnosticsCommandApprovalRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1270,6 +1271,54 @@ static async Task RunBroadIntentNoToolCallsRequiresActionRegression()
     AssertTrue(!string.Equals(reasonCode, "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase), "Broad engineering intent must not end as SUCCESS_NO_TOOL_CALLS.");
     AssertTrue(!string.Equals(finalStatus, "success", StringComparison.OrdinalIgnoreCase), "Broad engineering intent with no actions must not end as success.");
     Console.WriteLine("PASS BroadIntentNoToolCalls_RequiresAction");
+}
+
+static async Task RunHostDiagnosticsCommandApprovalRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var guard = new PermissionGuard();
+    var tracer = new ExecutionTracer(runtimeRoot);
+    tracer.StartRun("gpu-host-diagnostics", "gpu-host-diagnostics", workspaceRoot, runtimeRoot, AgentAccessMode.WorkspaceWrite.ToString(), "test", "test");
+    var runner = new SafeProcessRunner(session, guard, tracer);
+
+    var decision = guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.RunCommand,
+        WorkingDirectory = workspaceRoot,
+        Payload = "nvidia-smi"
+    });
+
+    AssertTrue(!decision.Allowed, "Expected nvidia-smi to require approval.");
+    AssertTrue(decision.RequiresApproval, "Expected approval requirement for host diagnostics command.");
+    AssertTrue(decision.ApprovalProposal is not null, "Expected structured approval proposal for host diagnostics.");
+
+    var result = await runner.RunAsync(new SafeProcessRequest
+    {
+        Kind = ToolActionKind.RunCommand,
+        Command = "dotnet",
+        Args = new[] { "nvidia-smi" },
+        WorkingDirectory = workspaceRoot,
+        Timeout = TimeSpan.FromSeconds(5)
+    });
+
+    AssertTrue(!result.Success, "Expected host diagnostics command not to execute without approval.");
+    AssertTrue(result.ReasonCode == PermissionReasonCodes.AccessDeniedOutsideWorkspace, "Expected approval-required host diagnostics denial reason.");
+    AssertTrue(tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.ApprovalRequired && x.ActionType == ToolActionKind.RunCommand.ToString()), "Expected ApprovalRequired lifecycle for host diagnostics command.");
+    Console.WriteLine("PASS HostDiagnosticsCommand_ApprovalRequired");
 }
 
 sealed class FakeNoopTool : ITool
