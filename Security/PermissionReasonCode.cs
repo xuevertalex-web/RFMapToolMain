@@ -16,5 +16,6 @@ public enum PermissionReasonCode
     AlternateDataStreamDenied,
     InvalidPathSyntaxDenied,
     InvalidWorkingDirectory,
+    HighRiskApprovalRequired,
     ToolDeniedByPolicy
 }

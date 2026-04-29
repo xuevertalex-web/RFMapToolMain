@@ -1305,6 +1305,7 @@ static async Task RunHostDiagnosticsCommandApprovalRegression()
 
     AssertTrue(!decision.Allowed, "Expected nvidia-smi to require approval.");
     AssertTrue(decision.RequiresApproval, "Expected approval requirement for host diagnostics command.");
+    AssertTrue(decision.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, "Expected high-risk approval reason code for host diagnostics command.");
     AssertTrue(decision.ApprovalProposal is not null, "Expected structured approval proposal for host diagnostics.");
     var packageInstallDecision = guard.Evaluate(session, new ToolAction
     {
@@ -1333,7 +1334,7 @@ static async Task RunHostDiagnosticsCommandApprovalRegression()
     });
 
     AssertTrue(!result.Success, "Expected host diagnostics command not to execute without approval.");
-    AssertTrue(result.ReasonCode == PermissionReasonCodes.AccessDeniedOutsideWorkspace, "Expected approval-required host diagnostics denial reason.");
+    AssertTrue(result.ReasonCode == PermissionReasonCodes.HighRiskApprovalRequired, "Expected approval-required host diagnostics denial reason.");
     AssertTrue(tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.ApprovalRequired && x.ActionType == ToolActionKind.RunCommand.ToString()), "Expected ApprovalRequired lifecycle for host diagnostics command.");
     Console.WriteLine("PASS HostDiagnosticsCommand_ApprovalRequired");
 }

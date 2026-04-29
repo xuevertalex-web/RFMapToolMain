@@ -288,6 +288,7 @@ public sealed class SafeProcessResult
         ReasonCode = reason switch
         {
             PermissionReasonCode.PathOutsideWorkspace => PermissionReasonCodes.AccessDeniedOutsideWorkspace,
+            PermissionReasonCode.HighRiskApprovalRequired => PermissionReasonCodes.HighRiskApprovalRequired,
             PermissionReasonCode.ReadOnlyWriteDenied => PermissionReasonCodes.AccessDeniedByMode,
             PermissionReasonCode.ReadOnlyDeleteDenied => PermissionReasonCodes.AccessDeniedDeleteOperation,
             PermissionReasonCode.WriteModeDeleteDenied => PermissionReasonCodes.AccessDeniedDeleteOperation,

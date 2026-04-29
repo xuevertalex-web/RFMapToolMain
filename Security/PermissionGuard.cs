@@ -78,19 +78,19 @@ public sealed class PermissionGuard
             return PermissionDecision.Deny(PermissionReasonCode.NetworkPathDenied, "Destination is a network path", normalizedDestination, normalizedWorkspace);
 
         if (normalizedTarget is not null && !IsWithinWorkspace(normalizedTarget, normalizedWorkspace))
-            return CreateApprovalRequired(action, "Target is outside active workspace", normalizedTarget, normalizedWorkspace);
+            return CreateApprovalRequired(action, PermissionReasonCode.PathOutsideWorkspace, "Target is outside active workspace", normalizedTarget, normalizedWorkspace);
 
         if (normalizedSource is not null && !IsWithinWorkspace(normalizedSource, normalizedWorkspace))
-            return CreateApprovalRequired(action, "Source is outside active workspace", normalizedSource, normalizedWorkspace);
+            return CreateApprovalRequired(action, PermissionReasonCode.PathOutsideWorkspace, "Source is outside active workspace", normalizedSource, normalizedWorkspace);
 
         if (normalizedDestination is not null && !IsWithinWorkspace(normalizedDestination, normalizedWorkspace))
-            return CreateApprovalRequired(action, "Destination is outside active workspace", normalizedDestination, normalizedWorkspace);
+            return CreateApprovalRequired(action, PermissionReasonCode.PathOutsideWorkspace, "Destination is outside active workspace", normalizedDestination, normalizedWorkspace);
 
         if (action.Kind == ToolActionKind.RunCommand)
         {
             var hasApprovalMarker = HasExplicitApprovalMarker(action.Payload);
             if (IsHighRiskCommand(action.Payload) && !hasApprovalMarker)
-                return CreateApprovalRequired(action, "High-risk host/system/network-impacting command requires explicit approval", normalizedTarget ?? normalizedWorkspace, normalizedWorkspace, ResolveCommandRiskLevel(action.Payload));
+                return CreateApprovalRequired(action, PermissionReasonCode.HighRiskApprovalRequired, "High-risk host/system/network-impacting command requires explicit approval", normalizedTarget ?? normalizedWorkspace, normalizedWorkspace, ResolveCommandRiskLevel(action.Payload));
 
             return PermissionDecision.Allow(normalizedTarget ?? normalizedWorkspace, normalizedWorkspace);
         }
@@ -294,7 +294,7 @@ public sealed class PermissionGuard
         return false;
     }
 
-    private static PermissionDecision CreateApprovalRequired(ToolAction action, string message, string normalizedTarget, string normalizedWorkspace, string riskLevel = "high")
+    private static PermissionDecision CreateApprovalRequired(ToolAction action, PermissionReasonCode code, string message, string normalizedTarget, string normalizedWorkspace, string riskLevel = "high")
     {
         var proposal = new ActionApprovalProposal
         {
@@ -313,7 +313,7 @@ public sealed class PermissionGuard
         };
 
         return PermissionDecision.ApprovalRequired(
-            PermissionReasonCode.PathOutsideWorkspace,
+            code,
             message,
             proposal,
             normalizedTarget,
