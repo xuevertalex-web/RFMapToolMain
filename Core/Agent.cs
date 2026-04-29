@@ -2072,8 +2072,14 @@ Write the final project overview now.";
                 ChangedKinds = normalizedChangedKinds,
                 Workspace = workspace ?? string.Empty,
                 DurationMs = runStartedUtc.HasValue ? Math.Max(0, (long)(DateTime.UtcNow - runStartedUtc.Value).TotalMilliseconds) : null,
+                RuntimeElapsedMs = runStartedUtc.HasValue ? Math.Max(0, (long)(DateTime.UtcNow - runStartedUtc.Value).TotalMilliseconds) : null,
                 Provider = provider ?? string.Empty,
                 Model = model ?? string.Empty,
+                RuntimeProfile = ResolveRuntimeProfileId(provider, model),
+                RuntimeEndpoint = ResolveRuntimeEndpoint(provider),
+                ConfiguredContextWindow = ResolveConfiguredContextWindow(provider),
+                ConfiguredGpuOffloadOptions = ResolveConfiguredGpuOffloadOptions(provider),
+                GpuUsageMeasured = false,
                 DegradedFlags = (degradedFlags ?? Array.Empty<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
                 FallbackReason = fallbackReason ?? string.Empty,
                 FallbackMode = fallbackMode ?? string.Empty,
@@ -2144,11 +2150,29 @@ Write the final project overview now.";
             [JsonPropertyName("durationMs")]
             public long? DurationMs { get; init; }
 
+            [JsonPropertyName("runtimeElapsedMs")]
+            public long? RuntimeElapsedMs { get; init; }
+
             [JsonPropertyName("provider")]
             public string Provider { get; init; } = string.Empty;
 
             [JsonPropertyName("model")]
             public string Model { get; init; } = string.Empty;
+
+            [JsonPropertyName("runtimeProfile")]
+            public string RuntimeProfile { get; init; } = string.Empty;
+
+            [JsonPropertyName("runtimeEndpoint")]
+            public string RuntimeEndpoint { get; init; } = string.Empty;
+
+            [JsonPropertyName("configuredContextWindow")]
+            public string ConfiguredContextWindow { get; init; } = string.Empty;
+
+            [JsonPropertyName("configuredGpuOffloadOptions")]
+            public string ConfiguredGpuOffloadOptions { get; init; } = string.Empty;
+
+            [JsonPropertyName("gpuUsageMeasured")]
+            public bool GpuUsageMeasured { get; init; }
 
             [JsonPropertyName("degradedFlags")]
             public string[] DegradedFlags { get; init; } = Array.Empty<string>();
@@ -2267,6 +2291,53 @@ Write the final project overview now.";
             }
 
             return string.Empty;
+        }
+
+        private static string ResolveRuntimeProfileId(string? provider, string? model)
+        {
+            if (string.IsNullOrWhiteSpace(provider))
+                return string.Empty;
+
+            try
+            {
+                return LlmProfiles.Resolve(provider, model).ProfileId;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string ResolveRuntimeEndpoint(string? provider)
+        {
+            if (string.Equals(provider, "ollama", StringComparison.OrdinalIgnoreCase))
+                return Environment.GetEnvironmentVariable("OLLAMA_ENDPOINT")?.Trim() is { Length: > 0 } endpoint ? endpoint : "http://localhost:11434";
+
+            return string.Empty;
+        }
+
+        private static string ResolveConfiguredContextWindow(string? provider)
+        {
+            if (!string.Equals(provider, "ollama", StringComparison.OrdinalIgnoreCase))
+                return string.Empty;
+
+            var numCtx = Environment.GetEnvironmentVariable("OLLAMA_NUM_CTX")?.Trim();
+            return string.IsNullOrWhiteSpace(numCtx) ? string.Empty : numCtx;
+        }
+
+        private static string ResolveConfiguredGpuOffloadOptions(string? provider)
+        {
+            if (!string.Equals(provider, "ollama", StringComparison.OrdinalIgnoreCase))
+                return string.Empty;
+
+            var numGpu = Environment.GetEnvironmentVariable("OLLAMA_NUM_GPU")?.Trim();
+            var gpuLayers = Environment.GetEnvironmentVariable("OLLAMA_GPU_LAYERS")?.Trim();
+            var options = new List<string>();
+            if (!string.IsNullOrWhiteSpace(numGpu))
+                options.Add($"num_gpu={numGpu}");
+            if (!string.IsNullOrWhiteSpace(gpuLayers))
+                options.Add($"gpu_layers={gpuLayers}");
+            return string.Join(";", options);
         }
 
         private static string[] BuildNextActionCandidates(bool planRequired, string reasonCode, string continuationHint, string lastKnownAction)

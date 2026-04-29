@@ -35,6 +35,7 @@ await RunActionLifecycleLedgerRegression();
 await RunStructuredActionLifecycleReportingRegression();
 await RunBroadIntentNoToolCallsRequiresActionRegression();
 await RunHostDiagnosticsCommandApprovalRegression();
+await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1319,6 +1320,32 @@ static async Task RunHostDiagnosticsCommandApprovalRegression()
     AssertTrue(result.ReasonCode == PermissionReasonCodes.AccessDeniedOutsideWorkspace, "Expected approval-required host diagnostics denial reason.");
     AssertTrue(tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.ApprovalRequired && x.ActionType == ToolActionKind.RunCommand.ToString()), "Expected ApprovalRequired lifecycle for host diagnostics command.");
     Console.WriteLine("PASS HostDiagnosticsCommand_ApprovalRequired");
+}
+
+static async Task RunRuntimeGpuDiagnosticsTruthfulReportingRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+
+    var structured = JsonSerializer.Serialize(new
+    {
+        provider = "ollama",
+        model = "qwen2.5-coder:7b-instruct-q4_K_M",
+        runtimeProfile = "ollama/qwen2.5-coder-instruct-q4_k_m",
+        runtimeEndpoint = "http://localhost:11434",
+        configuredContextWindow = "8192",
+        configuredGpuOffloadOptions = "num_gpu=1",
+        gpuUsageMeasured = false
+    });
+
+    using var doc = JsonDocument.Parse(structured);
+    var root = doc.RootElement;
+    AssertTrue(root.GetProperty("provider").GetString() == "ollama", "Expected provider=ollama.");
+    AssertTrue(root.GetProperty("gpuUsageMeasured").GetBoolean() == false, "Expected gpuUsageMeasured=false without measured diagnostics output.");
+    Console.WriteLine("PASS RuntimeGpuDiagnostics_TruthfulReporting");
 }
 
 sealed class FakeNoopTool : ITool
