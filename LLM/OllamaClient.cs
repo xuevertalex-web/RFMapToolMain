@@ -191,7 +191,7 @@ namespace LocalCursorAgent.LLM
 
             var numCtx = ReadIntEnv("LOCALCURSOR_OLLAMA_7B_NUM_CTX", 8192);
             var numGpu = ReadIntEnv("LOCALCURSOR_OLLAMA_7B_NUM_GPU", 1);
-            var gpuLayers = ReadIntEnv("LOCALCURSOR_OLLAMA_7B_GPU_LAYERS", 26);
+            var gpuLayers = ReadIntEnv("LOCALCURSOR_OLLAMA_7B_GPU_LAYERS", 32);
             var temperature = ReadDoubleEnv("LOCALCURSOR_OLLAMA_7B_TEMPERATURE", 0.2);
 
             return new

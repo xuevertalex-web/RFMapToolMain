@@ -505,7 +505,7 @@ function testStatusAndSummaryRendering() {
     configuredContextWindow: '8192',
     configuredGpuOffloadOptions: 'num_gpu=1',
     runtimeTuningProfile: '7b-quality-gpu-tuned',
-    runtimeTuningOptions: 'num_ctx=8192;num_gpu=1;gpu_layers=26;temperature=0.2',
+    runtimeTuningOptions: 'num_ctx=8192;num_gpu=1;gpu_layers=32;temperature=0.2',
     runtimeTuningSource: 'default',
     runtimeTuningApplied: true,
     runtimeTuningWarnings: ['GPU_LAYERS_NOT_SET'],
@@ -545,7 +545,7 @@ function testStatusAndSummaryRendering() {
   assert.ok(successRows.some(([key, value]) => key === 'configured context window' && value === '8192'));
   assert.ok(successRows.some(([key, value]) => key === 'configured gpu offload' && value === 'num_gpu=1'));
   assert.ok(successRows.some(([key, value]) => key === 'runtime tuning profile' && value === '7b-quality-gpu-tuned'));
-  assert.ok(successRows.some(([key, value]) => key === 'runtime tuning options' && value === 'num_ctx=8192;num_gpu=1;gpu_layers=26;temperature=0.2'));
+  assert.ok(successRows.some(([key, value]) => key === 'runtime tuning options' && value === 'num_ctx=8192;num_gpu=1;gpu_layers=32;temperature=0.2'));
   assert.ok(successRows.some(([key, value]) => key === 'runtime tuning source' && value === 'default'));
   assert.ok(successRows.some(([key, value]) => key === 'runtime tuning applied' && value === 'true'));
   assert.ok(successRows.some(([key, value]) => key === 'runtime tuning warnings' && value.includes('GPU_LAYERS_NOT_SET')));

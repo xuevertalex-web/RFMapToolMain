@@ -2463,7 +2463,7 @@ Write the final project overview now.";
             {
                 $"num_ctx={(string.IsNullOrWhiteSpace(numCtx) ? "8192" : numCtx)}",
                 $"num_gpu={(string.IsNullOrWhiteSpace(numGpu) ? "1" : numGpu)}",
-                $"gpu_layers={(string.IsNullOrWhiteSpace(gpuLayers) ? "26" : gpuLayers)}",
+                $"gpu_layers={(string.IsNullOrWhiteSpace(gpuLayers) ? "32" : gpuLayers)}",
                 $"temperature={(string.IsNullOrWhiteSpace(temperature) ? "0.2" : temperature)}"
             };
             return string.Join(";", options);
