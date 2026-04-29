@@ -311,6 +311,7 @@ public sealed class PermissionGuard
             IsInsideSandbox = false,
             RiskLevel = riskLevel,
             ReasonCode = PermissionDecision.ToReasonCodeString(code),
+            ExpectedEffect = BuildExpectedEffect(action),
             Reason = message,
             RequiresApproval = true,
             ApprovalStatus = ApprovalStatus.ApprovalRequired
@@ -322,5 +323,23 @@ public sealed class PermissionGuard
             proposal,
             normalizedTarget,
             normalizedWorkspace);
+    }
+
+    private static string BuildExpectedEffect(ToolAction action)
+    {
+        return action.Kind switch
+        {
+            ToolActionKind.ReadFile => "Reads file content from the specified target path.",
+            ToolActionKind.WriteFile => "Writes content to the specified target path.",
+            ToolActionKind.CreateFile => "Creates a new file at the specified target path.",
+            ToolActionKind.DeleteFile => "Deletes the specified file path.",
+            ToolActionKind.MoveFile => "Moves a file from source path to destination path.",
+            ToolActionKind.RenameFile => "Renames a file from source path to destination path.",
+            ToolActionKind.PatchFile => "Applies in-place modifications to the target file.",
+            ToolActionKind.RunCommand => "Executes the requested command in the specified working directory.",
+            ToolActionKind.Build => "Runs project build command in the specified working directory.",
+            ToolActionKind.Test => "Runs project tests in the specified working directory.",
+            _ => "Performs the requested tool action on the specified target."
+        };
     }
 }

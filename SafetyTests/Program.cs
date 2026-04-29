@@ -1379,6 +1379,7 @@ static async Task RunHostDiagnosticsCommandApprovalRegression()
     AssertTrue(decision.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, "Expected high-risk approval reason code for host diagnostics command.");
     AssertTrue(decision.ApprovalProposal is not null, "Expected structured approval proposal for host diagnostics.");
     AssertTrue(decision.ApprovalProposal?.ReasonCode == PermissionReasonCodes.HighRiskApprovalRequired, "Expected approval proposal to carry stable high-risk reasonCode.");
+    AssertTrue(!string.IsNullOrWhiteSpace(decision.ApprovalProposal?.ExpectedEffect), "Expected approval proposal to carry expectedEffect.");
     var packageInstallDecision = guard.Evaluate(session, new ToolAction
     {
         Kind = ToolActionKind.RunCommand,
@@ -1464,6 +1465,7 @@ static async Task RunDestructiveFileApprovalMarkerRegression()
     });
     AssertTrue(!noApprovalDecision.Allowed && noApprovalDecision.RequiresApproval, "Expected delete without marker to require approval.");
     AssertTrue(noApprovalDecision.ApprovalProposal?.ReasonCode == PermissionReasonCodes.AccessDeniedDeleteOperation, "Expected destructive approval proposal to carry stable reasonCode.");
+    AssertTrue(!string.IsNullOrWhiteSpace(noApprovalDecision.ApprovalProposal?.ExpectedEffect), "Expected destructive approval proposal to carry expectedEffect.");
 
     var approvedDecision = guard.Evaluate(session, new ToolAction
     {

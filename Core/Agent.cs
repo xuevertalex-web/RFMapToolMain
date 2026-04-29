@@ -2634,6 +2634,7 @@ Write the final project overview now.";
                 WorktreeRoot = p.WorktreeRoot,
                 RiskLevel = p.RiskLevel,
                 ReasonCode = p.ReasonCode,
+                ExpectedEffect = p.ExpectedEffect,
                 Reason = p.Reason,
                 ApprovalStatus = p.ApprovalStatus.ToString()
             }).ToArray();
@@ -2659,6 +2660,8 @@ Write the final project overview now.";
             public string RiskLevel { get; init; } = string.Empty;
             [JsonPropertyName("reasonCode")]
             public string ReasonCode { get; init; } = string.Empty;
+            [JsonPropertyName("expectedEffect")]
+            public string ExpectedEffect { get; init; } = string.Empty;
             [JsonPropertyName("reason")]
             public string Reason { get; init; } = string.Empty;
             [JsonPropertyName("approvalStatus")]
