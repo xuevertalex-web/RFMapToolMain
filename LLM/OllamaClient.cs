@@ -35,12 +35,14 @@ namespace LocalCursorAgent.LLM
             try
             {
                 var requestModel = await ResolveRequestModel(cancellationToken);
+                var tunedOptions = ResolveRequestOptions(requestModel);
                 var requestPayload = new
                 {
                     model = requestModel,
                     prompt,
                     stream = false,
-                    keep_alive = _keepAlive
+                    keep_alive = _keepAlive,
+                    options = tunedOptions
                 };
 
                 var json = JsonSerializer.Serialize(requestPayload);
@@ -180,6 +182,47 @@ namespace LocalCursorAgent.LLM
         {
             var raw = Environment.GetEnvironmentVariable("LOCALCURSOR_OLLAMA_KEEP_ALIVE");
             return string.IsNullOrWhiteSpace(raw) ? "0s" : raw.Trim();
+        }
+
+        private static object? ResolveRequestOptions(string requestModel)
+        {
+            if (!IsQwen7bInstruct(requestModel))
+                return null;
+
+            var numCtx = ReadIntEnv("LOCALCURSOR_OLLAMA_7B_NUM_CTX", 8192);
+            var numGpu = ReadIntEnv("LOCALCURSOR_OLLAMA_7B_NUM_GPU", 1);
+            var gpuLayers = ReadIntEnv("LOCALCURSOR_OLLAMA_7B_GPU_LAYERS", 26);
+            var temperature = ReadDoubleEnv("LOCALCURSOR_OLLAMA_7B_TEMPERATURE", 0.2);
+
+            return new
+            {
+                num_ctx = numCtx,
+                num_gpu = numGpu,
+                gpu_layers = gpuLayers,
+                temperature
+            };
+        }
+
+        private static bool IsQwen7bInstruct(string requestModel)
+        {
+            if (string.IsNullOrWhiteSpace(requestModel))
+                return false;
+
+            return requestModel.Contains("qwen2.5-coder:7b-instruct-q4_k_m", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static int ReadIntEnv(string key, int fallback)
+        {
+            var raw = Environment.GetEnvironmentVariable(key)?.Trim();
+            return int.TryParse(raw, out var parsed) && parsed > 0 ? parsed : fallback;
+        }
+
+        private static double ReadDoubleEnv(string key, double fallback)
+        {
+            var raw = Environment.GetEnvironmentVariable(key)?.Trim();
+            return double.TryParse(raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed) && parsed >= 0
+                ? parsed
+                : fallback;
         }
     }
 }
