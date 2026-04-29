@@ -238,6 +238,8 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
         const summary = normalizeOptionalLogText(payload.summary || payload.summaryText || payload.message);
         const buildText = normalizeStructuredBuildText(payload);
         const changedFiles = Array.isArray(payload.changedFiles) ? payload.changedFiles.filter(Boolean) : [];
+        const outsideBoundaryAttempts = Number.isFinite(payload.outsideBoundaryAttempts) ? Math.max(0, Math.floor(payload.outsideBoundaryAttempts)) : 0;
+        const highRiskApprovalRequiredActions = Number.isFinite(payload.highRiskApprovalRequiredActions) ? Math.max(0, Math.floor(payload.highRiskApprovalRequiredActions)) : 0;
         const modelProvider = normalizeOptionalLogText(payload.provider || payload.modelProvider);
         const model = normalizeOptionalLogText(payload.model);
         const modelText = [modelProvider, model].filter(Boolean).join(' / ');
@@ -254,6 +256,8 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
         if (summary) lines.push('Summary: ' + summary);
         lines.push('Build: ' + buildText);
         lines.push('ChangedFiles: ' + String(changedFiles.length));
+        lines.push('OutsideBoundaryAttempts: ' + String(outsideBoundaryAttempts));
+        lines.push('HighRiskApprovalRequired: ' + String(highRiskApprovalRequiredActions));
         if (fallbackReason || fallbackMode) lines.push('Fallback: ' + [fallbackReason, fallbackMode].filter(Boolean).join(' / '));
         if (modelText) lines.push('Model: ' + modelText);
         if (embeddingsInfo.text) lines.push('Embeddings: ' + embeddingsInfo.text);

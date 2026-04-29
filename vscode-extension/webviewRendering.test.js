@@ -536,6 +536,7 @@ function testStatusAndSummaryRendering() {
   assert.ok(context.resultBadge.className.includes('running'));
   assert.ok(context.summary.className.includes('na'));
   assert.ok(String(context.summary.textContent || '').includes('Next actions:'), 'Expected summary to include next actions block.');
+
 }
 
 testSelectorAndStatusPresence();
