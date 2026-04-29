@@ -2079,6 +2079,9 @@ Write the final project overview now.";
                 RuntimeEndpoint = ResolveRuntimeEndpoint(provider),
                 ConfiguredContextWindow = ResolveConfiguredContextWindow(provider),
                 ConfiguredGpuOffloadOptions = ResolveConfiguredGpuOffloadOptions(provider),
+                RuntimeTuningProfile = ResolveRuntimeTuningProfile(provider, model),
+                RuntimeTuningOptions = ResolveRuntimeTuningOptions(provider, model),
+                RuntimeTuningSource = ResolveRuntimeTuningSource(provider, model),
                 GpuUsageMeasured = false,
                 DegradedFlags = (degradedFlags ?? Array.Empty<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
                 FallbackReason = fallbackReason ?? string.Empty,
@@ -2176,6 +2179,15 @@ Write the final project overview now.";
 
             [JsonPropertyName("configuredGpuOffloadOptions")]
             public string ConfiguredGpuOffloadOptions { get; init; } = string.Empty;
+
+            [JsonPropertyName("runtimeTuningProfile")]
+            public string RuntimeTuningProfile { get; init; } = string.Empty;
+
+            [JsonPropertyName("runtimeTuningOptions")]
+            public string RuntimeTuningOptions { get; init; } = string.Empty;
+
+            [JsonPropertyName("runtimeTuningSource")]
+            public string RuntimeTuningSource { get; init; } = string.Empty;
 
             [JsonPropertyName("gpuUsageMeasured")]
             public bool GpuUsageMeasured { get; init; }
@@ -2414,6 +2426,53 @@ Write the final project overview now.";
             if (!string.IsNullOrWhiteSpace(gpuLayers))
                 options.Add($"gpu_layers={gpuLayers}");
             return string.Join(";", options);
+        }
+
+        private static string ResolveRuntimeTuningProfile(string? provider, string? model)
+        {
+            if (!string.Equals(provider, "ollama", StringComparison.OrdinalIgnoreCase))
+                return string.Empty;
+            if (string.IsNullOrWhiteSpace(model))
+                return string.Empty;
+            return model.Contains("qwen2.5-coder:7b-instruct-q4_k_m", StringComparison.OrdinalIgnoreCase)
+                ? "7b-quality-gpu-tuned"
+                : model.Contains("qwen2.5-coder:3b-instruct-q4_k_m", StringComparison.OrdinalIgnoreCase)
+                    ? "3b-fast"
+                    : string.Empty;
+        }
+
+        private static string ResolveRuntimeTuningOptions(string? provider, string? model)
+        {
+            if (!string.Equals(provider, "ollama", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(model))
+                return string.Empty;
+            if (!model.Contains("qwen2.5-coder:7b-instruct-q4_k_m", StringComparison.OrdinalIgnoreCase))
+                return string.Empty;
+            var numCtx = Environment.GetEnvironmentVariable("LOCALCURSOR_OLLAMA_7B_NUM_CTX")?.Trim();
+            var numGpu = Environment.GetEnvironmentVariable("LOCALCURSOR_OLLAMA_7B_NUM_GPU")?.Trim();
+            var gpuLayers = Environment.GetEnvironmentVariable("LOCALCURSOR_OLLAMA_7B_GPU_LAYERS")?.Trim();
+            var temperature = Environment.GetEnvironmentVariable("LOCALCURSOR_OLLAMA_7B_TEMPERATURE")?.Trim();
+            var options = new List<string>
+            {
+                $"num_ctx={(string.IsNullOrWhiteSpace(numCtx) ? "8192" : numCtx)}",
+                $"num_gpu={(string.IsNullOrWhiteSpace(numGpu) ? "1" : numGpu)}",
+                $"gpu_layers={(string.IsNullOrWhiteSpace(gpuLayers) ? "26" : gpuLayers)}",
+                $"temperature={(string.IsNullOrWhiteSpace(temperature) ? "0.2" : temperature)}"
+            };
+            return string.Join(";", options);
+        }
+
+        private static string ResolveRuntimeTuningSource(string? provider, string? model)
+        {
+            if (!string.Equals(provider, "ollama", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(model))
+                return string.Empty;
+            if (!model.Contains("qwen2.5-coder:7b-instruct-q4_k_m", StringComparison.OrdinalIgnoreCase))
+                return string.Empty;
+            var hasOverride =
+                !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LOCALCURSOR_OLLAMA_7B_NUM_CTX")) ||
+                !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LOCALCURSOR_OLLAMA_7B_NUM_GPU")) ||
+                !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LOCALCURSOR_OLLAMA_7B_GPU_LAYERS")) ||
+                !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LOCALCURSOR_OLLAMA_7B_TEMPERATURE"));
+            return hasOverride ? "env" : "default";
         }
 
         private static string[] BuildNextActionCandidates(bool planRequired, string reasonCode, string continuationHint, string lastKnownAction)

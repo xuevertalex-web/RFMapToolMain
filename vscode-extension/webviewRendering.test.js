@@ -168,7 +168,6 @@ function testModelStateHydrationAndSelectorOptions() {
   const optionValues = context.modelSelector.options.map(item => item.value);
   assert.deepStrictEqual(optionValues, [
     'qwen2.5-coder:3b-instruct-q4_K_M',
-    'qwen2.5-coder:7b',
     'qwen2.5-coder:7b-instruct-q4_K_M'
   ]);
   assert.strictEqual(context.selectedOllamaModel, 'qwen2.5-coder:7b-instruct-q4_K_M');
@@ -203,7 +202,7 @@ function testRunNormalizationContracts() {
       finalStatus: 'success',
       summary: 'analysis complete',
       message: 'done',
-      model: 'qwen2.5-coder:7b',
+      model: 'qwen2.5-coder:7b-instruct-q4_K_M',
       provider: 'ollama',
       buildStarted: false,
       buildSucceeded: false,
@@ -214,7 +213,7 @@ function testRunNormalizationContracts() {
   assert.strictEqual(success.fallbackReason, '');
   assert.strictEqual(success.fallbackMode, '');
   assert.strictEqual(success.reasonCode, '');
-  assert.strictEqual(success.modelUsed, 'ollama / qwen2.5-coder:7b');
+  assert.strictEqual(success.modelUsed, 'ollama / qwen2.5-coder:7b-instruct-q4_K_M');
   assert.strictEqual(success.changedFilesCount, 0);
   assert.strictEqual(success.approvalRequiredCount, 0);
   assert.strictEqual(success.externalAttempts, 0);
@@ -241,6 +240,9 @@ function testRunNormalizationContracts() {
   assert.strictEqual(success.runtimeEndpoint, 'not available');
   assert.strictEqual(success.configuredContextWindow, 'not available');
   assert.strictEqual(success.configuredGpuOffloadOptions, 'not available');
+  assert.strictEqual(success.runtimeTuningProfile, 'not available');
+  assert.strictEqual(success.runtimeTuningOptions, 'not available');
+  assert.strictEqual(success.runtimeTuningSource, 'not available');
   assert.strictEqual(success.gpuUsageMeasured, false);
   assertNoMojibake(success.summary, 'success summary');
 
@@ -494,11 +496,14 @@ function testStatusAndSummaryRendering() {
     buildStarted: false,
     buildSucceeded: false,
     changedFilesCount: 0,
-    modelUsed: 'ollama / qwen2.5-coder:7b',
+    modelUsed: 'ollama / qwen2.5-coder:7b-instruct-q4_K_M',
     runtimeProfile: 'ollama/qwen2.5-coder-7b-quality-gpu-tuned',
     runtimeEndpoint: 'http://localhost:11434',
     configuredContextWindow: '8192',
     configuredGpuOffloadOptions: 'num_gpu=1',
+    runtimeTuningProfile: '7b-quality-gpu-tuned',
+    runtimeTuningOptions: 'num_ctx=8192;num_gpu=1;gpu_layers=26;temperature=0.2',
+    runtimeTuningSource: 'default',
     gpuUsageMeasured: false,
     embeddingsSummary: 'not available',
     embeddingsWarning: false,
@@ -529,11 +534,14 @@ function testStatusAndSummaryRendering() {
   assert.ok(successRows.some(([key, value]) => key === 'approval status required' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'approval status denied' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'approval status n/a' && value === '0'));
-  assert.ok(successRows.some(([key, value]) => key === 'model used' && value === 'ollama / qwen2.5-coder:7b'));
+  assert.ok(successRows.some(([key, value]) => key === 'model used' && value === 'ollama / qwen2.5-coder:7b-instruct-q4_K_M'));
   assert.ok(successRows.some(([key, value]) => key === 'runtime profile' && value === 'ollama/qwen2.5-coder-7b-quality-gpu-tuned'));
   assert.ok(successRows.some(([key, value]) => key === 'runtime endpoint' && value === 'http://localhost:11434'));
   assert.ok(successRows.some(([key, value]) => key === 'configured context window' && value === '8192'));
   assert.ok(successRows.some(([key, value]) => key === 'configured gpu offload' && value === 'num_gpu=1'));
+  assert.ok(successRows.some(([key, value]) => key === 'runtime tuning profile' && value === '7b-quality-gpu-tuned'));
+  assert.ok(successRows.some(([key, value]) => key === 'runtime tuning options' && value === 'num_ctx=8192;num_gpu=1;gpu_layers=26;temperature=0.2'));
+  assert.ok(successRows.some(([key, value]) => key === 'runtime tuning source' && value === 'default'));
   assert.ok(successRows.some(([key, value]) => key === 'gpu usage measured' && value === 'false'));
   assert.ok(!successRows.some(([key]) => key === 'fallback reason'));
 

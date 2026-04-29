@@ -56,6 +56,9 @@ const webviewClientStatusRenderer = `function renderRunStatus(run) {
         rows.push(['runtime endpoint', normalizeStatusCell(run.runtimeEndpoint, 'not available')]);
         rows.push(['configured context window', normalizeStatusCell(run.configuredContextWindow, 'not available')]);
         rows.push(['configured gpu offload', normalizeStatusCell(run.configuredGpuOffloadOptions, 'not available')]);
+        rows.push(['runtime tuning profile', normalizeStatusCell(run.runtimeTuningProfile, 'not available')]);
+        rows.push(['runtime tuning options', normalizeStatusCell(run.runtimeTuningOptions, 'not available')]);
+        rows.push(['runtime tuning source', normalizeStatusCell(run.runtimeTuningSource, 'not available')]);
         rows.push(['gpu usage measured', String(run.gpuUsageMeasured === true)]);
         rows.push(['embeddings', embeddingsSummary]);
         rows.push(['duration', normalizeStatusCell(run.duration, 'not available')]);

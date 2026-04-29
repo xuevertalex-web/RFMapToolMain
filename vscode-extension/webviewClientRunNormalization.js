@@ -445,6 +445,9 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         const runtimeEndpoint = normalizeText(structured && structured.runtimeEndpoint, 'not available');
         const configuredContextWindow = normalizeText(structured && structured.configuredContextWindow, 'not available');
         const configuredGpuOffloadOptions = normalizeText(structured && structured.configuredGpuOffloadOptions, 'not available');
+        const runtimeTuningProfile = normalizeText(structured && structured.runtimeTuningProfile, 'not available');
+        const runtimeTuningOptions = normalizeText(structured && structured.runtimeTuningOptions, 'not available');
+        const runtimeTuningSource = normalizeText(structured && structured.runtimeTuningSource, 'not available');
         const gpuUsageMeasured = typeof (structured && structured.gpuUsageMeasured) === 'boolean'
           ? structured.gpuUsageMeasured
           : false;
@@ -505,6 +508,9 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           runtimeEndpoint,
           configuredContextWindow,
           configuredGpuOffloadOptions,
+          runtimeTuningProfile,
+          runtimeTuningOptions,
+          runtimeTuningSource,
           gpuUsageMeasured,
           modelUsed,
           reasonCode,
