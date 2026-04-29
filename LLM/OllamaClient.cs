@@ -13,7 +13,7 @@ namespace LocalCursorAgent.LLM
         private readonly string _keepAlive;
         private string? _resolvedModel;
 
-        public OllamaClient(string endpoint = "http://localhost:11434", string model = "qwen2.5-coder:7b")
+        public OllamaClient(string endpoint = "http://localhost:11434", string model = "qwen2.5-coder:3b-instruct-q4_K_M")
         {
             _endpoint = endpoint;
             _model = model;
@@ -103,7 +103,7 @@ namespace LocalCursorAgent.LLM
             var requested = _model.Trim();
             if (string.IsNullOrWhiteSpace(requested))
             {
-                _resolvedModel = "qwen2.5-coder:7b";
+                _resolvedModel = "qwen2.5-coder:3b-instruct-q4_K_M";
                 return _resolvedModel;
             }
 
@@ -149,7 +149,7 @@ namespace LocalCursorAgent.LLM
 
         public static string ResolveModelAlias(string requestedModel, IReadOnlyList<string> availableModels)
         {
-            var requested = string.IsNullOrWhiteSpace(requestedModel) ? "qwen2.5-coder:7b" : requestedModel.Trim();
+            var requested = string.IsNullOrWhiteSpace(requestedModel) ? "qwen2.5-coder:3b-instruct-q4_K_M" : requestedModel.Trim();
             if (availableModels is null || availableModels.Count == 0)
                 return requested;
 

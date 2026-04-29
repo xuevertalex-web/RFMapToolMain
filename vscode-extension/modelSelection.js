@@ -3,6 +3,7 @@ const http = require('http');
 const SELECTED_MODEL_STATE_KEY = 'localCursorAgent.selectedOllamaModel';
 
 const AVAILABLE_OLLAMA_MODELS = Object.freeze([
+  'qwen2.5-coder:3b-instruct-q4_K_M',
   'qwen2.5-coder:7b',
   'qwen2.5-coder:7b-instruct-q4_K_M'
 ]);

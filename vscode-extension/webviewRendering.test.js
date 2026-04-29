@@ -167,6 +167,7 @@ function testModelStateHydrationAndSelectorOptions() {
 
   const optionValues = context.modelSelector.options.map(item => item.value);
   assert.deepStrictEqual(optionValues, [
+    'qwen2.5-coder:3b-instruct-q4_K_M',
     'qwen2.5-coder:7b',
     'qwen2.5-coder:7b-instruct-q4_K_M'
   ]);

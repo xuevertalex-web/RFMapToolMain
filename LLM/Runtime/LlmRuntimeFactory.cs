@@ -40,7 +40,7 @@ namespace LocalCursorAgent.LLM.Runtime
         {
             var endpoint = Environment.GetEnvironmentVariable("OLLAMA_ENDPOINT")?.Trim();
             var modelName = ollamaModelOverride ?? Environment.GetEnvironmentVariable("OLLAMA_MODEL")?.Trim();
-            var model = string.IsNullOrWhiteSpace(modelName) ? "qwen2.5-coder:7b" : modelName;
+            var model = string.IsNullOrWhiteSpace(modelName) ? "qwen2.5-coder:3b-instruct-q4_K_M" : modelName;
 
             var adapter = new OllamaProviderAdapter(
                 string.IsNullOrWhiteSpace(endpoint) ? "http://localhost:11434" : endpoint,
