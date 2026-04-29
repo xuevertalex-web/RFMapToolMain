@@ -292,9 +292,10 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
           const target = normalizeOptionalLogText(item.normalizedTarget || item.path || item.command);
           const riskLevel = normalizeOptionalLogText(item.riskLevel);
           const reasonCode = normalizeOptionalLogText(item.reasonCode);
+          const expectedEffect = normalizeOptionalLogText(item.expectedEffect);
           const approvalStatus = normalizeOptionalLogText(item.approvalStatus);
           const reason = normalizeOptionalLogText(item.reason);
-          lines.push('ApprovalProposal: ' + [actionType, target, riskLevel, reasonCode, approvalStatus, reason].filter(Boolean).join(' | '));
+          lines.push('ApprovalProposal: ' + [actionType, target, riskLevel, reasonCode, expectedEffect, approvalStatus, reason].filter(Boolean).join(' | '));
         }
         if (fallbackReason || fallbackMode) lines.push('Fallback: ' + [fallbackReason, fallbackMode].filter(Boolean).join(' / '));
         if (modelText) lines.push('Model: ' + modelText);
