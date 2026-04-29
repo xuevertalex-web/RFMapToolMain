@@ -229,6 +229,11 @@ function testRunNormalizationContracts() {
   assert.strictEqual(success.buildText, 'not started');
   assert.strictEqual(success.embeddingsSummary, 'not available');
   assert.strictEqual(success.embeddingsWarning, false);
+  assert.strictEqual(success.runtimeProfile, 'not available');
+  assert.strictEqual(success.runtimeEndpoint, 'not available');
+  assert.strictEqual(success.configuredContextWindow, 'not available');
+  assert.strictEqual(success.configuredGpuOffloadOptions, 'not available');
+  assert.strictEqual(success.gpuUsageMeasured, false);
   assertNoMojibake(success.summary, 'success summary');
 
   const timeoutFallback = context.normalizeRunResult({
@@ -445,6 +450,11 @@ function testStatusAndSummaryRendering() {
     buildSucceeded: false,
     changedFilesCount: 0,
     modelUsed: 'ollama / qwen2.5-coder:7b',
+    runtimeProfile: 'ollama/qwen2.5-coder-instruct-q4_k_m',
+    runtimeEndpoint: 'http://localhost:11434',
+    configuredContextWindow: '8192',
+    configuredGpuOffloadOptions: 'num_gpu=1',
+    gpuUsageMeasured: false,
     embeddingsSummary: 'not available',
     embeddingsWarning: false,
     duration: '500 ms',
@@ -466,6 +476,11 @@ function testStatusAndSummaryRendering() {
   assert.ok(successRows.some(([key, value]) => key === 'host boundary preserved' && value === 'true'));
   assert.ok(successRows.some(([key, value]) => key === 'lifecycle executed' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'model used' && value === 'ollama / qwen2.5-coder:7b'));
+  assert.ok(successRows.some(([key, value]) => key === 'runtime profile' && value === 'ollama/qwen2.5-coder-instruct-q4_k_m'));
+  assert.ok(successRows.some(([key, value]) => key === 'runtime endpoint' && value === 'http://localhost:11434'));
+  assert.ok(successRows.some(([key, value]) => key === 'configured context window' && value === '8192'));
+  assert.ok(successRows.some(([key, value]) => key === 'configured gpu offload' && value === 'num_gpu=1'));
+  assert.ok(successRows.some(([key, value]) => key === 'gpu usage measured' && value === 'false'));
   assert.ok(!successRows.some(([key]) => key === 'fallback reason'));
 
   context.renderRunSummary(successRun);

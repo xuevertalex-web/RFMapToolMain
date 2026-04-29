@@ -90,7 +90,7 @@ public sealed class PermissionGuard
         {
             var hasApprovalMarker = HasExplicitApprovalMarker(action.Payload);
             if (IsHighRiskCommand(action.Payload) && !hasApprovalMarker)
-                return CreateApprovalRequired(action, "High-risk host diagnostic/system command requires explicit approval", normalizedTarget ?? normalizedWorkspace, normalizedWorkspace);
+                return CreateApprovalRequired(action, "High-risk host/system/network-impacting command requires explicit approval", normalizedTarget ?? normalizedWorkspace, normalizedWorkspace, ResolveCommandRiskLevel(action.Payload));
 
             return PermissionDecision.Allow(normalizedTarget ?? normalizedWorkspace, normalizedWorkspace);
         }
@@ -166,12 +166,39 @@ public sealed class PermissionGuard
 
         var lowered = text.ToLowerInvariant();
         return lowered.Contains("nvidia-smi", StringComparison.Ordinal) ||
+               lowered.Contains("curl ", StringComparison.Ordinal) ||
+               lowered.Contains("wget ", StringComparison.Ordinal) ||
+               lowered.Contains("invoke-webrequest", StringComparison.Ordinal) ||
+               lowered.Contains("invoke-restmethod", StringComparison.Ordinal) ||
                lowered.Contains("netstat", StringComparison.Ordinal) ||
                lowered.Contains("tcpdump", StringComparison.Ordinal) ||
                lowered.Contains("wireshark", StringComparison.Ordinal) ||
                lowered.Contains("tasklist", StringComparison.Ordinal) ||
                lowered.Contains("get-process", StringComparison.Ordinal) ||
-               lowered.Contains("wmic", StringComparison.Ordinal);
+               lowered.Contains("wmic", StringComparison.Ordinal) ||
+               lowered.Contains("pip install", StringComparison.Ordinal) ||
+               lowered.Contains("npm install -g", StringComparison.Ordinal) ||
+               lowered.Contains("winget install", StringComparison.Ordinal) ||
+               lowered.Contains("choco install", StringComparison.Ordinal) ||
+               lowered.Contains("apt install", StringComparison.Ordinal) ||
+               lowered.Contains("yum install", StringComparison.Ordinal) ||
+               lowered.Contains("dnf install", StringComparison.Ordinal) ||
+               lowered.Contains("powershell -enc", StringComparison.Ordinal) ||
+               lowered.Contains("remove-item -recurse", StringComparison.Ordinal) ||
+               lowered.Contains("rm -rf", StringComparison.Ordinal);
+    }
+
+    private static string ResolveCommandRiskLevel(string? payload)
+    {
+        var lowered = NormalizeCommandPayload(payload).ToLowerInvariant();
+        if (lowered.Contains("rm -rf", StringComparison.Ordinal) ||
+            lowered.Contains("remove-item -recurse", StringComparison.Ordinal) ||
+            lowered.Contains("powershell -enc", StringComparison.Ordinal))
+        {
+            return "high";
+        }
+
+        return "medium";
     }
 
     private static bool HasExplicitApprovalMarker(string? payload)
@@ -267,7 +294,7 @@ public sealed class PermissionGuard
         return false;
     }
 
-    private static PermissionDecision CreateApprovalRequired(ToolAction action, string message, string normalizedTarget, string normalizedWorkspace)
+    private static PermissionDecision CreateApprovalRequired(ToolAction action, string message, string normalizedTarget, string normalizedWorkspace, string riskLevel = "high")
     {
         var proposal = new ActionApprovalProposal
         {
@@ -279,7 +306,7 @@ public sealed class PermissionGuard
             ProjectRoot = normalizedWorkspace,
             WorktreeRoot = normalizedWorkspace,
             IsInsideSandbox = false,
-            RiskLevel = "high",
+            RiskLevel = riskLevel,
             Reason = message,
             RequiresApproval = true,
             ApprovalStatus = ApprovalStatus.ApprovalRequired

@@ -43,6 +43,11 @@ const webviewClientStatusRenderer = `function renderRunStatus(run) {
         rows.push(['lifecycle executed', String(Math.max(0, Number(run.actionLifecycleCounts && run.actionLifecycleCounts.executed) || 0))]);
         rows.push(['lifecycle failed', String(Math.max(0, Number(run.actionLifecycleCounts && run.actionLifecycleCounts.failed) || 0))]);
         rows.push(['model used', modelUsed]);
+        rows.push(['runtime profile', normalizeStatusCell(run.runtimeProfile, 'not available')]);
+        rows.push(['runtime endpoint', normalizeStatusCell(run.runtimeEndpoint, 'not available')]);
+        rows.push(['configured context window', normalizeStatusCell(run.configuredContextWindow, 'not available')]);
+        rows.push(['configured gpu offload', normalizeStatusCell(run.configuredGpuOffloadOptions, 'not available')]);
+        rows.push(['gpu usage measured', String(run.gpuUsageMeasured === true)]);
         rows.push(['embeddings', embeddingsSummary]);
         rows.push(['duration', normalizeStatusCell(run.duration, 'not available')]);
         rows.push(['workspace', normalizeStatusCell(run.workspace, 'not available')]);

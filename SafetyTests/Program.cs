@@ -1306,6 +1306,13 @@ static async Task RunHostDiagnosticsCommandApprovalRegression()
     AssertTrue(!decision.Allowed, "Expected nvidia-smi to require approval.");
     AssertTrue(decision.RequiresApproval, "Expected approval requirement for host diagnostics command.");
     AssertTrue(decision.ApprovalProposal is not null, "Expected structured approval proposal for host diagnostics.");
+    var packageInstallDecision = guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.RunCommand,
+        WorkingDirectory = workspaceRoot,
+        Payload = "npm install -g typescript"
+    });
+    AssertTrue(!packageInstallDecision.Allowed && packageInstallDecision.RequiresApproval, "Expected global package install command to require approval.");
 
     var approvedDecision = guard.Evaluate(session, new ToolAction
     {

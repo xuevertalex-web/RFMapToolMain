@@ -400,6 +400,13 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         const status = normalizeFinalStatusValue(structured, ok, failed);
         const provider = normalizeText(structured && (structured.provider || structured.modelProvider), 'not available');
         const model = normalizeText(structured && structured.model, 'not available');
+        const runtimeProfile = normalizeText(structured && structured.runtimeProfile, 'not available');
+        const runtimeEndpoint = normalizeText(structured && structured.runtimeEndpoint, 'not available');
+        const configuredContextWindow = normalizeText(structured && structured.configuredContextWindow, 'not available');
+        const configuredGpuOffloadOptions = normalizeText(structured && structured.configuredGpuOffloadOptions, 'not available');
+        const gpuUsageMeasured = typeof (structured && structured.gpuUsageMeasured) === 'boolean'
+          ? structured.gpuUsageMeasured
+          : false;
         const modelUsed = normalizeModelUsedText(provider, model);
         const duration = normalizeDurationText(structured);
         const fallbackReason = normalizeOptionalText(structured && structured.fallbackReason);
@@ -453,6 +460,11 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           duration,
           provider,
           model,
+          runtimeProfile,
+          runtimeEndpoint,
+          configuredContextWindow,
+          configuredGpuOffloadOptions,
+          gpuUsageMeasured,
           modelUsed,
           reasonCode,
           continuationHint,
