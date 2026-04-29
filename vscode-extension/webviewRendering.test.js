@@ -491,6 +491,7 @@ function testRunNormalizationContracts() {
           normalizedTarget: 'C:/outside.txt',
           riskLevel: 'high',
           reasonCode: 'ACCESS_DENIED_OUTSIDE_WORKSPACE',
+          expectedEffect: 'Reads file content from the specified target path.',
           reason: 'Target is outside active workspace',
           approvalStatus: 'ApprovalRequired',
           hiddenThought: 'must not leak'
@@ -500,6 +501,7 @@ function testRunNormalizationContracts() {
   });
   assert.strictEqual(approvalShapeRun.approvalRequiredActions.length, 1);
   assert.strictEqual(approvalShapeRun.approvalRequiredActions[0].reasonCode, 'ACCESS_DENIED_OUTSIDE_WORKSPACE');
+  assert.strictEqual(approvalShapeRun.approvalRequiredActions[0].expectedEffect, 'Reads file content from the specified target path.');
   assert.strictEqual(Object.prototype.hasOwnProperty.call(approvalShapeRun.approvalRequiredActions[0], 'hiddenThought'), false);
 }
 
