@@ -7,6 +7,29 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         return String(value === undefined || value === null ? '' : value).trim();
       }
 
+      function isOutsideSandboxTarget(item) {
+        if (!item || typeof item !== 'object') {
+          return false;
+        }
+
+        const normalizedTarget = normalizeOptionalText(item.normalizedTarget).toLowerCase();
+        const sandboxRoot = normalizeOptionalText(item.sandboxRoot).toLowerCase();
+        if (!normalizedTarget) {
+          return false;
+        }
+        if (!sandboxRoot) {
+          return true;
+        }
+        if (normalizedTarget === sandboxRoot) {
+          return false;
+        }
+
+        const slash = sandboxRoot.endsWith('/') || sandboxRoot.endsWith('\\\\') ? '' : '/';
+        const normalizedSandboxPrefix = (sandboxRoot + slash).replace(/\\\\/g, '/');
+        const normalizedTargetPath = normalizedTarget.replace(/\\\\/g, '/');
+        return !normalizedTargetPath.startsWith(normalizedSandboxPrefix);
+      }
+
       function normalizeDurationText(structured) {
         if (!structured || typeof structured !== 'object') {
           return 'not available';
@@ -190,6 +213,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
             path: normalizeOptionalText(item.path),
             command: normalizeOptionalText(item.command),
             normalizedTarget: normalizeText(item.normalizedTarget, ''),
+            sandboxRoot: normalizeOptionalText(item.sandboxRoot),
             riskLevel: normalizeText(item.riskLevel, 'not available'),
             reasonCode: normalizeOptionalText(item.reasonCode),
             reason: normalizeText(item.reason, 'not available'),
@@ -410,7 +434,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           : approvalRequiredActions.length;
         const outsideBoundaryAttempts = Number.isFinite(structured && structured.outsideBoundaryAttempts)
           ? Math.max(0, Math.floor(structured.outsideBoundaryAttempts))
-          : approvalRequiredActions.filter(item => item && item.normalizedTarget).length;
+          : approvalRequiredActions.filter(isOutsideSandboxTarget).length;
         const highRiskApprovalRequiredActions = Number.isFinite(structured && structured.highRiskApprovalRequiredActions)
           ? Math.max(0, Math.floor(structured.highRiskApprovalRequiredActions))
           : approvalRequiredActions.filter(item => String(item && item.riskLevel || '').toLowerCase() === 'high').length;

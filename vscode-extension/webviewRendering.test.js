@@ -403,6 +403,32 @@ function testRunNormalizationContracts() {
   assert.strictEqual(approvalOnlyRun.executedActions, 0);
   assert.strictEqual(approvalOnlyRun.failedActions, 0);
 
+  const mixedBoundaryRun = context.normalizeRunResult({
+    ok: false,
+    structuredResult: {
+      ok: false,
+      finalStatus: 'error',
+      approvalRequiredActions: [
+        {
+          actionType: 'RunCommand',
+          normalizedTarget: 'C:/repo/workspace/outside.txt',
+          sandboxRoot: 'C:/repo/workspace',
+          riskLevel: 'medium',
+          approvalStatus: 'ApprovalRequired'
+        },
+        {
+          actionType: 'RunCommand',
+          normalizedTarget: 'C:/outside.txt',
+          sandboxRoot: 'C:/repo/workspace',
+          riskLevel: 'high',
+          approvalStatus: 'ApprovalRequired'
+        }
+      ]
+    }
+  });
+  assert.strictEqual(mixedBoundaryRun.approvalRequiredCount, 2);
+  assert.strictEqual(mixedBoundaryRun.outsideBoundaryAttempts, 1);
+
   const lifecycleRun = context.normalizeRunResult({
     ok: true,
     structuredResult: {
