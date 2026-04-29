@@ -249,6 +249,13 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
         const failedActions = Number.isFinite(payload.failedActions) ? Math.max(0, Math.floor(payload.failedActions)) : 0;
         const outsideBoundaryAttempts = Number.isFinite(payload.outsideBoundaryAttempts) ? Math.max(0, Math.floor(payload.outsideBoundaryAttempts)) : 0;
         const highRiskApprovalRequiredActions = Number.isFinite(payload.highRiskApprovalRequiredActions) ? Math.max(0, Math.floor(payload.highRiskApprovalRequiredActions)) : 0;
+        const approvalStatusSummary = payload.approvalStatusSummary && typeof payload.approvalStatusSummary === 'object'
+          ? payload.approvalStatusSummary
+          : {};
+        const approvalStatusAllowed = Number.isFinite(approvalStatusSummary.allowed) ? Math.max(0, Math.floor(approvalStatusSummary.allowed)) : 0;
+        const approvalStatusRequired = Number.isFinite(approvalStatusSummary.approvalRequired) ? Math.max(0, Math.floor(approvalStatusSummary.approvalRequired)) : 0;
+        const approvalStatusDenied = Number.isFinite(approvalStatusSummary.denied) ? Math.max(0, Math.floor(approvalStatusSummary.denied)) : 0;
+        const approvalStatusNotApplicable = Number.isFinite(approvalStatusSummary.notApplicable) ? Math.max(0, Math.floor(approvalStatusSummary.notApplicable)) : 0;
         const hostBoundaryPreserved = typeof payload.hostBoundaryPreserved === 'boolean' ? payload.hostBoundaryPreserved : true;
         const modelProvider = normalizeOptionalLogText(payload.provider || payload.modelProvider);
         const model = normalizeOptionalLogText(payload.model);
@@ -275,6 +282,10 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
         lines.push('FailedActions: ' + String(failedActions));
         lines.push('OutsideBoundaryAttempts: ' + String(outsideBoundaryAttempts));
         lines.push('HighRiskApprovalRequired: ' + String(highRiskApprovalRequiredActions));
+        lines.push('ApprovalStatusAllowed: ' + String(approvalStatusAllowed));
+        lines.push('ApprovalStatusRequired: ' + String(approvalStatusRequired));
+        lines.push('ApprovalStatusDenied: ' + String(approvalStatusDenied));
+        lines.push('ApprovalStatusNotApplicable: ' + String(approvalStatusNotApplicable));
         lines.push('HostBoundaryPreserved: ' + String(hostBoundaryPreserved));
         for (const item of approvalRequiredActions.slice(0, 3)) {
           const actionType = normalizeOptionalLogText(item.actionType) || 'UnknownAction';
