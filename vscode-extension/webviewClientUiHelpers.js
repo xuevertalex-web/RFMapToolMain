@@ -296,13 +296,14 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
           const projectRoot = normalizeOptionalLogText(item.projectRoot);
           const worktreeRoot = normalizeOptionalLogText(item.worktreeRoot);
           const riskLevel = normalizeOptionalLogText(item.riskLevel);
+          const riskMarker = riskLevel ? ('risk_' + riskLevel.toLowerCase()) : '';
           const reasonCode = normalizeOptionalLogText(item.reasonCode);
           const expectedEffect = normalizeOptionalLogText(item.expectedEffect);
           const isInsideSandbox = item.isInsideSandbox === true ? 'inside_sandbox' : 'outside_sandbox';
           const requiresApproval = item.requiresApproval === false ? 'no_approval' : 'requires_approval';
           const approvalStatus = normalizeOptionalLogText(item.approvalStatus);
           const reason = normalizeOptionalLogText(item.reason);
-          lines.push('ApprovalProposal: ' + [actionType, command, rawPath, target, sandboxRoot, projectRoot, worktreeRoot, isInsideSandbox, requiresApproval, approvalStatus, riskLevel, reasonCode, expectedEffect, reason].filter(Boolean).join(' | '));
+          lines.push('ApprovalProposal: ' + [actionType, command, rawPath, target, sandboxRoot, projectRoot, worktreeRoot, isInsideSandbox, requiresApproval, approvalStatus, riskLevel, riskMarker, reasonCode, expectedEffect, reason].filter(Boolean).join(' | '));
         }
         if (fallbackReason || fallbackMode) lines.push('Fallback: ' + [fallbackReason, fallbackMode].filter(Boolean).join(' / '));
         if (modelText) lines.push('Model: ' + modelText);
