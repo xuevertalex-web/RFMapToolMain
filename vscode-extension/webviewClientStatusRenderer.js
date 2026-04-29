@@ -44,6 +44,10 @@ const webviewClientStatusRenderer = `function renderRunStatus(run) {
         rows.push(['lifecycle blocked', String(Math.max(0, Number(run.actionLifecycleCounts && run.actionLifecycleCounts.blocked) || 0))]);
         rows.push(['lifecycle executed', String(Math.max(0, Number(run.actionLifecycleCounts && run.actionLifecycleCounts.executed) || 0))]);
         rows.push(['lifecycle failed', String(Math.max(0, Number(run.actionLifecycleCounts && run.actionLifecycleCounts.failed) || 0))]);
+        rows.push(['approval status allowed', String(Math.max(0, Number(run.approvalStatusSummary && run.approvalStatusSummary.allowed) || 0))]);
+        rows.push(['approval status required', String(Math.max(0, Number(run.approvalStatusSummary && run.approvalStatusSummary.approvalRequired) || 0))]);
+        rows.push(['approval status denied', String(Math.max(0, Number(run.approvalStatusSummary && run.approvalStatusSummary.denied) || 0))]);
+        rows.push(['approval status n/a', String(Math.max(0, Number(run.approvalStatusSummary && run.approvalStatusSummary.notApplicable) || 0))]);
         rows.push(['model used', modelUsed]);
         rows.push(['runtime profile', normalizeStatusCell(run.runtimeProfile, 'not available')]);
         rows.push(['runtime endpoint', normalizeStatusCell(run.runtimeEndpoint, 'not available')]);

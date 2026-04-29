@@ -2116,7 +2116,8 @@ Write the final project overview now.";
                 DeniedActions = tracerDeniedActions,
                 BlockedActions = actionLifecycleEntries.Count(e => e.LifecycleState == ActionLifecycleState.Blocked),
                 HostBoundaryPreserved = true,
-                ActionLifecycle = MapActionLifecycle(actionLifecycleEntries)
+                ActionLifecycle = MapActionLifecycle(actionLifecycleEntries),
+                ApprovalStatusSummary = BuildApprovalStatusSummary(actionLifecycleEntries)
             };
 
             Console.WriteLine(JsonSerializer.Serialize(payload));
@@ -2271,6 +2272,61 @@ Write the final project overview now.";
 
             [JsonPropertyName("actionLifecycle")]
             public ActionLifecyclePayload[] ActionLifecycle { get; init; } = Array.Empty<ActionLifecyclePayload>();
+
+            [JsonPropertyName("approvalStatusSummary")]
+            public ApprovalStatusSummaryPayload ApprovalStatusSummary { get; init; } = new();
+        }
+
+        private sealed class ApprovalStatusSummaryPayload
+        {
+            [JsonPropertyName("allowed")]
+            public int Allowed { get; init; }
+
+            [JsonPropertyName("approvalRequired")]
+            public int ApprovalRequired { get; init; }
+
+            [JsonPropertyName("denied")]
+            public int Denied { get; init; }
+
+            [JsonPropertyName("notApplicable")]
+            public int NotApplicable { get; init; }
+        }
+
+        private static ApprovalStatusSummaryPayload BuildApprovalStatusSummary(IReadOnlyList<ActionLifecycleEntry> entries)
+        {
+            var allowed = 0;
+            var approvalRequired = 0;
+            var denied = 0;
+            var notApplicable = 0;
+
+            foreach (var entry in entries)
+            {
+                var status = (entry?.ApprovalStatus ?? string.Empty).Trim();
+                if (status.Equals(ApprovalStatus.Allowed.ToString(), StringComparison.OrdinalIgnoreCase))
+                {
+                    allowed++;
+                }
+                else if (status.Equals(ApprovalStatus.ApprovalRequired.ToString(), StringComparison.OrdinalIgnoreCase))
+                {
+                    approvalRequired++;
+                }
+                else if (status.Equals(ApprovalStatus.Denied.ToString(), StringComparison.OrdinalIgnoreCase))
+                {
+                    denied++;
+                }
+                else
+                {
+                    notApplicable++;
+                }
+            }
+
+            return new ApprovalStatusSummaryPayload
+            {
+                Allowed = allowed,
+                ApprovalRequired = approvalRequired,
+                Denied = denied,
+                NotApplicable = notApplicable
+            };
         }
 
         private sealed class SessionContinuationPayload

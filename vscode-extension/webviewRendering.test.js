@@ -219,6 +219,10 @@ function testRunNormalizationContracts() {
   assert.strictEqual(success.externalAttempts, 0);
   assert.strictEqual(success.deniedActions, 0);
   assert.strictEqual(success.blockedActions, 0);
+  assert.strictEqual(success.approvalStatusSummary.allowed, 0);
+  assert.strictEqual(success.approvalStatusSummary.approvalRequired, 0);
+  assert.strictEqual(success.approvalStatusSummary.denied, 0);
+  assert.strictEqual(success.approvalStatusSummary.notApplicable, 0);
   assert.strictEqual(success.planRequired, false);
   assert.strictEqual(success.continuationHint, '');
   assert.strictEqual(success.sessionContinuation.lastSuccessfulStep, '');
@@ -355,6 +359,10 @@ function testRunNormalizationContracts() {
   assert.strictEqual(approvalRun.actionLifecycleCounts.blocked, 0);
   assert.strictEqual(approvalRun.actionLifecycleCounts.executed, 0);
   assert.strictEqual(approvalRun.actionLifecycleCounts.failed, 0);
+  assert.strictEqual(approvalRun.approvalStatusSummary.allowed, 0);
+  assert.strictEqual(approvalRun.approvalStatusSummary.approvalRequired, 0);
+  assert.strictEqual(approvalRun.approvalStatusSummary.denied, 0);
+  assert.strictEqual(approvalRun.approvalStatusSummary.notApplicable, 0);
 
   const approvalOnlyRun = context.normalizeRunResult({
     ok: false,
@@ -400,6 +408,28 @@ function testRunNormalizationContracts() {
   assert.strictEqual(lifecycleRun.deniedActions, 1);
   assert.strictEqual(lifecycleRun.blockedActions, 1);
   assert.strictEqual(lifecycleRun.actionLifecycle[0].actionCorrelationId, 'act-1');
+  assert.strictEqual(lifecycleRun.approvalStatusSummary.allowed, 0);
+  assert.strictEqual(lifecycleRun.approvalStatusSummary.approvalRequired, 0);
+  assert.strictEqual(lifecycleRun.approvalStatusSummary.denied, 0);
+  assert.strictEqual(lifecycleRun.approvalStatusSummary.notApplicable, 5);
+
+  const approvalSummaryRun = context.normalizeRunResult({
+    ok: true,
+    structuredResult: {
+      ok: true,
+      finalStatus: 'success',
+      approvalStatusSummary: {
+        allowed: 2,
+        approvalRequired: 3,
+        denied: 1,
+        notApplicable: 4
+      }
+    }
+  });
+  assert.strictEqual(approvalSummaryRun.approvalStatusSummary.allowed, 2);
+  assert.strictEqual(approvalSummaryRun.approvalStatusSummary.approvalRequired, 3);
+  assert.strictEqual(approvalSummaryRun.approvalStatusSummary.denied, 1);
+  assert.strictEqual(approvalSummaryRun.approvalStatusSummary.notApplicable, 4);
 
   const approvalShapeRun = context.normalizeRunResult({
     ok: false,
@@ -479,6 +509,10 @@ function testStatusAndSummaryRendering() {
   assert.ok(successRows.some(([key, value]) => key === 'next actions' && value === 'not available'));
   assert.ok(successRows.some(([key, value]) => key === 'host boundary preserved' && value === 'true'));
   assert.ok(successRows.some(([key, value]) => key === 'lifecycle executed' && value === '0'));
+  assert.ok(successRows.some(([key, value]) => key === 'approval status allowed' && value === '0'));
+  assert.ok(successRows.some(([key, value]) => key === 'approval status required' && value === '0'));
+  assert.ok(successRows.some(([key, value]) => key === 'approval status denied' && value === '0'));
+  assert.ok(successRows.some(([key, value]) => key === 'approval status n/a' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'model used' && value === 'ollama / qwen2.5-coder:7b'));
   assert.ok(successRows.some(([key, value]) => key === 'runtime profile' && value === 'ollama/qwen2.5-coder-instruct-q4_k_m'));
   assert.ok(successRows.some(([key, value]) => key === 'runtime endpoint' && value === 'http://localhost:11434'));
@@ -513,6 +547,12 @@ function testStatusAndSummaryRendering() {
       blocked: 1,
       executed: 1,
       failed: 0
+    },
+    approvalStatusSummary: {
+      allowed: 1,
+      approvalRequired: 2,
+      denied: 2,
+      notApplicable: 0
     }
   };
 
@@ -530,6 +570,9 @@ function testStatusAndSummaryRendering() {
   assert.ok(fallbackRows.some(([key, value]) => key === 'lifecycle requested' && value === '3'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'lifecycle approval_required' && value === '2'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'lifecycle blocked' && value === '1'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'approval status allowed' && value === '1'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'approval status required' && value === '2'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'approval status denied' && value === '2'));
 
   context.renderRunSummary(fallbackRun);
   assert.strictEqual(context.resultBadge.textContent, 'fallback-success');

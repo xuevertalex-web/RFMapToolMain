@@ -231,6 +231,31 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         return counts;
       }
 
+      function normalizeApprovalStatusSummary(structured, actionLifecycle) {
+        const source = structured && typeof structured.approvalStatusSummary === 'object' && structured.approvalStatusSummary
+          ? structured.approvalStatusSummary
+          : null;
+
+        if (source) {
+          return {
+            allowed: Number.isFinite(source.allowed) ? Math.max(0, Math.floor(source.allowed)) : 0,
+            approvalRequired: Number.isFinite(source.approvalRequired) ? Math.max(0, Math.floor(source.approvalRequired)) : 0,
+            denied: Number.isFinite(source.denied) ? Math.max(0, Math.floor(source.denied)) : 0,
+            notApplicable: Number.isFinite(source.notApplicable) ? Math.max(0, Math.floor(source.notApplicable)) : 0
+          };
+        }
+
+        const summary = { allowed: 0, approvalRequired: 0, denied: 0, notApplicable: 0 };
+        for (const entry of actionLifecycle || []) {
+          const status = String(entry && entry.approvalStatus || '').trim().toLowerCase();
+          if (status === 'allowed') summary.allowed++;
+          else if (status === 'approvalrequired') summary.approvalRequired++;
+          else if (status === 'denied') summary.denied++;
+          else summary.notApplicable++;
+        }
+        return summary;
+      }
+
       function isTimeoutFallbackReason(fallbackReason) {
         return String(fallbackReason || '').trim().toUpperCase() === 'MODEL_TIMEOUT';
       }
@@ -378,6 +403,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         const approvalRequiredActions = normalizeApprovalRequiredActions(structured);
         const actionLifecycle = normalizeActionLifecycle(structured);
         const actionLifecycleCounts = buildActionLifecycleCounts(actionLifecycle);
+        const approvalStatusSummary = normalizeApprovalStatusSummary(structured, actionLifecycle);
         const externalAttempts = Number.isFinite(structured && structured.externalAttempts)
           ? Math.max(0, Math.floor(structured.externalAttempts))
           : approvalRequiredActions.length;
@@ -503,6 +529,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           hostBoundaryPreserved,
           actionLifecycle,
           actionLifecycleCounts,
+          approvalStatusSummary,
           changedHints,
           changedRanges,
           changedKinds,
