@@ -49,6 +49,21 @@ namespace LocalCursorAgent.LLM.Runtime
                 StallProfile: "local_ollama_progress_aware",
                 RetryPreference: "provider-fallback",
                 PreferFallbackOnHardFailure: true),
+            ["ollama/qwen2.5-coder-7b-quality-gpu-tuned"] = new(
+                ProfileId: "ollama/qwen2.5-coder-7b-quality-gpu-tuned",
+                Provider: "ollama",
+                ContextClass: "local-medium",
+                ExpectedLatencyClass: "slow-local",
+                StreamingSupported: false,
+                StructuredOutputReliability: "medium",
+                CodeStrength: "high",
+                ParsingStrictness: "lenient",
+                UsableTextTolerance: "very_high",
+                ExpectedAnalysisResponseMode: "plain_text_terse_ok",
+                TimeoutProfile: "local_ollama_relaxed",
+                StallProfile: "local_ollama_progress_aware",
+                RetryPreference: "provider-fallback",
+                PreferFallbackOnHardFailure: true),
             ["openai/default"] = new(
                 ProfileId: "openai/default",
                 Provider: "openai",
@@ -99,7 +114,7 @@ namespace LocalCursorAgent.LLM.Runtime
             if (provider.Equals("ollama", StringComparison.OrdinalIgnoreCase) &&
                 IsQwen25CoderInstructQ4Km(model))
             {
-                return Profiles["ollama/qwen2.5-coder-instruct-q4_k_m"];
+                return Profiles["ollama/qwen2.5-coder-7b-quality-gpu-tuned"];
             }
 
             if (provider.Equals("ollama", StringComparison.OrdinalIgnoreCase) &&

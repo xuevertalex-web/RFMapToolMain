@@ -685,7 +685,7 @@ static Task RunOllamaQwenProfileSelectionRegression()
     var instructPolicy = LlmProfiles.ResolvePolicy("ollama", "qwen2.5-coder:7b-instruct-q4_K_M");
 
     AssertTrue(baseProfile.ProfileId == "ollama/qwen2.5-coder", "Expected qwen base profile template.");
-    AssertTrue(instructProfile.ProfileId == "ollama/qwen2.5-coder-instruct-q4_k_m", "Expected qwen instruct profile template.");
+    AssertTrue(instructProfile.ProfileId == "ollama/qwen2.5-coder-7b-quality-gpu-tuned", "Expected qwen 7b quality gpu-tuned profile template.");
     AssertTrue(baseProfile.UsableTextTolerance == "high", "Expected high usable text tolerance for local qwen profile.");
     AssertTrue(instructProfile.UsableTextTolerance == "very_high", "Expected very high usable text tolerance for local qwen instruct profile.");
     AssertTrue(instructProfile.ExpectedAnalysisResponseMode == "plain_text_terse_ok", "Expected terse plain text analysis mode for qwen instruct profile.");
@@ -1350,7 +1350,7 @@ static async Task RunRuntimeGpuDiagnosticsTruthfulReportingRegression()
     {
         provider = "ollama",
         model = "qwen2.5-coder:7b-instruct-q4_K_M",
-        runtimeProfile = "ollama/qwen2.5-coder-instruct-q4_k_m",
+            runtimeProfile = "ollama/qwen2.5-coder-7b-quality-gpu-tuned",
         runtimeEndpoint = "http://localhost:11434",
         configuredContextWindow = "8192",
         configuredGpuOffloadOptions = "num_gpu=1",

@@ -495,7 +495,7 @@ function testStatusAndSummaryRendering() {
     buildSucceeded: false,
     changedFilesCount: 0,
     modelUsed: 'ollama / qwen2.5-coder:7b',
-    runtimeProfile: 'ollama/qwen2.5-coder-instruct-q4_k_m',
+    runtimeProfile: 'ollama/qwen2.5-coder-7b-quality-gpu-tuned',
     runtimeEndpoint: 'http://localhost:11434',
     configuredContextWindow: '8192',
     configuredGpuOffloadOptions: 'num_gpu=1',
@@ -530,7 +530,7 @@ function testStatusAndSummaryRendering() {
   assert.ok(successRows.some(([key, value]) => key === 'approval status denied' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'approval status n/a' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'model used' && value === 'ollama / qwen2.5-coder:7b'));
-  assert.ok(successRows.some(([key, value]) => key === 'runtime profile' && value === 'ollama/qwen2.5-coder-instruct-q4_k_m'));
+  assert.ok(successRows.some(([key, value]) => key === 'runtime profile' && value === 'ollama/qwen2.5-coder-7b-quality-gpu-tuned'));
   assert.ok(successRows.some(([key, value]) => key === 'runtime endpoint' && value === 'http://localhost:11434'));
   assert.ok(successRows.some(([key, value]) => key === 'configured context window' && value === '8192'));
   assert.ok(successRows.some(([key, value]) => key === 'configured gpu offload' && value === 'num_gpu=1'));
