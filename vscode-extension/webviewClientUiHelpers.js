@@ -243,6 +243,7 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
           : [];
         const externalAttempts = Number.isFinite(payload.externalAttempts) ? Math.max(0, Math.floor(payload.externalAttempts)) : approvalRequiredActions.length;
         const deniedActions = Number.isFinite(payload.deniedActions) ? Math.max(0, Math.floor(payload.deniedActions)) : 0;
+        const blockedActions = Number.isFinite(payload.blockedActions) ? Math.max(0, Math.floor(payload.blockedActions)) : 0;
         const requestedActions = Number.isFinite(payload.requestedActions) ? Math.max(0, Math.floor(payload.requestedActions)) : 0;
         const executedActions = Number.isFinite(payload.executedActions) ? Math.max(0, Math.floor(payload.executedActions)) : 0;
         const failedActions = Number.isFinite(payload.failedActions) ? Math.max(0, Math.floor(payload.failedActions)) : 0;
@@ -268,6 +269,7 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
         lines.push('ApprovalRequired: ' + String(approvalRequiredActions.length));
         lines.push('ExternalAttempts: ' + String(externalAttempts));
         lines.push('DeniedActions: ' + String(deniedActions));
+        lines.push('BlockedActions: ' + String(blockedActions));
         lines.push('RequestedActions: ' + String(requestedActions));
         lines.push('ExecutedActions: ' + String(executedActions));
         lines.push('FailedActions: ' + String(failedActions));
