@@ -219,6 +219,9 @@ function testRunNormalizationContracts() {
   assert.strictEqual(success.externalAttempts, 0);
   assert.strictEqual(success.deniedActions, 0);
   assert.strictEqual(success.blockedActions, 0);
+  assert.strictEqual(success.requestedActions, 0);
+  assert.strictEqual(success.executedActions, 0);
+  assert.strictEqual(success.failedActions, 0);
   assert.strictEqual(success.approvalStatusSummary.allowed, 0);
   assert.strictEqual(success.approvalStatusSummary.approvalRequired, 0);
   assert.strictEqual(success.approvalStatusSummary.denied, 0);
@@ -349,6 +352,9 @@ function testRunNormalizationContracts() {
   assert.strictEqual(approvalRun.highRiskApprovalRequiredActions, 1);
   assert.strictEqual(approvalRun.deniedActions, 1);
   assert.strictEqual(approvalRun.blockedActions, 0);
+  assert.strictEqual(approvalRun.requestedActions, 0);
+  assert.strictEqual(approvalRun.executedActions, 0);
+  assert.strictEqual(approvalRun.failedActions, 0);
   assert.ok(String(approvalRun.continuationHint).toLowerCase().includes('continue'));
   assert.strictEqual(approvalRun.sessionContinuation.lastSuccessfulStep, 'ToolCallsExecuted');
   assert.strictEqual(approvalRun.sessionContinuation.lastKnownAction, 'Executed 1 tool calls');
@@ -385,6 +391,9 @@ function testRunNormalizationContracts() {
   assert.strictEqual(approvalOnlyRun.externalAttempts, 1);
   assert.strictEqual(approvalOnlyRun.deniedActions, 0);
   assert.strictEqual(approvalOnlyRun.blockedActions, 0);
+  assert.strictEqual(approvalOnlyRun.requestedActions, 0);
+  assert.strictEqual(approvalOnlyRun.executedActions, 0);
+  assert.strictEqual(approvalOnlyRun.failedActions, 0);
 
   const lifecycleRun = context.normalizeRunResult({
     ok: true,
@@ -407,6 +416,9 @@ function testRunNormalizationContracts() {
   assert.strictEqual(lifecycleRun.actionLifecycleCounts.failed, 1);
   assert.strictEqual(lifecycleRun.deniedActions, 1);
   assert.strictEqual(lifecycleRun.blockedActions, 1);
+  assert.strictEqual(lifecycleRun.requestedActions, 1);
+  assert.strictEqual(lifecycleRun.executedActions, 1);
+  assert.strictEqual(lifecycleRun.failedActions, 1);
   assert.strictEqual(lifecycleRun.actionLifecycle[0].actionCorrelationId, 'act-1');
   assert.strictEqual(lifecycleRun.approvalStatusSummary.allowed, 0);
   assert.strictEqual(lifecycleRun.approvalStatusSummary.approvalRequired, 0);
@@ -502,6 +514,9 @@ function testStatusAndSummaryRendering() {
   assert.ok(successRows.some(([key, value]) => key === 'build' && value === 'not started'));
   assert.ok(successRows.some(([key, value]) => key === 'approval required' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'blocked actions' && value === '0'));
+  assert.ok(successRows.some(([key, value]) => key === 'requested actions' && value === '0'));
+  assert.ok(successRows.some(([key, value]) => key === 'executed actions' && value === '0'));
+  assert.ok(successRows.some(([key, value]) => key === 'failed actions' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'outside boundary attempts' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'high-risk approval required' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'plan required' && value === 'false'));
@@ -537,6 +552,9 @@ function testStatusAndSummaryRendering() {
     externalAttempts: 2,
     deniedActions: 2,
     blockedActions: 1,
+    requestedActions: 3,
+    executedActions: 1,
+    failedActions: 0,
     planRequired: true,
     continuationHint: 'Provide a step-by-step implementation plan and execute the first concrete edit.',
     nextActionCandidates: ['Draft 3-step plan', 'Pick first file', 'Apply first edit'],
@@ -564,6 +582,9 @@ function testStatusAndSummaryRendering() {
   assert.ok(fallbackRows.some(([key, value]) => key === 'external attempts' && value === '2'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'denied actions' && value === '2'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'blocked actions' && value === '1'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'requested actions' && value === '3'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'executed actions' && value === '1'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'failed actions' && value === '0'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'plan required' && value === 'true'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'continuation hint' && value.includes('step-by-step implementation plan')));
   assert.ok(fallbackRows.some(([key, value]) => key === 'next actions' && value.includes('Draft 3-step plan')));

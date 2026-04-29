@@ -2114,7 +2114,10 @@ Write the final project overview now.";
                 OutsideBoundaryAttempts = approvalRequiredActions.Count(x => x is not null && !x.IsInsideSandbox),
                 HighRiskApprovalRequiredActions = approvalRequiredActions.Count(x => x is not null && string.Equals(x.RiskLevel, "high", StringComparison.OrdinalIgnoreCase)),
                 DeniedActions = tracerDeniedActions,
+                RequestedActions = actionLifecycleEntries.Count(e => e.LifecycleState == ActionLifecycleState.Requested),
                 BlockedActions = actionLifecycleEntries.Count(e => e.LifecycleState == ActionLifecycleState.Blocked),
+                ExecutedActions = actionLifecycleEntries.Count(e => e.LifecycleState == ActionLifecycleState.Executed),
+                FailedActions = actionLifecycleEntries.Count(e => e.LifecycleState == ActionLifecycleState.Failed),
                 HostBoundaryPreserved = true,
                 ActionLifecycle = MapActionLifecycle(actionLifecycleEntries),
                 ApprovalStatusSummary = BuildApprovalStatusSummary(actionLifecycleEntries)
@@ -2266,6 +2269,15 @@ Write the final project overview now.";
 
             [JsonPropertyName("blockedActions")]
             public int BlockedActions { get; init; }
+
+            [JsonPropertyName("requestedActions")]
+            public int RequestedActions { get; init; }
+
+            [JsonPropertyName("executedActions")]
+            public int ExecutedActions { get; init; }
+
+            [JsonPropertyName("failedActions")]
+            public int FailedActions { get; init; }
 
             [JsonPropertyName("hostBoundaryPreserved")]
             public bool HostBoundaryPreserved { get; init; }

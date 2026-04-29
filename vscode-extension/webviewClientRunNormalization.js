@@ -419,6 +419,15 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         const blockedActions = Number.isFinite(structured && structured.blockedActions)
           ? Math.max(0, Math.floor(structured.blockedActions))
           : actionLifecycleCounts.blocked;
+        const requestedActions = Number.isFinite(structured && structured.requestedActions)
+          ? Math.max(0, Math.floor(structured.requestedActions))
+          : actionLifecycleCounts.requested;
+        const executedActions = Number.isFinite(structured && structured.executedActions)
+          ? Math.max(0, Math.floor(structured.executedActions))
+          : actionLifecycleCounts.executed;
+        const failedActions = Number.isFinite(structured && structured.failedActions)
+          ? Math.max(0, Math.floor(structured.failedActions))
+          : actionLifecycleCounts.failed;
         const hostBoundaryPreserved = typeof (structured && structured.hostBoundaryPreserved) === 'boolean'
           ? structured.hostBoundaryPreserved
           : true;
@@ -525,6 +534,9 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           highRiskApprovalRequiredActions,
           deniedActions,
           blockedActions,
+          requestedActions,
+          executedActions,
+          failedActions,
           planRequired,
           hostBoundaryPreserved,
           actionLifecycle,
