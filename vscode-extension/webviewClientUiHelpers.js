@@ -238,8 +238,14 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
         const summary = normalizeOptionalLogText(payload.summary || payload.summaryText || payload.message);
         const buildText = normalizeStructuredBuildText(payload);
         const changedFiles = Array.isArray(payload.changedFiles) ? payload.changedFiles.filter(Boolean) : [];
+        const approvalRequiredActions = Array.isArray(payload.approvalRequiredActions)
+          ? payload.approvalRequiredActions.filter(item => item && typeof item === 'object')
+          : [];
+        const externalAttempts = Number.isFinite(payload.externalAttempts) ? Math.max(0, Math.floor(payload.externalAttempts)) : approvalRequiredActions.length;
+        const deniedActions = Number.isFinite(payload.deniedActions) ? Math.max(0, Math.floor(payload.deniedActions)) : 0;
         const outsideBoundaryAttempts = Number.isFinite(payload.outsideBoundaryAttempts) ? Math.max(0, Math.floor(payload.outsideBoundaryAttempts)) : 0;
         const highRiskApprovalRequiredActions = Number.isFinite(payload.highRiskApprovalRequiredActions) ? Math.max(0, Math.floor(payload.highRiskApprovalRequiredActions)) : 0;
+        const hostBoundaryPreserved = typeof payload.hostBoundaryPreserved === 'boolean' ? payload.hostBoundaryPreserved : true;
         const modelProvider = normalizeOptionalLogText(payload.provider || payload.modelProvider);
         const model = normalizeOptionalLogText(payload.model);
         const modelText = [modelProvider, model].filter(Boolean).join(' / ');
@@ -256,8 +262,20 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
         if (summary) lines.push('Summary: ' + summary);
         lines.push('Build: ' + buildText);
         lines.push('ChangedFiles: ' + String(changedFiles.length));
+        lines.push('ApprovalRequired: ' + String(approvalRequiredActions.length));
+        lines.push('ExternalAttempts: ' + String(externalAttempts));
+        lines.push('DeniedActions: ' + String(deniedActions));
         lines.push('OutsideBoundaryAttempts: ' + String(outsideBoundaryAttempts));
         lines.push('HighRiskApprovalRequired: ' + String(highRiskApprovalRequiredActions));
+        lines.push('HostBoundaryPreserved: ' + String(hostBoundaryPreserved));
+        for (const item of approvalRequiredActions.slice(0, 3)) {
+          const actionType = normalizeOptionalLogText(item.actionType) || 'UnknownAction';
+          const target = normalizeOptionalLogText(item.normalizedTarget || item.path || item.command);
+          const riskLevel = normalizeOptionalLogText(item.riskLevel);
+          const approvalStatus = normalizeOptionalLogText(item.approvalStatus);
+          const reason = normalizeOptionalLogText(item.reason);
+          lines.push('ApprovalProposal: ' + [actionType, target, riskLevel, approvalStatus, reason].filter(Boolean).join(' | '));
+        }
         if (fallbackReason || fallbackMode) lines.push('Fallback: ' + [fallbackReason, fallbackMode].filter(Boolean).join(' / '));
         if (modelText) lines.push('Model: ' + modelText);
         if (embeddingsInfo.text) lines.push('Embeddings: ' + embeddingsInfo.text);
