@@ -2082,6 +2082,8 @@ Write the final project overview now.";
                 RuntimeTuningProfile = ResolveRuntimeTuningProfile(provider, model),
                 RuntimeTuningOptions = ResolveRuntimeTuningOptions(provider, model),
                 RuntimeTuningSource = ResolveRuntimeTuningSource(provider, model),
+                RuntimeTuningApplied = ResolveRuntimeTuningApplied(provider, model),
+                RuntimeTuningWarnings = ResolveRuntimeTuningWarnings(provider, model),
                 GpuUsageMeasured = false,
                 DegradedFlags = (degradedFlags ?? Array.Empty<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
                 FallbackReason = fallbackReason ?? string.Empty,
@@ -2188,6 +2190,12 @@ Write the final project overview now.";
 
             [JsonPropertyName("runtimeTuningSource")]
             public string RuntimeTuningSource { get; init; } = string.Empty;
+
+            [JsonPropertyName("runtimeTuningApplied")]
+            public bool RuntimeTuningApplied { get; init; }
+
+            [JsonPropertyName("runtimeTuningWarnings")]
+            public string[] RuntimeTuningWarnings { get; init; } = Array.Empty<string>();
 
             [JsonPropertyName("gpuUsageMeasured")]
             public bool GpuUsageMeasured { get; init; }
@@ -2473,6 +2481,40 @@ Write the final project overview now.";
                 !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LOCALCURSOR_OLLAMA_7B_GPU_LAYERS")) ||
                 !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LOCALCURSOR_OLLAMA_7B_TEMPERATURE"));
             return hasOverride ? "env" : "default";
+        }
+
+        private static bool ResolveRuntimeTuningApplied(string? provider, string? model)
+        {
+            return !string.IsNullOrWhiteSpace(ResolveRuntimeTuningProfile(provider, model));
+        }
+
+        private static string[] ResolveRuntimeTuningWarnings(string? provider, string? model)
+        {
+            var warnings = new List<string>();
+            if (!string.Equals(provider, "ollama", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(model))
+                return warnings.ToArray();
+            if (!model.Contains("qwen2.5-coder:7b-instruct-q4_k_m", StringComparison.OrdinalIgnoreCase))
+            {
+                warnings.Add("MODEL_NOT_7B_TUNED");
+                return warnings.ToArray();
+            }
+
+            var gpuLayersRaw = Environment.GetEnvironmentVariable("LOCALCURSOR_OLLAMA_7B_GPU_LAYERS")?.Trim();
+            var ctxRaw = Environment.GetEnvironmentVariable("LOCALCURSOR_OLLAMA_7B_NUM_CTX")?.Trim();
+            if (string.IsNullOrWhiteSpace(gpuLayersRaw))
+            {
+                warnings.Add("GPU_LAYERS_NOT_SET");
+            }
+
+            var effectiveCtx = 8192;
+            if (int.TryParse(ctxRaw, out var parsedCtx) && parsedCtx > 0)
+                effectiveCtx = parsedCtx;
+            if (effectiveCtx > 8192)
+            {
+                warnings.Add("CTX_TOO_HIGH_FOR_4GB");
+            }
+
+            return warnings.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         }
 
         private static string[] BuildNextActionCandidates(bool planRequired, string reasonCode, string continuationHint, string lastKnownAction)

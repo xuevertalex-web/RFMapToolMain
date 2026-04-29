@@ -448,6 +448,12 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         const runtimeTuningProfile = normalizeText(structured && structured.runtimeTuningProfile, 'not available');
         const runtimeTuningOptions = normalizeText(structured && structured.runtimeTuningOptions, 'not available');
         const runtimeTuningSource = normalizeText(structured && structured.runtimeTuningSource, 'not available');
+        const runtimeTuningApplied = typeof (structured && structured.runtimeTuningApplied) === 'boolean'
+          ? structured.runtimeTuningApplied
+          : false;
+        const runtimeTuningWarnings = Array.isArray(structured && structured.runtimeTuningWarnings)
+          ? structured.runtimeTuningWarnings.map(item => normalizeOptionalText(item)).filter(Boolean)
+          : [];
         const gpuUsageMeasured = typeof (structured && structured.gpuUsageMeasured) === 'boolean'
           ? structured.gpuUsageMeasured
           : false;
@@ -511,6 +517,8 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           runtimeTuningProfile,
           runtimeTuningOptions,
           runtimeTuningSource,
+          runtimeTuningApplied,
+          runtimeTuningWarnings,
           gpuUsageMeasured,
           modelUsed,
           reasonCode,

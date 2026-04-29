@@ -243,6 +243,9 @@ function testRunNormalizationContracts() {
   assert.strictEqual(success.runtimeTuningProfile, 'not available');
   assert.strictEqual(success.runtimeTuningOptions, 'not available');
   assert.strictEqual(success.runtimeTuningSource, 'not available');
+  assert.strictEqual(success.runtimeTuningApplied, false);
+  assert.strictEqual(Array.isArray(success.runtimeTuningWarnings), true);
+  assert.strictEqual(success.runtimeTuningWarnings.length, 0);
   assert.strictEqual(success.gpuUsageMeasured, false);
   assertNoMojibake(success.summary, 'success summary');
 
@@ -504,6 +507,8 @@ function testStatusAndSummaryRendering() {
     runtimeTuningProfile: '7b-quality-gpu-tuned',
     runtimeTuningOptions: 'num_ctx=8192;num_gpu=1;gpu_layers=26;temperature=0.2',
     runtimeTuningSource: 'default',
+    runtimeTuningApplied: true,
+    runtimeTuningWarnings: ['GPU_LAYERS_NOT_SET'],
     gpuUsageMeasured: false,
     embeddingsSummary: 'not available',
     embeddingsWarning: false,
@@ -542,6 +547,8 @@ function testStatusAndSummaryRendering() {
   assert.ok(successRows.some(([key, value]) => key === 'runtime tuning profile' && value === '7b-quality-gpu-tuned'));
   assert.ok(successRows.some(([key, value]) => key === 'runtime tuning options' && value === 'num_ctx=8192;num_gpu=1;gpu_layers=26;temperature=0.2'));
   assert.ok(successRows.some(([key, value]) => key === 'runtime tuning source' && value === 'default'));
+  assert.ok(successRows.some(([key, value]) => key === 'runtime tuning applied' && value === 'true'));
+  assert.ok(successRows.some(([key, value]) => key === 'runtime tuning warnings' && value.includes('GPU_LAYERS_NOT_SET')));
   assert.ok(successRows.some(([key, value]) => key === 'gpu usage measured' && value === 'false'));
   assert.ok(!successRows.some(([key]) => key === 'fallback reason'));
 
