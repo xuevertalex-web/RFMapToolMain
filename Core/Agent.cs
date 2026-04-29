@@ -362,6 +362,22 @@ namespace LocalCursorAgent.Core
                         !string.IsNullOrWhiteSpace(currentResponse) &&
                         !currentResponse.TrimStart().StartsWith("TOOL:", StringComparison.OrdinalIgnoreCase))
                     {
+                        if (IsTechnicalAnalysisIntent(task) &&
+                            (contextInfo.SelectedFiles.Count == 0 || IsNonSubstantiveNoToolResponse(currentResponse) || IsNeedsMoreDataResponse(currentResponse)))
+                        {
+                            _memory.Add("task_status", "needs_action_plan");
+                            return FinalizeRunResult(
+                                false,
+                                "Technical analysis request did not produce grounded workspace analysis. Produce actionable target/context steps first.",
+                                "No actionable steps produced for technical analysis intent",
+                                "NO_ACTIONABLE_STEPS",
+                                Array.Empty<string>(),
+                                Array.Empty<ChangedHint>(),
+                                Array.Empty<ChangedRange>(),
+                                Array.Empty<ChangedKind>(),
+                                false);
+                        }
+
                         _memory.Add("final_response", currentResponse);
                         return FinalizeRunResult(
                             true,
@@ -398,7 +414,7 @@ namespace LocalCursorAgent.Core
                                 continue;
                             }
 
-                            if (!analysisOnlyTask && IsBroadEngineeringIntent(task))
+                            if (!analysisOnlyTask && (IsBroadEngineeringIntent(task) || IsTechnicalAnalysisIntent(task)))
                             {
                                 _memory.Add("task_status", "needs_action_plan");
                                 return FinalizeRunResult(
@@ -666,7 +682,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                         }
 
                         _memory.Add("final_response", currentResponse);
-                        if (IsBroadEngineeringIntent(task))
+                        if (IsBroadEngineeringIntent(task) || IsTechnicalAnalysisIntent(task))
                         {
                             _memory.Add("task_status", "needs_action_plan");
                             return FinalizeRunResult(
@@ -1014,6 +1030,23 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                    lower.StartsWith("\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u044e", StringComparison.Ordinal) ||
                    lower.StartsWith("\u044f \u043d\u0430\u0439\u0434\u0443", StringComparison.Ordinal) ||
                    lower.StartsWith("\u044f \u0440\u0430\u0441\u0441\u043c\u043e\u0442\u0440\u044e", StringComparison.Ordinal);
+        }
+
+        private static bool IsNeedsMoreDataResponse(string response)
+        {
+            if (string.IsNullOrWhiteSpace(response))
+                return false;
+
+            var lower = response.Trim().ToLowerInvariant();
+            return lower.Contains("need more information", StringComparison.Ordinal) ||
+                   lower.Contains("provide more information", StringComparison.Ordinal) ||
+                   lower.Contains("provide code", StringComparison.Ordinal) ||
+                   lower.Contains("provide the code", StringComparison.Ordinal) ||
+                   lower.Contains("need the code", StringComparison.Ordinal) ||
+                   lower.Contains("нужно больше информации", StringComparison.Ordinal) ||
+                   lower.Contains("предоставьте больше информации", StringComparison.Ordinal) ||
+                   lower.Contains("предоставьте код", StringComparison.Ordinal) ||
+                   lower.Contains("нужен код", StringComparison.Ordinal);
         }
 
         private static string BuildAnalysisFallbackSummary(string task, ContextInformation contextInfo, string fallbackReason)
@@ -2563,6 +2596,29 @@ Write the final project overview now.";
                    value.Contains("поэтап") ||
                    value.Contains("разбор") ||
                    value.Contains("приступ");
+        }
+
+        private static bool IsTechnicalAnalysisIntent(string task)
+        {
+            var value = (task ?? string.Empty).Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            return value.Contains("analy") ||
+                   value.Contains("analysis") ||
+                   value.Contains("synchron") ||
+                   value.Contains("coordinate") ||
+                   value.Contains("client") ||
+                   value.Contains("server") ||
+                   value.Contains("logic") ||
+                   value.Contains("mechanism") ||
+                   value.Contains("разбор") ||
+                   value.Contains("анализ") ||
+                   value.Contains("синхрон") ||
+                   value.Contains("координат") ||
+                   value.Contains("клиент") ||
+                   value.Contains("сервер") ||
+                   value.Contains("механизм");
         }
 
         private static ApprovalRequiredActionPayload[] MapApprovalProposals(IReadOnlyList<ActionApprovalProposal> proposals)

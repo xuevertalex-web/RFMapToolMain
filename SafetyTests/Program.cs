@@ -34,6 +34,7 @@ await RunExternalActionApprovalProposalRegression();
 await RunActionLifecycleLedgerRegression();
 await RunStructuredActionLifecycleReportingRegression();
 await RunBroadIntentNoToolCallsRequiresActionRegression();
+await RunTechnicalNoToolCallsRequiresActionRegression();
 await RunHostDiagnosticsCommandApprovalRegression();
 await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
 await RunDestructiveFileApprovalMarkerRegression();
@@ -1197,7 +1198,7 @@ static async Task RunBroadIntentNoToolCallsRequiresActionRegression()
     var runtimeRoot = Path.Combine(tempRoot, "runtime");
     Directory.CreateDirectory(workspaceRoot);
     Directory.CreateDirectory(runtimeRoot);
-    File.WriteAllText(Path.Combine(workspaceRoot, "Program.cs"), "namespace SampleApp; public static class Entry { public static void Hello() { } }");
+    File.WriteAllText(Path.Combine(workspaceRoot, "notes.txt"), "no csharp files here");
 
     var tracer = new ExecutionTracer(runtimeRoot);
     tracer.StartRun(
@@ -1271,6 +1272,77 @@ static async Task RunBroadIntentNoToolCallsRequiresActionRegression()
     AssertTrue(!string.Equals(reasonCode, "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase), "Broad engineering intent must not end as SUCCESS_NO_TOOL_CALLS.");
     AssertTrue(!string.Equals(finalStatus, "success", StringComparison.OrdinalIgnoreCase), "Broad engineering intent with no actions must not end as success.");
     Console.WriteLine("PASS BroadIntentNoToolCalls_RequiresAction");
+}
+
+static async Task RunTechnicalNoToolCallsRequiresActionRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    File.WriteAllText(Path.Combine(workspaceRoot, "notes.txt"), "no csharp files here");
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    tracer.StartRun(
+        "Analyze synchronization of player coordinates between client and server",
+        "Analyze synchronization of player coordinates between client and server",
+        workspaceRoot,
+        runtimeRoot,
+        AgentAccessMode.WorkspaceWrite.ToString(),
+        "FakeNoToolAnalysisClient",
+        "fake-no-tool-model");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var toolRegistry = new ToolRegistry();
+    var memory = new MemoryStore();
+    var permissionGuard = new PermissionGuard();
+    var safeProcessRunner = new SafeProcessRunner(session, permissionGuard, tracer);
+    var buildVerifier = new BuildVerifier(safeProcessRunner, tracer);
+    var sandboxManager = new SandboxManager(workspaceRoot, runtimeRoot);
+    var embeddingService = new EmbeddingService(disabled: true);
+    var vectorStore = new VectorStore();
+    var fileStateManager = new FileStateManager();
+    var projectIndexer = new ProjectIndexer(workspaceRoot, embeddingService, vectorStore, new AgentConfig(workspaceRoot), fileStateManager);
+    var contextBuilder = new ContextBuilder(workspaceRoot, vectorStore, fileStateManager, new ProjectSymbolDirectory(), tracer);
+
+    var agent = new Agent(
+        new FakeNoToolAnalysisClient(),
+        toolRegistry,
+        memory,
+        buildVerifier,
+        sandboxManager,
+        projectIndexer,
+        contextBuilder,
+        fileStateManager,
+        session,
+        workspaceResolution: null);
+
+    var oldOut = Console.Out;
+    var capture = new StringWriter();
+    Console.SetOut(capture);
+    try
+    {
+        _ = await agent.RunTask("Analyze synchronization of player coordinates between client and server");
+    }
+    finally
+    {
+        Console.SetOut(oldOut);
+    }
+
+    var structured = ExtractStructuredPayload(capture.ToString());
+    var reasonCode = structured.GetProperty("reasonCode").GetString() ?? string.Empty;
+    AssertTrue(!string.Equals(reasonCode, "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase), "Technical no-tool analysis must not end with SUCCESS_NO_TOOL_CALLS.");
+    AssertTrue(!string.Equals(reasonCode, "SUCCESS_ANALYSIS_RESPONSE", StringComparison.OrdinalIgnoreCase), "Technical no-tool analysis must not end with SUCCESS_ANALYSIS_RESPONSE.");
+    Console.WriteLine("PASS TechnicalNoToolCalls_RequiresAction");
 }
 
 static async Task RunHostDiagnosticsCommandApprovalRegression()
@@ -1439,6 +1511,15 @@ sealed class FakeUsableErrorPrefixedSuccessClient : ILLMClient
 {
     public Task<string> Generate(string prompt, CancellationToken cancellationToken = default)
         => Task.FromResult("Error: I cannot execute tools directly in this mode, but here is the project analysis: the code is small, has one entry type, and does not require build changes.");
+
+    public Task<bool> IsAvailable(CancellationToken cancellationToken = default)
+        => Task.FromResult(true);
+}
+
+sealed class FakeNoToolAnalysisClient : ILLMClient
+{
+    public Task<string> Generate(string prompt, CancellationToken cancellationToken = default)
+        => Task.FromResult("Для анализа механизма синхронизации координат игрока между клиентом и сервером, мне нужно знать конкретный код или описание того, как происходит синхронизация.");
 
     public Task<bool> IsAvailable(CancellationToken cancellationToken = default)
         => Task.FromResult(true);
