@@ -302,7 +302,7 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
           const requiresApproval = item.requiresApproval === false ? 'no_approval' : 'requires_approval';
           const approvalStatus = normalizeOptionalLogText(item.approvalStatus);
           const reason = normalizeOptionalLogText(item.reason);
-          lines.push('ApprovalProposal: ' + [actionType, command, rawPath, target, sandboxRoot, projectRoot, worktreeRoot, isInsideSandbox, requiresApproval, riskLevel, reasonCode, expectedEffect, approvalStatus, reason].filter(Boolean).join(' | '));
+          lines.push('ApprovalProposal: ' + [actionType, command, rawPath, target, sandboxRoot, projectRoot, worktreeRoot, isInsideSandbox, requiresApproval, approvalStatus, riskLevel, reasonCode, expectedEffect, reason].filter(Boolean).join(' | '));
         }
         if (fallbackReason || fallbackMode) lines.push('Fallback: ' + [fallbackReason, fallbackMode].filter(Boolean).join(' / '));
         if (modelText) lines.push('Model: ' + modelText);
