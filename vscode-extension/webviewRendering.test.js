@@ -339,6 +339,7 @@ function testRunNormalizationContracts() {
           command: '',
           normalizedTarget: 'C:/outside.txt',
           riskLevel: 'high',
+          reasonCode: 'ACCESS_DENIED_OUTSIDE_WORKSPACE',
           reason: 'Target is outside active workspace',
           approvalStatus: 'ApprovalRequired'
         }
@@ -353,6 +354,7 @@ function testRunNormalizationContracts() {
     }
   });
   assert.strictEqual(approvalRun.approvalRequiredCount, 1);
+  assert.strictEqual(approvalRun.approvalRequiredActions[0].reasonCode, 'ACCESS_DENIED_OUTSIDE_WORKSPACE');
   assert.strictEqual(approvalRun.externalAttempts, 1);
   assert.strictEqual(approvalRun.outsideBoundaryAttempts, 1);
   assert.strictEqual(approvalRun.highRiskApprovalRequiredActions, 1);
@@ -460,6 +462,7 @@ function testRunNormalizationContracts() {
           path: 'C:/outside.txt',
           normalizedTarget: 'C:/outside.txt',
           riskLevel: 'high',
+          reasonCode: 'ACCESS_DENIED_OUTSIDE_WORKSPACE',
           reason: 'Target is outside active workspace',
           approvalStatus: 'ApprovalRequired',
           hiddenThought: 'must not leak'
@@ -468,6 +471,7 @@ function testRunNormalizationContracts() {
     }
   });
   assert.strictEqual(approvalShapeRun.approvalRequiredActions.length, 1);
+  assert.strictEqual(approvalShapeRun.approvalRequiredActions[0].reasonCode, 'ACCESS_DENIED_OUTSIDE_WORKSPACE');
   assert.strictEqual(Object.prototype.hasOwnProperty.call(approvalShapeRun.approvalRequiredActions[0], 'hiddenThought'), false);
 }
 

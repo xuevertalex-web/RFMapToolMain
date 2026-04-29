@@ -191,6 +191,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
             command: normalizeOptionalText(item.command),
             normalizedTarget: normalizeText(item.normalizedTarget, ''),
             riskLevel: normalizeText(item.riskLevel, 'not available'),
+            reasonCode: normalizeOptionalText(item.reasonCode),
             reason: normalizeText(item.reason, 'not available'),
             approvalStatus: normalizeText(item.approvalStatus, 'not available')
           }));

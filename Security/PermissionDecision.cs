@@ -7,7 +7,9 @@ public sealed class PermissionDecision
     public ApprovalStatus ApprovalStatus { get; init; } = ApprovalStatus.NotApplicable;
     public PermissionReasonCode ReasonCode { get; init; }
     public string ReasonCodeName => ReasonCode.ToString();
-    public string ReasonCodeString => ReasonCode switch
+    public string ReasonCodeString => ToReasonCodeString(ReasonCode);
+
+    public static string ToReasonCodeString(PermissionReasonCode reasonCode) => reasonCode switch
     {
         PermissionReasonCode.Allowed => PermissionReasonCodes.Allowed,
         PermissionReasonCode.WorkspaceNotResolved => PermissionReasonCodes.WorkspaceRootNotResolved,

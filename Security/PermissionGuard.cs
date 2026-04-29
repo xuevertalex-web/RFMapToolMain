@@ -310,6 +310,7 @@ public sealed class PermissionGuard
             WorktreeRoot = normalizedWorkspace,
             IsInsideSandbox = false,
             RiskLevel = riskLevel,
+            ReasonCode = PermissionDecision.ToReasonCodeString(code),
             Reason = message,
             RequiresApproval = true,
             ApprovalStatus = ApprovalStatus.ApprovalRequired
