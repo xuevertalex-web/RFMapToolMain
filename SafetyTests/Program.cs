@@ -1307,6 +1307,15 @@ static async Task RunHostDiagnosticsCommandApprovalRegression()
     AssertTrue(decision.RequiresApproval, "Expected approval requirement for host diagnostics command.");
     AssertTrue(decision.ApprovalProposal is not null, "Expected structured approval proposal for host diagnostics.");
 
+    var approvedDecision = guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.RunCommand,
+        WorkingDirectory = workspaceRoot,
+        Payload = "nvidia-smi APPROVED:true"
+    });
+    AssertTrue(approvedDecision.Allowed, "Expected approved host diagnostics command to pass guard policy.");
+    AssertTrue(!approvedDecision.RequiresApproval, "Expected no approval requirement after explicit approval marker.");
+
     var result = await runner.RunAsync(new SafeProcessRequest
     {
         Kind = ToolActionKind.RunCommand,

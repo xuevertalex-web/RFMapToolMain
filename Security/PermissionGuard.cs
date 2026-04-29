@@ -88,7 +88,8 @@ public sealed class PermissionGuard
 
         if (action.Kind == ToolActionKind.RunCommand)
         {
-            if (IsHighRiskCommand(action.Payload))
+            var hasApprovalMarker = HasExplicitApprovalMarker(action.Payload);
+            if (IsHighRiskCommand(action.Payload) && !hasApprovalMarker)
                 return CreateApprovalRequired(action, "High-risk host diagnostic/system command requires explicit approval", normalizedTarget ?? normalizedWorkspace, normalizedWorkspace);
 
             return PermissionDecision.Allow(normalizedTarget ?? normalizedWorkspace, normalizedWorkspace);
@@ -159,7 +160,7 @@ public sealed class PermissionGuard
 
     private static bool IsHighRiskCommand(string? payload)
     {
-        var text = payload?.Trim() ?? string.Empty;
+        var text = NormalizeCommandPayload(payload);
         if (text.Length == 0)
             return false;
 
@@ -171,6 +172,28 @@ public sealed class PermissionGuard
                lowered.Contains("tasklist", StringComparison.Ordinal) ||
                lowered.Contains("get-process", StringComparison.Ordinal) ||
                lowered.Contains("wmic", StringComparison.Ordinal);
+    }
+
+    private static bool HasExplicitApprovalMarker(string? payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        return payload.Contains("APPROVED:true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeCommandPayload(string? payload)
+    {
+        var text = payload?.Trim() ?? string.Empty;
+        if (text.Length == 0)
+            return string.Empty;
+
+        var marker = "APPROVED:true";
+        var idx = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (idx >= 0)
+            text = text.Remove(idx, marker.Length).Trim();
+
+        return text;
     }
 
     private static bool IsWriteLike(ToolActionKind kind) =>
