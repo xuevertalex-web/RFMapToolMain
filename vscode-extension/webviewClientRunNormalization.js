@@ -218,7 +218,8 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
             reasonCode: normalizeOptionalText(item.reasonCode),
             expectedEffect: normalizeOptionalText(item.expectedEffect),
             reason: normalizeText(item.reason, 'not available'),
-            approvalStatus: normalizeText(item.approvalStatus, 'not available')
+            approvalStatus: normalizeText(item.approvalStatus, 'not available'),
+            isInsideSandbox: item.isInsideSandbox === true
           }));
       }
 

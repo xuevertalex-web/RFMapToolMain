@@ -2636,7 +2636,8 @@ Write the final project overview now.";
                 ReasonCode = p.ReasonCode,
                 ExpectedEffect = p.ExpectedEffect,
                 Reason = p.Reason,
-                ApprovalStatus = p.ApprovalStatus.ToString()
+                ApprovalStatus = p.ApprovalStatus.ToString(),
+                IsInsideSandbox = p.IsInsideSandbox
             }).ToArray();
         }
 
@@ -2666,6 +2667,8 @@ Write the final project overview now.";
             public string Reason { get; init; } = string.Empty;
             [JsonPropertyName("approvalStatus")]
             public string ApprovalStatus { get; init; } = string.Empty;
+            [JsonPropertyName("isInsideSandbox")]
+            public bool IsInsideSandbox { get; init; }
         }
 
         private static ActionLifecyclePayload[] MapActionLifecycle(IReadOnlyList<ActionLifecycleEntry> entries)

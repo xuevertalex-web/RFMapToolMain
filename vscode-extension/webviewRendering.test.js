@@ -342,7 +342,8 @@ function testRunNormalizationContracts() {
           reasonCode: 'ACCESS_DENIED_OUTSIDE_WORKSPACE',
           expectedEffect: 'Reads file content from the specified target path.',
           reason: 'Target is outside active workspace',
-          approvalStatus: 'ApprovalRequired'
+          approvalStatus: 'ApprovalRequired',
+          isInsideSandbox: false
         }
       ],
       externalAttempts: 1,
@@ -357,6 +358,7 @@ function testRunNormalizationContracts() {
   assert.strictEqual(approvalRun.approvalRequiredCount, 1);
   assert.strictEqual(approvalRun.approvalRequiredActions[0].reasonCode, 'ACCESS_DENIED_OUTSIDE_WORKSPACE');
   assert.strictEqual(approvalRun.approvalRequiredActions[0].expectedEffect, 'Reads file content from the specified target path.');
+  assert.strictEqual(approvalRun.approvalRequiredActions[0].isInsideSandbox, false);
   assert.strictEqual(approvalRun.externalAttempts, 1);
   assert.strictEqual(approvalRun.outsideBoundaryAttempts, 1);
   assert.strictEqual(approvalRun.highRiskApprovalRequiredActions, 1);
