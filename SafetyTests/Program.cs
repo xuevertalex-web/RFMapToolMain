@@ -38,6 +38,7 @@ await RunTechnicalNoToolCallsRequiresActionRegression();
 await RunHostDiagnosticsCommandApprovalRegression();
 await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
 await RunDestructiveFileApprovalMarkerRegression();
+RunExtractRequestedNewFilePath_ExtensionRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1475,6 +1476,20 @@ static async Task RunDestructiveFileApprovalMarkerRegression()
     });
     AssertTrue(approvedDecision.Allowed, "Expected delete with approval marker to pass guard.");
     Console.WriteLine("PASS DestructiveFileApprovalMarker");
+}
+
+static void RunExtractRequestedNewFilePath_ExtensionRegression()
+{
+    var method = typeof(Agent).GetMethod("ExtractRequestedNewFilePath", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+    AssertTrue(method is not null, "Expected Agent.ExtractRequestedNewFilePath to exist.");
+
+    var result1 = method!.Invoke(null, new object[] { "create file config/new.cfg for parser" }) as string;
+    AssertTrue(string.Equals(result1, "config/new.cfg", StringComparison.Ordinal), "Expected .cfg path extraction for create intent.");
+
+    var result2 = method!.Invoke(null, new object[] { "make file scripts/setup.ps1 with defaults" }) as string;
+    AssertTrue(string.Equals(result2, "scripts/setup.ps1", StringComparison.Ordinal), "Expected .ps1 path extraction for make intent.");
+
+    Console.WriteLine("PASS ExtractRequestedNewFilePath_ExtensionRegression");
 }
 
 sealed class FakeNoopTool : ITool
