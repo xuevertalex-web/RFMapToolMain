@@ -42,6 +42,7 @@ RunExtractRequestedNewFilePath_ExtensionRegression();
 RunExtractRequestedNewFilePath_NoCreateIntentRegression();
 RunExtractRequestedNewFilePath_NoExtensionRegression();
 RunExtractRequestedNewFilePath_UppercaseExtensionRegression();
+RunExtractRequestedNewFilePath_WindowsPathRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1526,6 +1527,17 @@ static void RunExtractRequestedNewFilePath_UppercaseExtensionRegression()
     AssertTrue(string.Equals(result, "Assets/Texture.PNG", StringComparison.Ordinal), "Expected path extraction to preserve uppercase extension.");
 
     Console.WriteLine("PASS ExtractRequestedNewFilePath_UppercaseExtensionRegression");
+}
+
+static void RunExtractRequestedNewFilePath_WindowsPathRegression()
+{
+    var method = typeof(Agent).GetMethod("ExtractRequestedNewFilePath", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+    AssertTrue(method is not null, "Expected Agent.ExtractRequestedNewFilePath to exist.");
+
+    var result = method!.Invoke(null, new object[] { "create file tools\\build\\setup.cmd now" }) as string;
+    AssertTrue(string.Equals(result, "tools\\build\\setup.cmd", StringComparison.Ordinal), "Expected extraction for Windows-style path.");
+
+    Console.WriteLine("PASS ExtractRequestedNewFilePath_WindowsPathRegression");
 }
 
 sealed class FakeNoopTool : ITool
