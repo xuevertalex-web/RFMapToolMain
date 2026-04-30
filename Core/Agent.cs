@@ -1162,12 +1162,16 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                                  normalized.Contains("создать") ||
                                  normalized.Contains("добавь") ||
                                  normalized.Contains("добавить") ||
-                                 normalized.Contains("напиши");
+                                 normalized.Contains("напиши") ||
+                                 normalized.Contains("сделай") ||
+                                 normalized.Contains("саздай") ||
+                                 normalized.Contains("зделай") ||
+                                 normalized.Contains("напеши");
 
             if (!isCreateIntent)
                 return null;
 
-            var fileMatch = Regex.Match(task, @"([A-Za-z0-9_\-./\\]+\.cs)\b");
+            var fileMatch = Regex.Match(task, @"([A-Za-z0-9_\-./\\]+\.[A-Za-z0-9_\-]+)\b");
             if (!fileMatch.Success)
                 return null;
 
