@@ -1,4 +1,4 @@
-namespace LocalCursorAgent.LLM.Runtime
+﻿namespace LocalCursorAgent.LLM.Runtime
 {
     public static class LlmRuntimeClassifier
     {
@@ -109,8 +109,6 @@ namespace LocalCursorAgent.LLM.Runtime
                     text,
                     "here is",
                     "analysis:",
-                    "РєСЂР°С‚РєРёР№ РѕР±Р·РѕСЂ",
-                    "РїСЂРѕРµРєС‚",
                     "based on indexed"))
             {
                 return true;
