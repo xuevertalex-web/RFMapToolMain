@@ -40,6 +40,7 @@ await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
 await RunDestructiveFileApprovalMarkerRegression();
 RunExtractRequestedNewFilePath_ExtensionRegression();
 RunExtractRequestedNewFilePath_NoCreateIntentRegression();
+RunExtractRequestedNewFilePath_NoExtensionRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1502,6 +1503,17 @@ static void RunExtractRequestedNewFilePath_NoCreateIntentRegression()
     AssertTrue(result is null, "Expected no path extraction when create intent is absent.");
 
     Console.WriteLine("PASS ExtractRequestedNewFilePath_NoCreateIntentRegression");
+}
+
+static void RunExtractRequestedNewFilePath_NoExtensionRegression()
+{
+    var method = typeof(Agent).GetMethod("ExtractRequestedNewFilePath", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+    AssertTrue(method is not null, "Expected Agent.ExtractRequestedNewFilePath to exist.");
+
+    var result = method!.Invoke(null, new object[] { "create file config/newfile for parser" }) as string;
+    AssertTrue(result is null, "Expected no path extraction when file has no extension.");
+
+    Console.WriteLine("PASS ExtractRequestedNewFilePath_NoExtensionRegression");
 }
 
 sealed class FakeNoopTool : ITool
