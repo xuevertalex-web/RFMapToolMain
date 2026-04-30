@@ -43,6 +43,7 @@ RunExtractRequestedNewFilePath_NoCreateIntentRegression();
 RunExtractRequestedNewFilePath_NoExtensionRegression();
 RunExtractRequestedNewFilePath_UppercaseExtensionRegression();
 RunExtractRequestedNewFilePath_WindowsPathRegression();
+RunExtractRequestedNewFilePath_QuotedPathRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1538,6 +1539,17 @@ static void RunExtractRequestedNewFilePath_WindowsPathRegression()
     AssertTrue(string.Equals(result, "tools\\build\\setup.cmd", StringComparison.Ordinal), "Expected extraction for Windows-style path.");
 
     Console.WriteLine("PASS ExtractRequestedNewFilePath_WindowsPathRegression");
+}
+
+static void RunExtractRequestedNewFilePath_QuotedPathRegression()
+{
+    var method = typeof(Agent).GetMethod("ExtractRequestedNewFilePath", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+    AssertTrue(method is not null, "Expected Agent.ExtractRequestedNewFilePath to exist.");
+
+    var result = method!.Invoke(null, new object[] { "create file \"configs/new.config.json\" please" }) as string;
+    AssertTrue(string.Equals(result, "configs/new.config.json", StringComparison.Ordinal), "Expected extraction for quoted file path.");
+
+    Console.WriteLine("PASS ExtractRequestedNewFilePath_QuotedPathRegression");
 }
 
 sealed class FakeNoopTool : ITool
