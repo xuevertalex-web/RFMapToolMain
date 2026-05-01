@@ -1130,13 +1130,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static bool IsHardLlmFailureResponse(string response)
         {
-            if (string.IsNullOrWhiteSpace(response))
-                return false;
-
-            var fallbackMetadata = new LlmProviderMetadata("legacy", string.Empty, "legacy-classifier");
-            var fallbackProfile = LlmProfiles.Resolve("ollama");
-            var classified = LlmRuntimeClassifier.Classify(response, fallbackMetadata, fallbackProfile, LlmRuntimePolicy.Default);
-            return classified.IsFailure;
+            return LlmFailureDetector.IsHardLlmFailureResponse(response);
         }
 
         private bool TryRepairCs8802(BuildVerifier.BuildResult buildResult, HashSet<string> changedFiles, out string? nextPrompt)
