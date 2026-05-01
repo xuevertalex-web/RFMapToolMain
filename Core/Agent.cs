@@ -1079,10 +1079,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static bool LooksLikeClassDeclaration(string line)
         {
-            if (string.IsNullOrWhiteSpace(line))
-                return false;
-
-            return Regex.IsMatch(line, @"(?:public|private|protected|internal)?\s*(?:abstract|sealed|static)?\s*(?:partial\s+)?class\s+\w+");
+            return !string.IsNullOrWhiteSpace(line) &&
+                   Regex.IsMatch(line, @"(?:public|private|protected|internal)?\s*(?:abstract|sealed|static)?\s*(?:partial\s+)?class\s+\w+");
         }
 
         private static int FindMatchingBlockEnd(string[] lines, int startLineIndex)
