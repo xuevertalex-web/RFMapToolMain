@@ -949,7 +949,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             if (fallbackName is { Length: > 0 })
                 candidates.Add(fallbackName);
 
-            var indexedSymbols = symbolDirectory?.GetSymbols(filePath) ?? new List<string>();
+            var indexedSymbols = symbolDirectory?.GetSymbols(filePath) ?? [];
 
             foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
             {
