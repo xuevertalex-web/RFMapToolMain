@@ -941,8 +941,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             if (patchDecision.TargetMethod is { Length: > 0 })
                 candidates.Add(patchDecision.TargetMethod);
 
-            var targetSymbol = ChangeHintBuilder.ExtractTargetSymbol(toolInput);
-            if (targetSymbol is { Length: > 0 })
+            if (ChangeHintBuilder.ExtractTargetSymbol(toolInput) is { Length: > 0 } targetSymbol)
                 candidates.Add(targetSymbol);
 
             var fallbackName = Path.GetFileNameWithoutExtension(filePath);
