@@ -1153,14 +1153,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             return -1;
         }
 
-        private string BuildPrompt(string task, int iteration, string previousResponse)
-        {
-            var context = _memory.GetContextString(CONTEXT_WINDOW);
-            var toolsDescription = _toolRegistry.GetToolsDescription();
-            var responseLanguageRule = ResponseLanguageHelper.BuildResponseLanguageRule(task);
-            return PromptBuilder.BuildPrompt(task, iteration, previousResponse, context, toolsDescription, responseLanguageRule);
-        }
-
         private string BuildPromptWithContext(string task, int iteration, string previousResponse, string codeContext, string regressionAdvice, string promptShapingAdvice, string strategyBiasAdvice)
         {
             var executionContext = _memory.GetContextString(CONTEXT_WINDOW);
