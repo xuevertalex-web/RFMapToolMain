@@ -834,11 +834,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             Unknown
         }
 
-        private static ChangedKindType ClassifyIntent(string task, string toolInput, string patchReason, Execution.BuildVerifier.BuildResult? buildResult)
-        {
-            return ChangedKindClassifier.ClassifyIntent(task, toolInput, patchReason, buildResult);
-        }
-
         private bool TryRepairCs8802(BuildVerifier.BuildResult buildResult, HashSet<string> changedFiles, out string? nextPrompt)
         {
             nextPrompt = null;
