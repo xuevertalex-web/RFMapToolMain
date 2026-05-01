@@ -1057,11 +1057,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static string EmitStructuredDiagnosticResult(StructuredDiagnostic diagnostic, IEnumerable<string> changedFiles, IEnumerable<ChangedHint> changedHints, IEnumerable<ChangedRange> changedRanges, IEnumerable<ChangedKind> changedKinds)
         {
-            var message = $@"Structured diagnostic:
-root_cause: {diagnostic.RootCause}
-attempted_fix: {diagnostic.AttemptedFix}
-why_denied: {diagnostic.WhyDenied}
-next_safe_action: {diagnostic.NextSafeAction}";
+            var message = StructuredDiagnosticMessageBuilder.Build(diagnostic);
 
             return EmitAgentRunResult(
                 false,
@@ -2089,7 +2085,7 @@ Write the final project overview now.";
             public string Kind { get; init; } = string.Empty;
         }
 
-        private sealed class StructuredDiagnostic
+        internal sealed class StructuredDiagnostic
         {
             public string RootCause { get; init; } = string.Empty;
             public string AttemptedFix { get; init; } = string.Empty;
