@@ -2069,26 +2069,12 @@ Write the final project overview now.";
 
         private static string ResolveConfiguredContextWindow(string? provider)
         {
-            if (!string.Equals(provider, "ollama", StringComparison.OrdinalIgnoreCase))
-                return string.Empty;
-
-            var numCtx = Environment.GetEnvironmentVariable("OLLAMA_NUM_CTX")?.Trim();
-            return string.IsNullOrWhiteSpace(numCtx) ? string.Empty : numCtx;
+            return RuntimeTuningResolver.ResolveConfiguredContextWindow(provider);
         }
 
         private static string ResolveConfiguredGpuOffloadOptions(string? provider)
         {
-            if (!string.Equals(provider, "ollama", StringComparison.OrdinalIgnoreCase))
-                return string.Empty;
-
-            var numGpu = Environment.GetEnvironmentVariable("OLLAMA_NUM_GPU")?.Trim();
-            var gpuLayers = Environment.GetEnvironmentVariable("OLLAMA_GPU_LAYERS")?.Trim();
-            var options = new List<string>();
-            if (!string.IsNullOrWhiteSpace(numGpu))
-                options.Add($"num_gpu={numGpu}");
-            if (!string.IsNullOrWhiteSpace(gpuLayers))
-                options.Add($"gpu_layers={gpuLayers}");
-            return string.Join(";", options);
+            return RuntimeTuningResolver.ResolveConfiguredGpuOffloadOptions(provider);
         }
 
         private static string ResolveRuntimeTuningProfile(string? provider, string? model)
