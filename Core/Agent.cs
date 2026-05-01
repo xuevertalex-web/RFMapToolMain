@@ -1312,7 +1312,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         {
             var context = _memory.GetContextString(CONTEXT_WINDOW);
             var toolsDescription = _toolRegistry.GetToolsDescription();
-            var responseLanguageRule = BuildResponseLanguageRule(task);
+            var responseLanguageRule = ResponseLanguageHelper.BuildResponseLanguageRule(task);
             return PromptBuilder.BuildPrompt(task, iteration, previousResponse, context, toolsDescription, responseLanguageRule);
         }
 
@@ -1323,7 +1323,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             var toolsDescription = _toolRegistry.GetToolsDescription();
             var policyBlock = BuildPolicyBlock();
             var startupStateBlock = BuildStartupStateBlock();
-            var responseLanguageRule = BuildResponseLanguageRule(task);
+            var responseLanguageRule = ResponseLanguageHelper.BuildResponseLanguageRule(task);
             return ContextPromptBuilder.BuildPromptWithContext(
                 task,
                 iteration,
@@ -1342,13 +1342,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static string BuildAnalysisPromptWithContext(string task, int iteration, string previousResponse, string compactContext)
         {
-            var responseLanguageRule = BuildResponseLanguageRule(task);
+            var responseLanguageRule = ResponseLanguageHelper.BuildResponseLanguageRule(task);
             return AnalysisPromptBuilder.BuildAnalysisPromptWithContext(task, iteration, previousResponse, compactContext, responseLanguageRule);
-        }
-
-        private static string BuildResponseLanguageRule(string task)
-        {
-            return ResponseLanguageHelper.BuildResponseLanguageRule(task);
         }
 
         private string BuildPolicyBlock()
