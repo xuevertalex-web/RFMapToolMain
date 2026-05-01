@@ -1303,11 +1303,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             return -1;
         }
 
-        private static string ExtractActionHint(string toolInput, string fallbackSymbol)
-        {
-            return ChangeHintBuilder.ExtractActionHint(toolInput, fallbackSymbol);
-        }
-
         private string BuildPrompt(string task, int iteration, string previousResponse)
         {
             var context = _memory.GetContextString(CONTEXT_WINDOW);
