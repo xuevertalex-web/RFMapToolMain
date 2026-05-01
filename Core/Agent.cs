@@ -125,9 +125,6 @@ namespace LocalCursorAgent.Core
                 {
                     _memory.Add("indexing_complete", $"Indexed {indexResult.FilesProcessed} files");
                 }
-                else if (!string.IsNullOrEmpty(indexResult.Error))
-                {
-                }
 
                 var targetResolutionGate = new TargetResolutionGate(_projectIndexer, _contextBuilder.Tracer);
                 var targetResolution = await targetResolutionGate.ResolveAsync(task);
