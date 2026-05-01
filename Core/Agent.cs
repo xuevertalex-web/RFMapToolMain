@@ -1233,11 +1233,7 @@ next_safe_action: {diagnostic.NextSafeAction}";
 
         private static bool IsModelTimeoutResponse(string response)
         {
-            if (string.IsNullOrWhiteSpace(response))
-                return false;
-
-            return response.Contains("timed out", StringComparison.OrdinalIgnoreCase) ||
-                   response.Contains("timeout", StringComparison.OrdinalIgnoreCase);
+            return TimeoutResponseHeuristics.IsModelTimeoutResponse(response);
         }
 
         private static string ResolveFallbackReason(LlmRuntimeResult? runtimeResult, string response)
