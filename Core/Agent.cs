@@ -251,7 +251,7 @@ namespace LocalCursorAgent.Core
 
                     var promptKind = analysisOnlyTask ? "BuildAnalysisPromptWithContext" : "BuildPromptWithContext";
                     var prompt = analysisOnlyTask
-                        ? BuildAnalysisPromptWithContext(task, iteration, currentResponse, contextString)
+                        ? AnalysisPromptBuilder.BuildAnalysisPromptWithContext(task, iteration, currentResponse, contextString, ResponseLanguageHelper.BuildResponseLanguageRule(task))
                         : BuildPromptWithContext(task, iteration, currentResponse, contextString, regressionAdvice.Text, regressionAdvice.PromptShapingText, regressionAdvice.StrategyBiasText);
                     _memory.Add("prompt_sent", prompt.Length > 100 ? prompt.Substring(0, 100) + "..." : prompt);
 
@@ -1183,12 +1183,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 policyBlock,
                 startupStateBlock,
                 responseLanguageRule);
-        }
-
-        private static string BuildAnalysisPromptWithContext(string task, int iteration, string previousResponse, string compactContext)
-        {
-            var responseLanguageRule = ResponseLanguageHelper.BuildResponseLanguageRule(task);
-            return AnalysisPromptBuilder.BuildAnalysisPromptWithContext(task, iteration, previousResponse, compactContext, responseLanguageRule);
         }
 
         private static string EmitAgentRunResult(
