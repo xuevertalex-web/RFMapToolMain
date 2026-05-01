@@ -931,7 +931,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             }
 
             var lines = File.ReadAllLines(filePath);
-            if (lines.Length == 0)
+            if (lines.Length is 0)
             {
                 return null;
             }
