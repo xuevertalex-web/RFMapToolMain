@@ -136,7 +136,7 @@ namespace LocalCursorAgent.Core
                     // Оставляем targetResolution пустым, это нормально
                 }
 
-                var gatedTargetFiles = requestedNewFile != null
+                var gatedTargetFiles = requestedNewFile is not null
                     ? new List<string>()
                     : targetResolution.IsResolved
                         ? targetResolution.SelectedFiles.ToList()
