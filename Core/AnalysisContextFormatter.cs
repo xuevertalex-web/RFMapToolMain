@@ -1,3 +1,5 @@
+using LocalCursorAgent.Context;
+
 namespace LocalCursorAgent.Core
 {
     internal static class AnalysisContextFormatter
