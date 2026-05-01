@@ -1894,7 +1894,7 @@ Write the final project overview now.";
             public ApprovalStatusSummaryPayload ApprovalStatusSummary { get; init; } = new();
         }
 
-        private sealed class ApprovalStatusSummaryPayload
+        internal sealed class ApprovalStatusSummaryPayload
         {
             [JsonPropertyName("allowed")]
             public int Allowed { get; init; }
@@ -1911,39 +1911,7 @@ Write the final project overview now.";
 
         private static ApprovalStatusSummaryPayload BuildApprovalStatusSummary(IReadOnlyList<ActionLifecycleEntry> entries)
         {
-            var allowed = 0;
-            var approvalRequired = 0;
-            var denied = 0;
-            var notApplicable = 0;
-
-            foreach (var entry in entries)
-            {
-                var status = (entry?.ApprovalStatus ?? string.Empty).Trim();
-                if (status.Equals(ApprovalStatus.Allowed.ToString(), StringComparison.OrdinalIgnoreCase))
-                {
-                    allowed++;
-                }
-                else if (status.Equals(ApprovalStatus.ApprovalRequired.ToString(), StringComparison.OrdinalIgnoreCase))
-                {
-                    approvalRequired++;
-                }
-                else if (status.Equals(ApprovalStatus.Denied.ToString(), StringComparison.OrdinalIgnoreCase))
-                {
-                    denied++;
-                }
-                else
-                {
-                    notApplicable++;
-                }
-            }
-
-            return new ApprovalStatusSummaryPayload
-            {
-                Allowed = allowed,
-                ApprovalRequired = approvalRequired,
-                Denied = denied,
-                NotApplicable = notApplicable
-            };
+            return ApprovalStatusSummaryBuilder.Build(entries);
         }
 
         private sealed class SessionContinuationPayload
