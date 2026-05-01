@@ -1915,18 +1915,7 @@ Write the final project overview now.";
 
         private string BuildPolicyBlock()
         {
-            if (_sessionContext is null)
-                return string.Empty;
-
-            var mode = _sessionContext.AccessMode.ToString();
-            return $@"WORKSPACE POLICY:
-- Active workspace root: {_sessionContext.ActiveWorkspaceRoot}
-- Runtime root: {_sessionContext.RuntimeRoot}
-- Access mode: {mode}
-- ReadOnly: read/analysis only; no write, delete, rename, move.
-- WorkspaceWrite: patch/write/create allowed inside workspace; destructive ops denied.
-- WorkspaceFullAccess: destructive ops allowed only inside workspace; runtime/protected paths remain denied.
-- Never target the runtime root or protected paths.";
+            return WorkspacePolicyFormatter.BuildPolicyBlock(_sessionContext);
         }
 
         private string BuildStartupStateBlock()
