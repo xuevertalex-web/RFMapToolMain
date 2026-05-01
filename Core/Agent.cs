@@ -1242,18 +1242,7 @@ next_safe_action: {diagnostic.NextSafeAction}";
 
         private static string ResolveFallbackReason(LlmRuntimeResult? runtimeResult, string response)
         {
-            if (runtimeResult is not null)
-            {
-                return runtimeResult.Status switch
-                {
-                    LlmRuntimeStatus.ModelTimeout => "MODEL_TIMEOUT",
-                    LlmRuntimeStatus.ProviderUnavailable => "PROVIDER_UNAVAILABLE",
-                    LlmRuntimeStatus.UnsupportedCapability => "UNSUPPORTED_CAPABILITY",
-                    _ => "LLM_REQUEST_FAILED"
-                };
-            }
-
-            return IsModelTimeoutResponse(response) ? "MODEL_TIMEOUT" : "LLM_REQUEST_FAILED";
+            return FallbackReasonResolver.Resolve(runtimeResult, response, IsModelTimeoutResponse);
         }
 
         private static string ResolveProviderName(ILLMClient llmClient, LlmProviderMetadata? metadata = null)
