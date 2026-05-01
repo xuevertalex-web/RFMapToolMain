@@ -835,20 +835,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static ChangedHint BuildChangedHint(string filePath, string toolInput, ExecutionTracer.PatchDecision patchDecision)
         {
-            var fileName = Path.GetFileNameWithoutExtension(filePath);
-            var reasonHint = NormalizeHint(patchDecision.Reason);
-            if (!string.IsNullOrWhiteSpace(reasonHint))
-            {
-                return new ChangedHint { File = filePath, Hint = reasonHint };
-            }
-
-            var actionHint = ExtractActionHint(toolInput, fileName);
-            if (!string.IsNullOrWhiteSpace(actionHint))
-            {
-                return new ChangedHint { File = filePath, Hint = actionHint };
-            }
-
-            return new ChangedHint { File = filePath, Hint = "Updated by agent" };
+            return ChangedHintComposer.BuildChangedHint(filePath, toolInput, patchDecision);
         }
 
         private static ChangedKind BuildChangedKind(string task, string toolInput, ExecutionTracer.PatchDecision patchDecision, Execution.BuildVerifier.BuildResult? buildResult)
@@ -2016,7 +2003,7 @@ Write the final project overview now.";
             public string Hint { get; init; } = string.Empty;
         }
 
-        private sealed class ChangedHint
+        internal sealed class ChangedHint
         {
             public string File { get; init; } = string.Empty;
             public string Hint { get; init; } = string.Empty;
