@@ -1,3 +1,5 @@
+using LocalCursorAgent.Security;
+
 namespace LocalCursorAgent.Core
 {
     internal static class WorkspacePolicyFormatter
