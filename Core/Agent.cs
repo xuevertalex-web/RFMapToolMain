@@ -890,7 +890,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             };
         }
 
-        private enum ChangedKindType
+        internal enum ChangedKindType
         {
             BugFix,
             Validation,
@@ -903,23 +903,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static ChangedKindType ClassifyIntent(string task, string toolInput, string patchReason, Execution.BuildVerifier.BuildResult? buildResult)
         {
-            var combined = string.Join(" ", new[] { task, toolInput, patchReason, buildResult?.Errors != null ? string.Join(" ", buildResult.Errors) : string.Empty })
-                .ToLowerInvariant();
-
-            if (combined.Contains("validation") || combined.Contains("null check") || combined.Contains("input check"))
-                return ChangedKindType.Validation;
-            if (combined.Contains("refactor") || combined.Contains("refined") || combined.Contains("rework"))
-                return ChangedKindType.Refactor;
-            if (combined.Contains("build error") || combined.Contains("compile") || combined.Contains("build failed") || combined.Contains("cs") || combined.Contains("restore"))
-                return ChangedKindType.BuildFix;
-            if (combined.Contains("fix") || combined.Contains("bug") || combined.Contains("error handling") || combined.Contains("exception"))
-                return ChangedKindType.BugFix;
-            if (combined.Contains("add") || combined.Contains("new") || combined.Contains("feature") || combined.Contains("implement"))
-                return ChangedKindType.FeatureAdd;
-            if (combined.Contains("update") || combined.Contains("adjust") || combined.Contains("change") || combined.Contains("modify"))
-                return ChangedKindType.Update;
-
-            return ChangedKindType.Unknown;
+            return ChangedKindClassifier.ClassifyIntent(task, toolInput, patchReason, buildResult);
         }
 
         private static bool IsMutationLikeToolCall(ToolCaller.ToolCall call)
