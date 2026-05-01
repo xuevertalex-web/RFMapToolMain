@@ -882,12 +882,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static ChangedKind BuildChangedKind(string task, string toolInput, ExecutionTracer.PatchDecision patchDecision, Execution.BuildVerifier.BuildResult? buildResult)
         {
-            var intent = ClassifyIntent(task, toolInput, patchDecision.Reason, buildResult);
-            return new ChangedKind
-            {
-                File = patchDecision.TargetFile,
-                Kind = intent.ToString()
-            };
+            return ChangedKindBuilder.BuildChangedKind(task, toolInput, patchDecision, buildResult);
         }
 
         internal enum ChangedKindType
@@ -2079,7 +2074,7 @@ Write the final project overview now.";
             public int EndLine { get; init; }
         }
 
-        private sealed class ChangedKind
+        internal sealed class ChangedKind
         {
             public string File { get; init; } = string.Empty;
             public string Kind { get; init; } = string.Empty;
