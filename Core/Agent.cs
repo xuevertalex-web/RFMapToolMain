@@ -1920,34 +1920,7 @@ Write the final project overview now.";
 
         private string BuildStartupStateBlock()
         {
-            if (_sessionContext is null && _workspaceResolution is null)
-                return string.Empty;
-
-            var lines = new List<string>();
-
-            if (_workspaceResolution is not null)
-            {
-                lines.Add("WORKSPACE RESOLUTION:");
-                lines.Add($"- Success: {_workspaceResolution.Success}");
-                lines.Add($"- Reason: {_workspaceResolution.ReasonCodeName} / {_workspaceResolution.ReasonCode}");
-                lines.Add($"- Source: {_workspaceResolution.Source ?? string.Empty}");
-                lines.Add($"- Workspace root: {_workspaceResolution.WorkspaceRoot ?? string.Empty}");
-                lines.Add($"- Message: {_workspaceResolution.Message}");
-            }
-
-            if (_sessionContext is not null)
-            {
-                if (lines.Count > 0)
-                    lines.Add(string.Empty);
-
-                lines.Add("SESSION STARTUP:");
-                lines.Add($"- Session id: {_sessionContext.SessionId}");
-                lines.Add($"- Runtime root: {_sessionContext.RuntimeRoot}");
-                lines.Add($"- Active workspace root: {_sessionContext.ActiveWorkspaceRoot}");
-                lines.Add($"- Access mode: {_sessionContext.AccessMode}");
-            }
-
-            return string.Join(Environment.NewLine, lines);
+            return StartupStateFormatter.BuildStartupStateBlock(_sessionContext, _workspaceResolution);
         }
 
         private static string EmitAgentRunResult(
