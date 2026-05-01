@@ -783,37 +783,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 _sandboxManager.CleanupSandbox();
             }
         }
-
-        /// <summary>
-        /// Log file state status and symbol information for debugging.
-        /// Shows which files are Hot, Dirty, or Clean and their extracted symbols.
-        /// </summary>
-        private void LogFileStateStatus(ContextInformation contextInfo)
-        {
-            if (contextInfo.SelectedFiles.Count == 0)
-                return;
-
-            Console.WriteLine("\n📊 Context Information:");
-            foreach (var file in contextInfo.SelectedFiles)
-            {
-                var stateLabel = contextInfo.FileStateFlags.TryGetValue(file, out var flag)
-                    ? $" {flag}"
-                    : " (Clean)";
-
-                var lastActivityUtc = _fileStateManager.GetLastActivityUtc(file);
-                var recencyLabel = lastActivityUtc == DateTime.MinValue
-                    ? ""
-                    : $" | LastActivityUtc: {lastActivityUtc:O}";
-                
-                // Get symbols for this file if available
-                var symbols = _projectIndexer.SymbolDirectory.GetSymbols(file);
-                var symbolsLabel = symbols.Count > 0 ? $" | Symbols: {string.Join(", ", symbols.Take(5))}" + (symbols.Count > 5 ? $"... +{symbols.Count - 5} more" : "") : "";
-                
-                Console.WriteLine($"  • {file}{stateLabel}{symbolsLabel}{recencyLabel}");
-            }
-            Console.WriteLine();
-        }
-
         internal enum ChangedKindType
         {
             BugFix,
