@@ -35,10 +35,18 @@ namespace LocalCursorAgent.Core
             if (string.IsNullOrWhiteSpace(candidate))
                 return null;
 
-            if (Regex.IsMatch(candidate, @"^[a-zA-Z][a-zA-Z0-9+\-.]*://"))
+            if (IsUrlLikeToken(task, fileMatch.Index, fileMatch.Length, candidate))
                 return null;
 
-            var tokenStart = fileMatch.Index;
+            return candidate;
+        }
+
+        private static bool IsUrlLikeToken(string task, int matchIndex, int matchLength, string candidate)
+        {
+            if (Regex.IsMatch(candidate, @"^[a-zA-Z][a-zA-Z0-9+\-.]*://"))
+                return true;
+
+            var tokenStart = matchIndex;
             while (tokenStart > 0)
             {
                 var ch = task[tokenStart - 1];
@@ -47,7 +55,7 @@ namespace LocalCursorAgent.Core
                 tokenStart--;
             }
 
-            var tokenEnd = fileMatch.Index + fileMatch.Length;
+            var tokenEnd = matchIndex + matchLength;
             while (tokenEnd < task.Length)
             {
                 var ch = task[tokenEnd];
@@ -57,10 +65,7 @@ namespace LocalCursorAgent.Core
             }
 
             var surroundingToken = task[tokenStart..tokenEnd];
-            if (surroundingToken.Contains("://", StringComparison.Ordinal))
-                return null;
-
-            return candidate;
+            return surroundingToken.Contains("://", StringComparison.Ordinal);
         }
     }
 }
