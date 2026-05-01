@@ -895,11 +895,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         {
             _contextBuilder.Tracer.MarkStopPoint("Agent", reasonCode, diagnostic.WhyDenied, Array.Empty<string>());
             _contextBuilder.Tracer.CompleteRun("failed", "Agent stopped with structured diagnostic", reasonCode, false);
-            return EmitStructuredDiagnosticResult(diagnostic, changedFiles, changedHints, changedRanges, changedKinds);
-        }
-
-        private static string EmitStructuredDiagnosticResult(StructuredDiagnostic diagnostic, IEnumerable<string> changedFiles, IEnumerable<ChangedHint> changedHints, IEnumerable<ChangedRange> changedRanges, IEnumerable<ChangedKind> changedKinds)
-        {
             var message = StructuredDiagnosticMessageBuilder.Build(diagnostic);
 
             return EmitAgentRunResult(
