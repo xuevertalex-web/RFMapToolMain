@@ -2056,23 +2056,10 @@ Write the final project overview now.";
 
         private static ActionLifecyclePayload[] MapActionLifecycle(IReadOnlyList<ActionLifecycleEntry> entries)
         {
-            return entries.Select(e => new ActionLifecyclePayload
-            {
-                Sequence = e.Sequence,
-                ActionCorrelationId = e.ActionCorrelationId,
-                ActionType = e.ActionType,
-                Target = e.Target,
-                Command = e.Command,
-                NormalizedTarget = e.NormalizedTarget,
-                LifecycleState = e.LifecycleState.ToString(),
-                ReasonCode = e.ReasonCode,
-                Reason = e.Reason,
-                ApprovalStatus = e.ApprovalStatus,
-                IsInsideSandbox = e.IsInsideSandbox
-            }).ToArray();
+            return ActionLifecycleMapper.MapActionLifecycle(entries);
         }
 
-        private sealed class ActionLifecyclePayload
+        internal sealed class ActionLifecyclePayload
         {
             [JsonPropertyName("sequence")]
             public int Sequence { get; init; }
