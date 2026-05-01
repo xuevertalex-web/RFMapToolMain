@@ -1160,7 +1160,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             var toolsDescription = _toolRegistry.GetToolsDescription();
             var policyBlock = WorkspacePolicyFormatter.BuildPolicyBlock(_sessionContext);
             var startupStateBlock = StartupStateFormatter.BuildStartupStateBlock(_sessionContext, _workspaceResolution);
-            var responseLanguageRule = ResponseLanguageHelper.BuildResponseLanguageRule(task);
             return ContextPromptBuilder.BuildPromptWithContext(
                 task,
                 iteration,
@@ -1174,7 +1173,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 toolsDescription,
                 policyBlock,
                 startupStateBlock,
-                responseLanguageRule);
+                ResponseLanguageHelper.BuildResponseLanguageRule(task));
         }
 
         private static string EmitAgentRunResult(
