@@ -936,7 +936,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 return null;
             }
 
-            var candidates = new List<string>();
+            var candidates = new List<string>(3);
 
             if (!string.IsNullOrWhiteSpace(patchDecision.TargetMethod))
                 candidates.Add(patchDecision.TargetMethod);
