@@ -44,6 +44,9 @@ RunExtractRequestedNewFilePath_NoExtensionRegression();
 RunExtractRequestedNewFilePath_UppercaseExtensionRegression();
 RunExtractRequestedNewFilePath_WindowsPathRegression();
 RunExtractRequestedNewFilePath_QuotedPathRegression();
+RunExtractRequestedNewFilePath_DashUnderscoreRegression();
+RunExtractRequestedNewFilePath_RelativeDotSlashRegression();
+RunExtractRequestedNewFilePath_MultiDotFileNameRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1551,6 +1554,40 @@ static void RunExtractRequestedNewFilePath_QuotedPathRegression()
 
     Console.WriteLine("PASS ExtractRequestedNewFilePath_QuotedPathRegression");
 }
+
+static void RunExtractRequestedNewFilePath_DashUnderscoreRegression()
+{
+    var method = typeof(Agent).GetMethod("ExtractRequestedNewFilePath", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+    AssertTrue(method is not null, "Expected Agent.ExtractRequestedNewFilePath to exist.");
+
+    var result = method!.Invoke(null, new object[] { "create file configs/my-config_v2.test.json now" }) as string;
+    AssertTrue(string.Equals(result, "configs/my-config_v2.test.json", StringComparison.Ordinal), "Expected extraction for dash/underscore and multi-dot path.");
+
+    Console.WriteLine("PASS ExtractRequestedNewFilePath_DashUnderscoreRegression");
+}
+
+static void RunExtractRequestedNewFilePath_RelativeDotSlashRegression()
+{
+    var method = typeof(Agent).GetMethod("ExtractRequestedNewFilePath", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+    AssertTrue(method is not null, "Expected Agent.ExtractRequestedNewFilePath to exist.");
+
+    var result = method!.Invoke(null, new object[] { "create file ./src/new-file.config.json please" }) as string;
+    AssertTrue(string.Equals(result, "./src/new-file.config.json", StringComparison.Ordinal), "Expected extraction for relative ./ path.");
+
+    Console.WriteLine("PASS ExtractRequestedNewFilePath_RelativeDotSlashRegression");
+}
+
+static void RunExtractRequestedNewFilePath_MultiDotFileNameRegression()
+{
+    var method = typeof(Agent).GetMethod("ExtractRequestedNewFilePath", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+    AssertTrue(method is not null, "Expected Agent.ExtractRequestedNewFilePath to exist.");
+
+    var result = method!.Invoke(null, new object[] { "create file archive.backup.2026-05-01.tar.gz now" }) as string;
+    AssertTrue(string.Equals(result, "archive.backup.2026-05-01.tar.gz", StringComparison.Ordinal), "Expected extraction for multi-dot archive file name.");
+
+    Console.WriteLine("PASS ExtractRequestedNewFilePath_MultiDotFileNameRegression");
+}
+
 
 sealed class FakeNoopTool : ITool
 {
