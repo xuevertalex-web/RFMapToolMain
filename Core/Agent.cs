@@ -1130,7 +1130,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 return false;
 
             var programPath = Path.Combine(_sessionContext.ActiveWorkspaceRoot, "Program.cs");
-            if (!File.Exists(programPath) || !ContainsTopLevelStatements(programPath))
+            if (!File.Exists(programPath) || !TopLevelStatementInspector.ContainsTopLevelStatements(programPath))
                 return false;
 
             foreach (var changedFile in changedFiles.Where(f =>
@@ -1141,10 +1141,10 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     continue;
 
                 var fileText = File.ReadAllText(changedFile);
-                if (!ContainsMainEntryPoint(fileText))
+                if (!TopLevelStatementInspector.ContainsMainEntryPoint(fileText))
                     continue;
 
-                var normalized = NormalizeHelperClassWithoutMain(fileText);
+                var normalized = TopLevelStatementInspector.NormalizeHelperClassWithoutMain(fileText);
                 if (string.Equals(normalized, fileText, StringComparison.Ordinal))
                     continue;
 
@@ -1156,35 +1156,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
             nextPrompt = "Detected CS8802 with top-level Program.cs. Do not rewrite Program.cs by default. Inspect newly created .cs files and remove any extra Main entry point or top-level executable code from them.";
             return true;
-        }
-
-        private static bool ContainsTopLevelStatements(string programPath)
-        {
-            var text = File.ReadAllText(programPath);
-            return text.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None)
-                .Select(line => line.Trim())
-                .Any(line => !string.IsNullOrWhiteSpace(line) &&
-                             !line.StartsWith("using ", StringComparison.Ordinal) &&
-                             !line.StartsWith("namespace ", StringComparison.Ordinal) &&
-                             !line.StartsWith("//", StringComparison.Ordinal) &&
-                             !line.StartsWith("/*", StringComparison.Ordinal) &&
-                             line != "{" &&
-                             line != "}" &&
-                             !line.StartsWith("[", StringComparison.Ordinal));
-        }
-
-        private static bool ContainsMainEntryPoint(string text) =>
-            Regex.IsMatch(text, @"\bstatic\s+(?:async\s+)?(?:void|int|Task(?:<int>)?)\s+Main\s*\(", RegexOptions.Multiline);
-
-        private static string NormalizeHelperClassWithoutMain(string text)
-        {
-            var withoutMain = Regex.Replace(
-                text,
-                @"^\s*(?:public|private|protected|internal)?\s*static\s+(?:async\s+)?(?:void|int|Task(?:<int>)?)\s+Main\s*\([^)]*\)\s*\{[\s\S]*?^\s*\}",
-                string.Empty,
-                RegexOptions.Multiline);
-
-            return withoutMain.Trim() + Environment.NewLine;
         }
 
         private string FinalizeRunResult(
