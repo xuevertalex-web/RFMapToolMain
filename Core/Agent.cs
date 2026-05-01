@@ -942,7 +942,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 candidates.Add(patchDecision.TargetMethod);
 
             var targetSymbol = ChangeHintBuilder.ExtractTargetSymbol(toolInput);
-            if (!string.IsNullOrWhiteSpace(targetSymbol))
+            if (targetSymbol is { Length: > 0 })
                 candidates.Add(targetSymbol);
 
             var fallbackName = Path.GetFileNameWithoutExtension(filePath);
