@@ -1091,7 +1091,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             if (!string.IsNullOrWhiteSpace(patchDecision.TargetMethod))
                 candidates.Add(patchDecision.TargetMethod);
 
-            var targetSymbol = ExtractTargetSymbol(toolInput);
+            var targetSymbol = ChangeHintBuilder.ExtractTargetSymbol(toolInput);
             if (!string.IsNullOrWhiteSpace(targetSymbol))
                 candidates.Add(targetSymbol);
 
@@ -1306,16 +1306,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         private static string ExtractActionHint(string toolInput, string fallbackSymbol)
         {
             return ChangeHintBuilder.ExtractActionHint(toolInput, fallbackSymbol);
-        }
-
-        private static string? ExtractTargetSymbol(string text)
-        {
-            return ChangeHintBuilder.ExtractTargetSymbol(text);
-        }
-
-        private static string NormalizeHint(string text)
-        {
-            return ChangeHintBuilder.NormalizeHint(text);
         }
 
         private string BuildPrompt(string task, int iteration, string previousResponse)
