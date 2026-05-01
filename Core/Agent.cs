@@ -938,73 +938,17 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static bool IsAnalysisOnlyTask(string task)
         {
-            if (string.IsNullOrWhiteSpace(task))
-                return false;
-
-            var normalized = task.ToLowerInvariant();
-            if (normalized.Contains("\u043e\u043f\u0438\u0448\u0438") ||
-                normalized.Contains("\u043e\u043f\u0438\u0441\u0430\u0442\u044c") ||
-                normalized.Contains("\u043e\u0431\u044a\u044f\u0441\u043d\u0438") ||
-                normalized.Contains("\u043e\u0431\u044a\u044f\u0441\u043d\u0438\u0442\u044c") ||
-                normalized.Contains("\u043e\u0431\u0437\u043e\u0440") ||
-                normalized.Contains("\u0441\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u0443") ||
-                normalized.Contains("\u0441\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u0430") ||
-                normalized.Contains("\u043a\u043b\u044e\u0447\u0435\u0432\u044b\u0435 \u0444\u0430\u0439\u043b\u044b") ||
-                normalized.Contains("\u0440\u0430\u0441\u0441\u043a\u0430\u0436\u0438"))
-            {
-                return true;
-            }
-
-            return normalized.Contains("analyze") ||
-                   normalized.Contains("analyse") ||
-                   normalized.Contains("summarize") ||
-                   normalized.Contains("summarise") ||
-                   normalized.Contains("explain") ||
-                   normalized.Contains("review") ||
-                   normalized.Contains("diagnose") ||
-                   normalized.Contains("опиши") ||
-                   normalized.Contains("описать") ||
-                   normalized.Contains("объясни") ||
-                   normalized.Contains("объяснить") ||
-                   normalized.Contains("обзор") ||
-                   normalized.Contains("структуру") ||
-                   normalized.Contains("структура") ||
-                   normalized.Contains("ключевые файлы") ||
-                   normalized.Contains("расскажи");
+            return TaskPrecheckHeuristics.IsAnalysisOnlyTask(task);
         }
 
         private static bool IsSuspiciousInjectedToolTask(string task)
         {
-            if (string.IsNullOrWhiteSpace(task))
-                return false;
-
-            var normalized = task.Trim();
-            return normalized.Contains("TOOL:", StringComparison.OrdinalIgnoreCase) ||
-                   normalized.Contains("INPUT:", StringComparison.OrdinalIgnoreCase);
+            return TaskPrecheckHeuristics.IsSuspiciousInjectedToolTask(task);
         }
 
         private static bool IsLowSignalTask(string task)
         {
-            if (string.IsNullOrWhiteSpace(task))
-                return true;
-
-            var normalized = task.Trim();
-            if (Path.IsPathRooted(normalized) && !normalized.Contains(' '))
-                return true;
-
-            var signalChars = normalized.Count(char.IsLetterOrDigit);
-            if (signalChars < 3)
-                return true;
-
-            if (normalized.Length >= 256)
-            {
-                var signalRatio = (double)signalChars / normalized.Length;
-                var substantiveTokenCount = Regex.Matches(normalized, @"[\p{L}\p{Nd}_]{3,}").Count;
-                if (signalRatio < 0.35 || substantiveTokenCount < 3)
-                    return true;
-            }
-
-            return false;
+            return TaskPrecheckHeuristics.IsLowSignalTask(task);
         }
 
         private static bool IsNonSubstantiveNoToolResponse(string response)
