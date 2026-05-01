@@ -830,24 +830,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static string ExtractWriteTargetPath(string input)
         {
-            if (string.IsNullOrWhiteSpace(input) || !input.StartsWith("write:", StringComparison.OrdinalIgnoreCase))
-                return string.Empty;
-
-            var payload = input.Substring(6);
-            if (string.IsNullOrWhiteSpace(payload))
-                return string.Empty;
-
-            // Handle Windows absolute paths like C:\foo\bar.cs:<content>.
-            if (payload.Length >= 3 &&
-                payload[1] == ':' &&
-                (payload[2] == '\\' || payload[2] == '/'))
-            {
-                var separator = payload.IndexOf(':', 3);
-                return separator >= 0 ? payload[..separator].Trim() : payload.Trim();
-            }
-
-            var idx = payload.IndexOf(':');
-            return idx >= 0 ? payload[..idx].Trim() : payload.Trim();
+            return WriteTargetPathExtractor.ExtractWriteTargetPath(input);
         }
 
         private static ChangedHint BuildChangedHint(string filePath, string toolInput, ExecutionTracer.PatchDecision patchDecision)
