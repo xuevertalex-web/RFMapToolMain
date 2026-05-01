@@ -796,15 +796,9 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             Console.WriteLine("\n📊 Context Information:");
             foreach (var file in contextInfo.SelectedFiles)
             {
-                var stateLabel = "";
-                if (contextInfo.FileStateFlags.TryGetValue(file, out var flag))
-                {
-                    stateLabel = $" {flag}";
-                }
-                else
-                {
-                    stateLabel = " (Clean)";
-                }
+                var stateLabel = contextInfo.FileStateFlags.TryGetValue(file, out var flag)
+                    ? $" {flag}"
+                    : " (Clean)";
 
                 var lastActivityUtc = _fileStateManager.GetLastActivityUtc(file);
                 var recencyLabel = lastActivityUtc == DateTime.MinValue
