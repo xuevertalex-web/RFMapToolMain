@@ -1073,10 +1073,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static bool LooksLikeMethodDeclaration(string line)
         {
-            if (string.IsNullOrWhiteSpace(line))
-                return false;
-
-            return Regex.IsMatch(line, @"(?:public|private|protected|internal)(?:\s+static)?(?:\s+async)?\s+(?:virtual\s+)?(?:override\s+)?[\w<>\.\[\],]+\s+\w+\s*\(");
+            return !string.IsNullOrWhiteSpace(line) &&
+                   Regex.IsMatch(line, @"(?:public|private|protected|internal)(?:\s+static)?(?:\s+async)?\s+(?:virtual\s+)?(?:override\s+)?[\w<>\.\[\],]+\s+\w+\s*\(");
         }
 
         private static bool LooksLikeClassDeclaration(string line)
