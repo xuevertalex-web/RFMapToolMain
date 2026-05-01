@@ -1905,14 +1905,12 @@ Write the final project overview now.";
 
         private static string BuildResponseLanguageRule(string task)
         {
-            return ContainsCyrillic(task)
-                ? "- Answer in Russian. The user wrote in Russian, so the final response must be in Russian."
-                : "- Answer in the same language as the user's task.";
+            return ResponseLanguageHelper.BuildResponseLanguageRule(task);
         }
 
         private static bool ContainsCyrillic(string value)
         {
-            return !string.IsNullOrEmpty(value) && value.Any(ch => ch >= '\u0400' && ch <= '\u04FF');
+            return ResponseLanguageHelper.ContainsCyrillic(value);
         }
 
         private string BuildPolicyBlock()
