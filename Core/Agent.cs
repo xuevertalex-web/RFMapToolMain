@@ -1258,31 +1258,12 @@ next_safe_action: {diagnostic.NextSafeAction}";
 
         private static string ResolveProviderName(ILLMClient llmClient, LlmProviderMetadata? metadata = null)
         {
-            if (metadata is not null && !string.IsNullOrWhiteSpace(metadata.Provider))
-                return metadata.Provider;
-
-            if (llmClient == null)
-                return string.Empty;
-
-            var typeName = llmClient.GetType().Name;
-            if (typeName.EndsWith("Client", StringComparison.OrdinalIgnoreCase))
-                typeName = typeName[..^"Client".Length];
-            return typeName;
+            return LlmClientIdentityResolver.ResolveProviderName(llmClient, metadata);
         }
 
         private static string ResolveModelName(ILLMClient llmClient, LlmProviderMetadata? metadata = null)
         {
-            if (metadata is not null && !string.IsNullOrWhiteSpace(metadata.Model))
-                return metadata.Model;
-
-            if (llmClient == null)
-                return string.Empty;
-
-            var field = llmClient.GetType().GetField("_model", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            if (field?.GetValue(llmClient) is string model && !string.IsNullOrWhiteSpace(model))
-                return model;
-
-            return string.Empty;
+            return LlmClientIdentityResolver.ResolveModelName(llmClient, metadata);
         }
 
         private static ChangedRange? BuildChangedRange(string filePath, string toolInput, ExecutionTracer.PatchDecision patchDecision, ProjectSymbolDirectory? symbolDirectory)
