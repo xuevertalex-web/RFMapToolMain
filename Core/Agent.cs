@@ -363,7 +363,7 @@ namespace LocalCursorAgent.Core
                         !currentResponse.TrimStart().StartsWith("TOOL:", StringComparison.OrdinalIgnoreCase))
                     {
                         if (IsTechnicalAnalysisIntent(task) &&
-                            (contextInfo.SelectedFiles.Count == 0 || IsNonSubstantiveNoToolResponse(currentResponse) || IsNeedsMoreDataResponse(currentResponse)))
+                            (contextInfo.SelectedFiles.Count == 0 || NoToolResponseHeuristics.IsNonSubstantiveNoToolResponse(currentResponse) || NoToolResponseHeuristics.IsNeedsMoreDataResponse(currentResponse)))
                         {
                             _memory.Add("task_status", "needs_action_plan");
                             return FinalizeRunResult(
@@ -408,7 +408,7 @@ namespace LocalCursorAgent.Core
                         lastKnownAction = $"Parsed {toolCalls.Count} tool calls";
                         if (toolCalls.Count == 0)
                         {
-                            if (IsNonSubstantiveNoToolResponse(currentResponse))
+                            if (NoToolResponseHeuristics.IsNonSubstantiveNoToolResponse(currentResponse))
                             {
                                 currentResponse = "Your previous response did not contain the final analysis. Provide the final answer now. Do not say what you will do. Do not ask for more steps. Do not emit a tool call.";
                                 continue;
@@ -675,7 +675,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                             continue;
                         }
 
-                        if (IsNonSubstantiveNoToolResponse(currentResponse))
+                        if (NoToolResponseHeuristics.IsNonSubstantiveNoToolResponse(currentResponse))
                         {
                             currentResponse = "Your previous response did not contain the final analysis. Provide the final answer now. Do not say what you will do. Do not ask for more steps. Do not emit a tool call.";
                             continue;
@@ -877,16 +877,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         private static bool IsLowSignalTask(string task)
         {
             return TaskPrecheckHeuristics.IsLowSignalTask(task);
-        }
-
-        private static bool IsNonSubstantiveNoToolResponse(string response)
-        {
-            return NoToolResponseHeuristics.IsNonSubstantiveNoToolResponse(response);
-        }
-
-        private static bool IsNeedsMoreDataResponse(string response)
-        {
-            return NoToolResponseHeuristics.IsNeedsMoreDataResponse(response);
         }
 
         private static string BuildAnalysisFallbackSummary(string task, ContextInformation contextInfo, string fallbackReason)
