@@ -414,7 +414,7 @@ namespace LocalCursorAgent.Core
                                 continue;
                             }
 
-                            if (!analysisOnlyTask && (IsBroadEngineeringIntent(task) || IsTechnicalAnalysisIntent(task)))
+                            if (!analysisOnlyTask && (TaskIntentClassifier.IsBroadEngineeringIntent(task) || IsTechnicalAnalysisIntent(task)))
                             {
                                 _memory.Add("task_status", "needs_action_plan");
                                 return FinalizeRunResult(
@@ -682,7 +682,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                         }
 
                         _memory.Add("final_response", currentResponse);
-                        if (IsBroadEngineeringIntent(task) || IsTechnicalAnalysisIntent(task))
+                        if (TaskIntentClassifier.IsBroadEngineeringIntent(task) || IsTechnicalAnalysisIntent(task))
                         {
                             _memory.Add("task_status", "needs_action_plan");
                             return FinalizeRunResult(
@@ -1725,8 +1725,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         {
             return RuntimeTuningResolver.ResolveRuntimeTuningWarnings(provider, model);
         }
-
-        private static bool IsBroadEngineeringIntent(string task) => TaskIntentClassifier.IsBroadEngineeringIntent(task);
 
         private static bool IsTechnicalAnalysisIntent(string task) => TaskIntentClassifier.IsTechnicalAnalysisIntent(task);
 
