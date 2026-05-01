@@ -954,7 +954,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 var symbolRange = FindBestSymbolRangeForFile(lines, indexedSymbols, candidate);
-                if (symbolRange is not null)
+                if (symbolRange.HasValue)
                 {
                     return new ChangedRange
                     {
