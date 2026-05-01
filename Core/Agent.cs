@@ -2006,25 +2006,10 @@ Write the final project overview now.";
 
         private static ApprovalRequiredActionPayload[] MapApprovalProposals(IReadOnlyList<ActionApprovalProposal> proposals)
         {
-            return proposals.Select(p => new ApprovalRequiredActionPayload
-            {
-                ActionType = p.ActionType,
-                Command = p.Command ?? string.Empty,
-                Path = p.Path ?? string.Empty,
-                NormalizedTarget = p.NormalizedTarget ?? string.Empty,
-                SandboxRoot = p.SandboxRoot,
-                ProjectRoot = p.ProjectRoot,
-                WorktreeRoot = p.WorktreeRoot,
-                RiskLevel = p.RiskLevel,
-                ReasonCode = p.ReasonCode,
-                ExpectedEffect = p.ExpectedEffect,
-                Reason = p.Reason,
-                ApprovalStatus = p.ApprovalStatus.ToString(),
-                IsInsideSandbox = p.IsInsideSandbox
-            }).ToArray();
+            return ApprovalProposalMapper.MapApprovalProposals(proposals);
         }
 
-        private sealed class ApprovalRequiredActionPayload
+        internal sealed class ApprovalRequiredActionPayload
         {
             [JsonPropertyName("actionType")]
             public string ActionType { get; init; } = string.Empty;
