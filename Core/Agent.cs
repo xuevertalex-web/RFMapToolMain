@@ -1171,8 +1171,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             var executionContext = _memory.GetContextString(CONTEXT_WINDOW);
             var taskProfile = _memorySystem.GetTaskProfileSummary(task);
             var toolsDescription = _toolRegistry.GetToolsDescription();
-            var policyBlock = BuildPolicyBlock();
-            var startupStateBlock = BuildStartupStateBlock();
+            var policyBlock = WorkspacePolicyFormatter.BuildPolicyBlock(_sessionContext);
+            var startupStateBlock = StartupStateFormatter.BuildStartupStateBlock(_sessionContext, _workspaceResolution);
             var responseLanguageRule = ResponseLanguageHelper.BuildResponseLanguageRule(task);
             return ContextPromptBuilder.BuildPromptWithContext(
                 task,
@@ -1194,16 +1194,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         {
             var responseLanguageRule = ResponseLanguageHelper.BuildResponseLanguageRule(task);
             return AnalysisPromptBuilder.BuildAnalysisPromptWithContext(task, iteration, previousResponse, compactContext, responseLanguageRule);
-        }
-
-        private string BuildPolicyBlock()
-        {
-            return WorkspacePolicyFormatter.BuildPolicyBlock(_sessionContext);
-        }
-
-        private string BuildStartupStateBlock()
-        {
-            return StartupStateFormatter.BuildStartupStateBlock(_sessionContext, _workspaceResolution);
         }
 
         private static string EmitAgentRunResult(
