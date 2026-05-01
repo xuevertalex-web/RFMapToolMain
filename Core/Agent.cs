@@ -1351,11 +1351,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             return ResponseLanguageHelper.BuildResponseLanguageRule(task);
         }
 
-        private static bool ContainsCyrillic(string value)
-        {
-            return ResponseLanguageHelper.ContainsCyrillic(value);
-        }
-
         private string BuildPolicyBlock()
         {
             return WorkspacePolicyFormatter.BuildPolicyBlock(_sessionContext);
