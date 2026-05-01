@@ -946,7 +946,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 candidates.Add(targetSymbol);
 
             var fallbackName = Path.GetFileNameWithoutExtension(filePath);
-            if (!string.IsNullOrWhiteSpace(fallbackName))
+            if (fallbackName is { Length: > 0 })
                 candidates.Add(fallbackName);
 
             var indexedSymbols = symbolDirectory?.GetSymbols(filePath) ?? new List<string>();
