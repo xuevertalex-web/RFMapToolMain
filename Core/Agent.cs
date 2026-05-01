@@ -78,7 +78,7 @@ namespace LocalCursorAgent.Core
             var runStartedUtc = DateTime.UtcNow;
             _memory.Add("task_start", task);
             var tracer = _contextBuilder.Tracer;
-            var requestedNewFile = ExtractRequestedNewFilePath(task);
+            var requestedNewFile = NewFilePathExtractor.ExtractRequestedNewFilePath(task);
             tracer.LogActionEvent("TaskReceived", "Agent", ExecutionTracer.ActionLogLevel.Info, "received", metadata: new Dictionary<string, object?>
             {
                 { "task", task }
@@ -236,7 +236,7 @@ namespace LocalCursorAgent.Core
                     lastSuccessfulStep = "ContextBuilt";
                     lastKnownAction = $"Built context with {resolvedFiles.Count} resolved files";
                     var contextString = analysisOnlyTask
-                        ? BuildCompactAnalysisContext(contextInfo)
+                        ? AnalysisContextFormatter.BuildCompactAnalysisContext(contextInfo)
                         : _contextBuilder.FormatContext(contextInfo);
 
                     // Build prompt with context
@@ -288,13 +288,13 @@ namespace LocalCursorAgent.Core
                     lastKnownAction = "Model response received";
                     _memory.Add("llm_response", currentResponse.Length > 100 ? currentResponse.Substring(0, 100) + "..." : currentResponse);
 
-                    var isHardFailure = runtimeResult?.IsFailure ?? IsHardLlmFailureResponse(currentResponse);
+                    var isHardFailure = runtimeResult?.IsFailure ?? LlmFailureDetector.IsHardLlmFailureResponse(currentResponse);
                     if (isHardFailure)
                     {
                         _memory.Add("llm_failure", currentResponse, "LlmUnavailableOrRequestFailed");
                         if (analysisOnlyTask)
                         {
-                            var fallbackReason = ResolveFallbackReason(runtimeResult, currentResponse);
+                            var fallbackReason = FallbackReasonResolver.Resolve(runtimeResult, currentResponse, TimeoutResponseHeuristics.IsModelTimeoutResponse);
                             if (string.Equals(fallbackReason, "MODEL_TIMEOUT", StringComparison.Ordinal))
                             {
                                 tracer.LogActionEvent("ModelCallTimedOut", "Agent", ExecutionTracer.ActionLogLevel.Warning, "timed_out", fallbackReason, metadata: new Dictionary<string, object?>
@@ -310,7 +310,7 @@ namespace LocalCursorAgent.Core
                                 { "response_length", currentResponse?.Length ?? 0 },
                                 { "response_preview", string.IsNullOrWhiteSpace(currentResponse) ? string.Empty : (currentResponse.Length > 120 ? currentResponse[..120] : currentResponse) }
                             });
-                            var fallbackSummary = BuildAnalysisFallbackSummary(task, contextInfo, fallbackReason);
+                            var fallbackSummary = AnalysisFallbackFormatter.BuildAnalysisFallbackSummary(contextInfo, fallbackReason);
                             tracer.LogActionEvent("AnalysisFallback", "Agent", ExecutionTracer.ActionLogLevel.Warning, "used", fallbackReason, metadata: new Dictionary<string, object?>
                             {
                                 { "selected_files", contextInfo.SelectedFiles.ToArray() },
@@ -334,13 +334,13 @@ namespace LocalCursorAgent.Core
                                 false,
                                 runStartedUtc: runStartedUtc,
                                 workspace: _sessionContext?.ActiveWorkspaceRoot,
-                                provider: ResolveProviderName(_llmClient, runtimeMetadata),
-                                model: ResolveModelName(_llmClient, runtimeMetadata),
+                                provider: LlmClientIdentityResolver.ResolveProviderName(_llmClient, runtimeMetadata),
+                                model: LlmClientIdentityResolver.ResolveModelName(_llmClient, runtimeMetadata),
                                 degradedFlags: new[] { "ANALYSIS_FALLBACK_USED" },
                                 fallbackReason: fallbackReason,
                                 fallbackMode: "INDEXED_CONTEXT_SUMMARY",
                                 payloadFinalStatus: "fallback-success",
-                                timeline: BuildAnalysisTimeline(modelTimedOut: string.Equals(fallbackReason, "MODEL_TIMEOUT", StringComparison.Ordinal), fallbackUsed: true));
+                                timeline: TimelineBuilder.BuildAnalysisTimeline(modelTimedOut: string.Equals(fallbackReason, "MODEL_TIMEOUT", StringComparison.Ordinal), fallbackUsed: true));
                         }
 
                         return FinalizeStructuredDiagnosticResult(
@@ -362,7 +362,7 @@ namespace LocalCursorAgent.Core
                         !string.IsNullOrWhiteSpace(currentResponse) &&
                         !currentResponse.TrimStart().StartsWith("TOOL:", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (IsTechnicalAnalysisIntent(task) &&
+                        if (TaskIntentClassifier.IsTechnicalAnalysisIntent(task) &&
                             (contextInfo.SelectedFiles.Count == 0 || NoToolResponseHeuristics.IsNonSubstantiveNoToolResponse(currentResponse) || NoToolResponseHeuristics.IsNeedsMoreDataResponse(currentResponse)))
                         {
                             _memory.Add("task_status", "needs_action_plan");
@@ -391,13 +391,13 @@ namespace LocalCursorAgent.Core
                             false,
                             runStartedUtc: runStartedUtc,
                             workspace: _sessionContext?.ActiveWorkspaceRoot,
-                            provider: ResolveProviderName(_llmClient, runtimeMetadata),
-                            model: ResolveModelName(_llmClient, runtimeMetadata),
+                            provider: LlmClientIdentityResolver.ResolveProviderName(_llmClient, runtimeMetadata),
+                            model: LlmClientIdentityResolver.ResolveModelName(_llmClient, runtimeMetadata),
                             degradedFlags: Array.Empty<string>(),
                             fallbackReason: string.Empty,
                             fallbackMode: string.Empty,
                             payloadFinalStatus: "success",
-                            timeline: BuildAnalysisTimeline(modelTimedOut: false, fallbackUsed: false));
+                            timeline: TimelineBuilder.BuildAnalysisTimeline(modelTimedOut: false, fallbackUsed: false));
                     }
 
                     // Check for tool calls
@@ -414,7 +414,7 @@ namespace LocalCursorAgent.Core
                                 continue;
                             }
 
-                            if (!analysisOnlyTask && (TaskIntentClassifier.IsBroadEngineeringIntent(task) || IsTechnicalAnalysisIntent(task)))
+                            if (!analysisOnlyTask && (TaskIntentClassifier.IsBroadEngineeringIntent(task) || TaskIntentClassifier.IsTechnicalAnalysisIntent(task)))
                             {
                                 _memory.Add("task_status", "needs_action_plan");
                                 return FinalizeRunResult(
@@ -442,9 +442,9 @@ namespace LocalCursorAgent.Core
                                 false);
                         }
 
-                        var mutationIntentTask = IsMutationIntentTask(task) || requestedNewFile != null;
+                        var mutationIntentTask = MutationIntentDetector.IsMutationIntentTask(task) || requestedNewFile != null;
 
-                        var mutationCall = toolCalls.FirstOrDefault(IsMutationLikeToolCall);
+                        var mutationCall = toolCalls.FirstOrDefault(ToolCallMutationHeuristics.IsMutationLikeToolCall);
                         if (mutationCall != null)
                         {
                             var intentGate = new IntentConfirmationGate(_contextBuilder.Tracer);
@@ -490,7 +490,7 @@ namespace LocalCursorAgent.Core
                             }
                         }
 
-                        patchStarted = patchStarted || toolCalls.Any(IsMutationLikeToolCall);
+                        patchStarted = patchStarted || toolCalls.Any(ToolCallMutationHeuristics.IsMutationLikeToolCall);
                         var toolResults = await _toolCaller.ExecuteToolCalls(toolCalls);
                         lastSuccessfulStep = "ToolCallsExecuted";
                         lastKnownAction = $"Executed {toolCalls.Count} tool calls";
@@ -532,20 +532,20 @@ namespace LocalCursorAgent.Core
                                 if (call.ToolName.Equals("file", StringComparison.OrdinalIgnoreCase) && 
                                     call.Input.StartsWith("write:", StringComparison.OrdinalIgnoreCase))
                                 {
-                                    var filePath = ExtractWriteTargetPath(call.Input);
+                                    var filePath = WriteTargetPathExtractor.ExtractWriteTargetPath(call.Input);
                                     if (!string.IsNullOrWhiteSpace(filePath))
                                     {
                                         changedFiles.Add(filePath);
                                         tracer.MarkChangedFile(filePath);
-                                        var patchDecision = BuildPatchDecision(filePath, call.Input, resolvedFiles);
+                                        var patchDecision = PatchDecisionBuilder.BuildPatchDecision(filePath, call.Input, resolvedFiles);
                                         _contextBuilder.Tracer.LogPatchDecision(patchDecision);
-                                        changedHints[filePath] = BuildChangedHint(filePath, call.Input, patchDecision);
+                                        changedHints[filePath] = ChangedHintComposer.BuildChangedHint(filePath, call.Input, patchDecision);
                                         var changedRange = BuildChangedRange(filePath, call.Input, patchDecision, _projectIndexer.SymbolDirectory);
                                         if (changedRange != null)
                                         {
                                             changedRanges[filePath] = changedRange;
                                         }
-                                        changedKinds[filePath] = BuildChangedKind(task, call.Input, patchDecision, buildResult: null);
+                                        changedKinds[filePath] = ChangedKindBuilder.BuildChangedKind(task, call.Input, patchDecision, buildResult: null);
                                         
                                         // Mark as Hot immediately after patch (highest priority)
                                         _fileStateManager.MarkHot(filePath);
@@ -667,7 +667,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     else
                     {
                         // No tool calls - this might be the final response
-                        if (IsMutationIntentTask(task) || requestedNewFile != null)
+                        if (MutationIntentDetector.IsMutationIntentTask(task) || requestedNewFile != null)
                         {
                             currentResponse = requestedNewFile != null
                                 ? $"This is a file creation task. Use the file tool now to write:{requestedNewFile}:... and create the requested file. Do not answer with explanation only."
@@ -682,7 +682,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                         }
 
                         _memory.Add("final_response", currentResponse);
-                        if (TaskIntentClassifier.IsBroadEngineeringIntent(task) || IsTechnicalAnalysisIntent(task))
+                        if (TaskIntentClassifier.IsBroadEngineeringIntent(task) || TaskIntentClassifier.IsTechnicalAnalysisIntent(task))
                         {
                             _memory.Add("task_status", "needs_action_plan");
                             return FinalizeRunResult(
@@ -768,7 +768,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                         ModelCallStarted = modelCallStarted,
                         PatchStarted = patchStarted,
                         BuildStarted = buildStarted,
-                        Timeline = BuildMaxIterationsTimeline(actualIterationsUsed, lastSuccessfulStep, lastKnownAction)
+                        Timeline = TimelineBuilder.BuildMaxIterationsTimeline(actualIterationsUsed, MAX_ITERATIONS, lastSuccessfulStep, lastKnownAction)
                     });
             }
             catch (Exception ex)
@@ -823,26 +823,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             Console.WriteLine();
         }
 
-        private static ExecutionTracer.PatchDecision BuildPatchDecision(string filePath, string input, List<string> alternativeFiles)
-        {
-            return PatchDecisionBuilder.BuildPatchDecision(filePath, input, alternativeFiles);
-        }
-
-        private static string ExtractWriteTargetPath(string input)
-        {
-            return WriteTargetPathExtractor.ExtractWriteTargetPath(input);
-        }
-
-        private static ChangedHint BuildChangedHint(string filePath, string toolInput, ExecutionTracer.PatchDecision patchDecision)
-        {
-            return ChangedHintComposer.BuildChangedHint(filePath, toolInput, patchDecision);
-        }
-
-        private static ChangedKind BuildChangedKind(string task, string toolInput, ExecutionTracer.PatchDecision patchDecision, Execution.BuildVerifier.BuildResult? buildResult)
-        {
-            return ChangedKindBuilder.BuildChangedKind(task, toolInput, patchDecision, buildResult);
-        }
-
         internal enum ChangedKindType
         {
             BugFix,
@@ -857,36 +837,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         private static ChangedKindType ClassifyIntent(string task, string toolInput, string patchReason, Execution.BuildVerifier.BuildResult? buildResult)
         {
             return ChangedKindClassifier.ClassifyIntent(task, toolInput, patchReason, buildResult);
-        }
-
-        private static bool IsMutationLikeToolCall(ToolCaller.ToolCall call)
-        {
-            return ToolCallMutationHeuristics.IsMutationLikeToolCall(call);
-        }
-
-        private static string BuildAnalysisFallbackSummary(string task, ContextInformation contextInfo, string fallbackReason)
-        {
-            return AnalysisFallbackFormatter.BuildAnalysisFallbackSummary(contextInfo, fallbackReason);
-        }
-
-        private static string BuildCompactAnalysisContext(ContextInformation contextInfo)
-        {
-            return AnalysisContextFormatter.BuildCompactAnalysisContext(contextInfo);
-        }
-
-        private static bool IsMutationIntentTask(string task)
-        {
-            return MutationIntentDetector.IsMutationIntentTask(task);
-        }
-
-        private static string? ExtractRequestedNewFilePath(string task)
-        {
-            return NewFilePathExtractor.ExtractRequestedNewFilePath(task);
-        }
-
-        private static bool IsHardLlmFailureResponse(string response)
-        {
-            return LlmFailureDetector.IsHardLlmFailureResponse(response);
         }
 
         private bool TryRepairCs8802(BuildVerifier.BuildResult buildResult, HashSet<string> changedFiles, out string? nextPrompt)
@@ -923,6 +873,11 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
             nextPrompt = "Detected CS8802 with top-level Program.cs. Do not rewrite Program.cs by default. Inspect newly created .cs files and remove any extra Main entry point or top-level executable code from them.";
             return true;
+        }
+
+        private static string? ExtractRequestedNewFilePath(string task)
+        {
+            return NewFilePathExtractor.ExtractRequestedNewFilePath(task);
         }
 
         private string FinalizeRunResult(
@@ -1016,36 +971,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 approvalRequiredActions: Array.Empty<ActionApprovalProposal>(),
                 tracerDeniedActions: 0,
                 actionLifecycleEntries: Array.Empty<ActionLifecycleEntry>());
-        }
-
-        private static TimelinePayload[] BuildMaxIterationsTimeline(int iterationsUsed, string lastSuccessfulStep, string lastKnownAction)
-        {
-            return TimelineBuilder.BuildMaxIterationsTimeline(iterationsUsed, MAX_ITERATIONS, lastSuccessfulStep, lastKnownAction);
-        }
-
-        private static TimelinePayload[] BuildAnalysisTimeline(bool modelTimedOut, bool fallbackUsed)
-        {
-            return TimelineBuilder.BuildAnalysisTimeline(modelTimedOut, fallbackUsed);
-        }
-
-        private static bool IsModelTimeoutResponse(string response)
-        {
-            return TimeoutResponseHeuristics.IsModelTimeoutResponse(response);
-        }
-
-        private static string ResolveFallbackReason(LlmRuntimeResult? runtimeResult, string response)
-        {
-            return FallbackReasonResolver.Resolve(runtimeResult, response, IsModelTimeoutResponse);
-        }
-
-        private static string ResolveProviderName(ILLMClient llmClient, LlmProviderMetadata? metadata = null)
-        {
-            return LlmClientIdentityResolver.ResolveProviderName(llmClient, metadata);
-        }
-
-        private static string ResolveModelName(ILLMClient llmClient, LlmProviderMetadata? metadata = null)
-        {
-            return LlmClientIdentityResolver.ResolveModelName(llmClient, metadata);
         }
 
         private static ChangedRange? BuildChangedRange(string filePath, string toolInput, ExecutionTracer.PatchDecision patchDecision, ProjectSymbolDirectory? symbolDirectory)
@@ -1418,15 +1343,15 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 RuntimeElapsedMs = runStartedUtc.HasValue ? Math.Max(0, (long)(DateTime.UtcNow - runStartedUtc.Value).TotalMilliseconds) : null,
                 Provider = provider ?? string.Empty,
                 Model = model ?? string.Empty,
-                RuntimeProfile = ResolveRuntimeProfileId(provider, model),
-                RuntimeEndpoint = ResolveRuntimeEndpoint(provider),
-                ConfiguredContextWindow = ResolveConfiguredContextWindow(provider),
-                ConfiguredGpuOffloadOptions = ResolveConfiguredGpuOffloadOptions(provider),
-                RuntimeTuningProfile = ResolveRuntimeTuningProfile(provider, model),
-                RuntimeTuningOptions = ResolveRuntimeTuningOptions(provider, model),
-                RuntimeTuningSource = ResolveRuntimeTuningSource(provider, model),
-                RuntimeTuningApplied = ResolveRuntimeTuningApplied(provider, model),
-                RuntimeTuningWarnings = ResolveRuntimeTuningWarnings(provider, model),
+                RuntimeProfile = RuntimeTuningResolver.ResolveRuntimeProfileId(provider, model),
+                RuntimeEndpoint = RuntimeTuningResolver.ResolveRuntimeEndpoint(provider),
+                ConfiguredContextWindow = RuntimeTuningResolver.ResolveConfiguredContextWindow(provider),
+                ConfiguredGpuOffloadOptions = RuntimeTuningResolver.ResolveConfiguredGpuOffloadOptions(provider),
+                RuntimeTuningProfile = RuntimeTuningResolver.ResolveRuntimeTuningProfile(provider, model),
+                RuntimeTuningOptions = RuntimeTuningResolver.ResolveRuntimeTuningOptions(provider, model),
+                RuntimeTuningSource = RuntimeTuningResolver.ResolveRuntimeTuningSource(provider, model),
+                RuntimeTuningApplied = RuntimeTuningResolver.ResolveRuntimeTuningApplied(provider, model),
+                RuntimeTuningWarnings = RuntimeTuningResolver.ResolveRuntimeTuningWarnings(provider, model),
                 GpuUsageMeasured = false,
                 DegradedFlags = (degradedFlags ?? Array.Empty<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
                 FallbackReason = fallbackReason ?? string.Empty,
@@ -1457,7 +1382,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 ModelCallStarted = failure?.ModelCallStarted,
                 PatchStarted = failure?.PatchStarted,
                 Timeline = timeline ?? failure?.Timeline ?? Array.Empty<TimelinePayload>(),
-                ApprovalRequiredActions = MapApprovalProposals(approvalRequiredActions),
+                ApprovalRequiredActions = ApprovalProposalMapper.MapApprovalProposals(approvalRequiredActions),
                 ExternalAttempts = approvalRequiredActions.Count,
                 OutsideBoundaryAttempts = approvalRequiredActions.Count(x => x is not null && !x.IsInsideSandbox),
                 HighRiskApprovalRequiredActions = approvalRequiredActions.Count(x => x is not null && string.Equals(x.RiskLevel, "high", StringComparison.OrdinalIgnoreCase)),
@@ -1467,8 +1392,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 ExecutedActions = actionLifecycleEntries.Count(e => e.LifecycleState == ActionLifecycleState.Executed),
                 FailedActions = actionLifecycleEntries.Count(e => e.LifecycleState == ActionLifecycleState.Failed),
                 HostBoundaryPreserved = true,
-                ActionLifecycle = MapActionLifecycle(actionLifecycleEntries),
-                ApprovalStatusSummary = BuildApprovalStatusSummary(actionLifecycleEntries)
+                ActionLifecycle = ActionLifecycleMapper.MapActionLifecycle(actionLifecycleEntries),
+                ApprovalStatusSummary = ApprovalStatusSummaryBuilder.Build(actionLifecycleEntries)
             };
 
             Console.WriteLine(JsonSerializer.Serialize(payload));
@@ -1667,70 +1592,12 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             public int NotApplicable { get; init; }
         }
 
-        private static ApprovalStatusSummaryPayload BuildApprovalStatusSummary(IReadOnlyList<ActionLifecycleEntry> entries)
-        {
-            return ApprovalStatusSummaryBuilder.Build(entries);
-        }
-
         private sealed class SessionContinuationPayload
         {
             [JsonPropertyName("lastSuccessfulStep")]
             public string LastSuccessfulStep { get; init; } = string.Empty;
             [JsonPropertyName("lastKnownAction")]
             public string LastKnownAction { get; init; } = string.Empty;
-        }
-
-
-        private static string ResolveRuntimeProfileId(string? provider, string? model)
-        {
-            return RuntimeTuningResolver.ResolveRuntimeProfileId(provider, model);
-        }
-
-        private static string ResolveRuntimeEndpoint(string? provider)
-        {
-            return RuntimeTuningResolver.ResolveRuntimeEndpoint(provider);
-        }
-
-        private static string ResolveConfiguredContextWindow(string? provider)
-        {
-            return RuntimeTuningResolver.ResolveConfiguredContextWindow(provider);
-        }
-
-        private static string ResolveConfiguredGpuOffloadOptions(string? provider)
-        {
-            return RuntimeTuningResolver.ResolveConfiguredGpuOffloadOptions(provider);
-        }
-
-        private static string ResolveRuntimeTuningProfile(string? provider, string? model)
-        {
-            return RuntimeTuningResolver.ResolveRuntimeTuningProfile(provider, model);
-        }
-
-        private static string ResolveRuntimeTuningOptions(string? provider, string? model)
-        {
-            return RuntimeTuningResolver.ResolveRuntimeTuningOptions(provider, model);
-        }
-
-        private static string ResolveRuntimeTuningSource(string? provider, string? model)
-        {
-            return RuntimeTuningResolver.ResolveRuntimeTuningSource(provider, model);
-        }
-
-        private static bool ResolveRuntimeTuningApplied(string? provider, string? model)
-        {
-            return RuntimeTuningResolver.ResolveRuntimeTuningApplied(provider, model);
-        }
-
-        private static string[] ResolveRuntimeTuningWarnings(string? provider, string? model)
-        {
-            return RuntimeTuningResolver.ResolveRuntimeTuningWarnings(provider, model);
-        }
-
-        private static bool IsTechnicalAnalysisIntent(string task) => TaskIntentClassifier.IsTechnicalAnalysisIntent(task);
-
-        private static ApprovalRequiredActionPayload[] MapApprovalProposals(IReadOnlyList<ActionApprovalProposal> proposals)
-        {
-            return ApprovalProposalMapper.MapApprovalProposals(proposals);
         }
 
         internal sealed class ApprovalRequiredActionPayload
@@ -1761,11 +1628,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             public string ApprovalStatus { get; init; } = string.Empty;
             [JsonPropertyName("isInsideSandbox")]
             public bool IsInsideSandbox { get; init; }
-        }
-
-        private static ActionLifecyclePayload[] MapActionLifecycle(IReadOnlyList<ActionLifecycleEntry> entries)
-        {
-            return ActionLifecycleMapper.MapActionLifecycle(entries);
         }
 
         internal sealed class ActionLifecyclePayload
