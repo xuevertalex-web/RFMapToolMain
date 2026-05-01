@@ -89,14 +89,14 @@ namespace LocalCursorAgent.Core
                 { "requested_new_file", requestedNewFile ?? string.Empty }
             });
 
-            if (IsSuspiciousInjectedToolTask(task))
+            if (TaskPrecheckHeuristics.IsSuspiciousInjectedToolTask(task))
             {
                 var message = "Task contains raw tool syntax. Provide a normal natural-language task instead.";
                 tracer.MarkStopPoint("Agent", "TASK_CONTAINS_TOOL_SYNTAX", message, new[] { "Indexing", "ModelRequest", "PatchApply", "BuildVerification" });
                 return FinalizeRunResult(false, message, "Task rejected before execution", "TASK_CONTAINS_TOOL_SYNTAX", Array.Empty<string>(), Array.Empty<ChangedHint>(), Array.Empty<ChangedRange>(), Array.Empty<ChangedKind>(), false);
             }
 
-            if (IsLowSignalTask(task))
+            if (TaskPrecheckHeuristics.IsLowSignalTask(task))
             {
                 var message = "Task is too short or ambiguous. Provide a concrete natural-language request.";
                 tracer.MarkStopPoint("Agent", "NON_ACTIONABLE_TASK", message, new[] { "Indexing", "ModelRequest", "PatchApply", "BuildVerification" });
@@ -160,7 +160,7 @@ namespace LocalCursorAgent.Core
                 var changedKinds = new Dictionary<string, ChangedKind>(StringComparer.OrdinalIgnoreCase);
                 string? lastBuildErrorSignature = null;
                 string? lastDeniedToolResult = null;
-                var analysisOnlyTask = IsAnalysisOnlyTask(task);
+                var analysisOnlyTask = TaskPrecheckHeuristics.IsAnalysisOnlyTask(task);
                 var runtimeClient = _llmClient as ILlmRuntimeClient;
                 var runtimeMetadata = runtimeClient?.Metadata;
                 var unrestrictedSandboxMode = AgentExecutionProfile.IsUnrestrictedInsideSandbox(_sessionContext);
@@ -862,21 +862,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         private static bool IsMutationLikeToolCall(ToolCaller.ToolCall call)
         {
             return ToolCallMutationHeuristics.IsMutationLikeToolCall(call);
-        }
-
-        private static bool IsAnalysisOnlyTask(string task)
-        {
-            return TaskPrecheckHeuristics.IsAnalysisOnlyTask(task);
-        }
-
-        private static bool IsSuspiciousInjectedToolTask(string task)
-        {
-            return TaskPrecheckHeuristics.IsSuspiciousInjectedToolTask(task);
-        }
-
-        private static bool IsLowSignalTask(string task)
-        {
-            return TaskPrecheckHeuristics.IsLowSignalTask(task);
         }
 
         private static string BuildAnalysisFallbackSummary(string task, ContextInformation contextInfo, string fallbackReason)
