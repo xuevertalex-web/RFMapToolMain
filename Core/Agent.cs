@@ -1121,114 +1121,12 @@ next_safe_action: {diagnostic.NextSafeAction}";
 
         private static TimelinePayload[] BuildMaxIterationsTimeline(int iterationsUsed, string lastSuccessfulStep, string lastKnownAction)
         {
-            var events = new List<TimelinePayload>
-            {
-                new()
-                {
-                    Stage = "IterationLoopStarted",
-                    Status = "started",
-                    Message = $"AgentIterationLoop started with max iterations {MAX_ITERATIONS}"
-                }
-            };
-
-            for (var iteration = 1; iteration <= iterationsUsed; iteration++)
-            {
-                events.Add(new TimelinePayload
-                {
-                    Stage = "IterationStarted",
-                    Status = "started",
-                    Message = $"Iteration {iteration}/{MAX_ITERATIONS} started"
-                });
-                events.Add(new TimelinePayload
-                {
-                    Stage = "IterationCompleted",
-                    Status = "completed",
-                    Message = iteration == iterationsUsed
-                        ? $"{lastSuccessfulStep}: {lastKnownAction}"
-                        : $"Iteration {iteration}/{MAX_ITERATIONS} completed"
-                });
-            }
-
-            events.Add(new TimelinePayload
-            {
-                Stage = "MaxIterationsReached",
-                Status = "failed",
-                Message = $"Iteration budget exhausted ({iterationsUsed}/{MAX_ITERATIONS})"
-            });
-            events.Add(new TimelinePayload
-            {
-                Stage = "RunFailedWithRootCause",
-                Status = "failed",
-                Message = "MAX_ITERATIONS_REACHED"
-            });
-
-            return events.ToArray();
+            return TimelineBuilder.BuildMaxIterationsTimeline(iterationsUsed, MAX_ITERATIONS, lastSuccessfulStep, lastKnownAction);
         }
 
         private static TimelinePayload[] BuildAnalysisTimeline(bool modelTimedOut, bool fallbackUsed)
         {
-            var events = new List<TimelinePayload>
-            {
-                new()
-                {
-                    Stage = "TaskReceived",
-                    Status = "received",
-                    Message = "Task accepted for analysis"
-                },
-                new()
-                {
-                    Stage = "IndexingStarted",
-                    Status = "started",
-                    Message = "Project indexing started"
-                },
-                new()
-                {
-                    Stage = "IndexingCompleted",
-                    Status = "completed",
-                    Message = "Project indexing completed"
-                },
-                new()
-                {
-                    Stage = "ModelCallStarted",
-                    Status = "started",
-                    Message = "Model call started"
-                }
-            };
-
-            if (modelTimedOut)
-            {
-                events.Add(new TimelinePayload
-                {
-                    Stage = "ModelCallTimedOut",
-                    Status = "timed_out",
-                    Message = "Model call timed out"
-                });
-            }
-
-            if (fallbackUsed)
-            {
-                events.Add(new TimelinePayload
-                {
-                    Stage = "AnalysisFallbackStarted",
-                    Status = "started",
-                    Message = "Using indexed context fallback"
-                });
-                events.Add(new TimelinePayload
-                {
-                    Stage = "AnalysisFallbackCompleted",
-                    Status = "completed",
-                    Message = "Indexed context summary prepared"
-                });
-            }
-
-            events.Add(new TimelinePayload
-            {
-                Stage = "RunCompleted",
-                Status = "completed",
-                Message = fallbackUsed ? "Run completed via fallback" : "Run completed"
-            });
-
-            return events.ToArray();
+            return TimelineBuilder.BuildAnalysisTimeline(modelTimedOut, fallbackUsed);
         }
 
         private static bool IsModelTimeoutResponse(string response)
@@ -2220,7 +2118,7 @@ Write the final project overview now.";
             public TimelinePayload[] Timeline { get; init; } = Array.Empty<TimelinePayload>();
         }
 
-        private sealed class TimelinePayload
+        internal sealed class TimelinePayload
         {
             [JsonPropertyName("stage")]
             public string Stage { get; init; } = string.Empty;
