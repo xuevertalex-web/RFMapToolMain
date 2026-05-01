@@ -47,6 +47,8 @@ RunExtractRequestedNewFilePath_QuotedPathRegression();
 RunExtractRequestedNewFilePath_DashUnderscoreRegression();
 RunExtractRequestedNewFilePath_RelativeDotSlashRegression();
 RunExtractRequestedNewFilePath_MultiDotFileNameRegression();
+RunExtractRequestedNewFilePath_UrlNegativeRegression();
+RunExtractRequestedNewFilePath_RussianIntentRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1586,6 +1588,50 @@ static void RunExtractRequestedNewFilePath_MultiDotFileNameRegression()
     AssertTrue(string.Equals(result, "archive.backup.2026-05-01.tar.gz", StringComparison.Ordinal), "Expected extraction for multi-dot archive file name.");
 
     Console.WriteLine("PASS ExtractRequestedNewFilePath_MultiDotFileNameRegression");
+}
+
+static void RunExtractRequestedNewFilePath_UrlNegativeRegression()
+{
+    var method = typeof(Agent).GetMethod("ExtractRequestedNewFilePath", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+    AssertTrue(method is not null, "Expected Agent.ExtractRequestedNewFilePath to exist.");
+
+    var urlTask = "create https://example.com/schema.json";
+    var urlPath = method!.Invoke(null, new object?[] { urlTask }) as string;
+    AssertTrue(urlPath is null, "URL must not be treated as a local file path");
+
+    var urlWithQueryTask = "create https://example.com/schema.json?raw=1#top";
+    var urlWithQueryPath = method.Invoke(null, new object?[] { urlWithQueryTask }) as string;
+    AssertTrue(urlWithQueryPath is null, "URL with query/hash must not be treated as a local file path");
+
+    Console.WriteLine("PASS ExtractRequestedNewFilePath_UrlNegativeRegression");
+}
+
+static void RunExtractRequestedNewFilePath_RussianIntentRegression()
+{
+    var method = typeof(Agent).GetMethod("ExtractRequestedNewFilePath", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+    AssertTrue(method is not null, "Expected Agent.ExtractRequestedNewFilePath to exist.");
+
+    var ruCreateTask = "создай tools/parser.cpp с базовым каркасом";
+    var ruCreatePath = method!.Invoke(null, new object?[] { ruCreateTask }) as string;
+    AssertTrue(string.Equals(ruCreatePath, "tools/parser.cpp", StringComparison.Ordinal), "Russian create intent should extract file path");
+
+    var ruVariants = new (string Task, string Expected)[]
+    {
+        ("добавь файл tools/addon.lua", "tools/addon.lua"),
+        ("напиши файл docs/manual.txt", "docs/manual.txt"),
+        ("сделай файл config/new.cfg", "config/new.cfg"),
+        ("саздай файл tools/typo1.cpp", "tools/typo1.cpp"),
+        ("напеши файл docs/typo2.md", "docs/typo2.md"),
+        ("зделай файл config/typo3.ini", "config/typo3.ini")
+    };
+
+    foreach (var testCase in ruVariants)
+    {
+        var extracted = method.Invoke(null, new object?[] { testCase.Task }) as string;
+        AssertTrue(string.Equals(extracted, testCase.Expected, StringComparison.Ordinal), $"Expected '{testCase.Expected}' for Russian variant '{testCase.Task}'");
+    }
+
+    Console.WriteLine("PASS ExtractRequestedNewFilePath_RussianIntentRegression");
 }
 
 

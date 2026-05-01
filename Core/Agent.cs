@@ -1148,7 +1148,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                    normalized.Contains("ensure build passes");
         }
 
-        private static string? ExtractRequestedNewFilePath(string task)
+                private static string? ExtractRequestedNewFilePath(string task)
         {
             if (string.IsNullOrWhiteSpace(task))
                 return null;
@@ -1176,7 +1176,35 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 return null;
 
             var candidate = fileMatch.Groups[1].Value.Trim();
-            return string.IsNullOrWhiteSpace(candidate) ? null : candidate;
+            if (string.IsNullOrWhiteSpace(candidate))
+                return null;
+
+            if (Regex.IsMatch(candidate, @"^[a-zA-Z][a-zA-Z0-9+\-.]*://"))
+                return null;
+
+            var tokenStart = fileMatch.Index;
+            while (tokenStart > 0)
+            {
+                var ch = task[tokenStart - 1];
+                if (char.IsWhiteSpace(ch) || ch == '"' || ch == '\'' || ch == '(' || ch == '[' || ch == '{' || ch == '<')
+                    break;
+                tokenStart--;
+            }
+
+            var tokenEnd = fileMatch.Index + fileMatch.Length;
+            while (tokenEnd < task.Length)
+            {
+                var ch = task[tokenEnd];
+                if (char.IsWhiteSpace(ch) || ch == '"' || ch == '\'' || ch == ')' || ch == ']' || ch == '}' || ch == '>')
+                    break;
+                tokenEnd++;
+            }
+
+            var surroundingToken = task[tokenStart..tokenEnd];
+            if (surroundingToken.Contains("://", StringComparison.Ordinal))
+                return null;
+
+            return candidate;
         }
 
         private static bool IsHardLlmFailureResponse(string response)
