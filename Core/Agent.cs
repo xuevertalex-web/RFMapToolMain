@@ -960,15 +960,17 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             foreach (var candidate in uniqueCandidates)
             {
                 var symbolRange = FindBestSymbolRangeForFile(lines, indexedSymbols, candidate);
-                if (symbolRange.HasValue)
+                if (!symbolRange.HasValue)
                 {
-                    return new ChangedRange
-                    {
-                        File = filePath,
-                        StartLine = symbolRange.Value.startLine,
-                        EndLine = symbolRange.Value.endLine
-                    };
+                    continue;
                 }
+
+                return new ChangedRange
+                {
+                    File = filePath,
+                    StartLine = symbolRange.Value.startLine,
+                    EndLine = symbolRange.Value.endLine
+                };
             }
 
             foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
