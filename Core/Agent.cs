@@ -956,8 +956,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
             var indexedSymbols = symbolDirectory?.GetSymbols(filePath) ?? [];
 
-            var uniqueCandidates = candidates
-                .Distinct(StringComparer.OrdinalIgnoreCase);
+            var uniqueCandidates = candidates.Distinct(StringComparer.OrdinalIgnoreCase);
             foreach (var candidate in uniqueCandidates)
             {
                 var symbolRange = FindBestSymbolRangeForFile(lines, indexedSymbols, candidate);
