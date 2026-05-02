@@ -1158,8 +1158,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
             for (var i = 0; i < lines.Length; i++)
             {
-                var line = lines[i];
-                if (line.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0)
+                if (lines[i].IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0)
                     return i;
             }
 
