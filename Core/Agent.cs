@@ -1005,7 +1005,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static (int startLine, int endLine)? FindBestSymbolRangeForFile(string[] lines, List<string> indexedSymbols, string candidate)
         {
-            if (string.IsNullOrWhiteSpace(candidate) || lines.Length == 0)
+            if (string.IsNullOrWhiteSpace(candidate) || lines.Length is 0)
                 return null;
 
             var searchOrder = indexedSymbols
