@@ -1090,7 +1090,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     if (LooksLikeMethodDeclaration(line))
                         return i;
                 }
-                else if (isClass && LooksLikeClassDeclaration(line))
+
+                if (isClass && LooksLikeClassDeclaration(line))
                 {
                     return i;
                 }
