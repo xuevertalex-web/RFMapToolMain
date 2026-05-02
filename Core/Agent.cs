@@ -1075,8 +1075,9 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             if (lines.Length == 0)
                 return -1;
 
-            var isMethod = declarationKind.Equals("method", StringComparison.OrdinalIgnoreCase);
-            var isClass = declarationKind.Equals("class", StringComparison.OrdinalIgnoreCase);
+            const StringComparison KindComparison = StringComparison.OrdinalIgnoreCase;
+            var isMethod = declarationKind.Equals("method", KindComparison);
+            var isClass = declarationKind.Equals("class", KindComparison);
             var startIndex = Math.Min(anchorLineIndex, lines.Length - 1);
             if (!isMethod && !isClass)
                 return -1;
