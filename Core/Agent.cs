@@ -1054,14 +1054,14 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 return null;
 
             var methodStart = FindNearestDeclarationStart(lines, anchorLineIndex, "method");
-            if (methodStart >= 0)
+            if (methodStart is >= 0)
             {
                 var methodEnd = FindMatchingBlockEnd(lines, methodStart);
                 return (methodStart + 1, methodEnd > methodStart ? methodEnd + 1 : methodStart + 1);
             }
 
             var classStart = FindNearestDeclarationStart(lines, anchorLineIndex, "class");
-            if (classStart >= 0)
+            if (classStart is >= 0)
             {
                 var classEnd = FindMatchingBlockEnd(lines, classStart);
                 return (classStart + 1, classEnd > classStart ? classEnd + 1 : classStart + 1);
