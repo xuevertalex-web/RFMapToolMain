@@ -1023,7 +1023,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 var symbolLine = FindSymbolDeclarationLine(lines, symbol);
                 if (symbolLine is < 0) continue;
 
-                var methodStart = FindNearestDeclarationStart(lines, symbolLine, "method");
+                var methodStart = FindNearestDeclarationStart(lines, symbolLine, declarationKind: "method");
                 if (methodStart is >= 0)
                 {
                     var methodEnd = FindMatchingBlockEnd(lines, methodStart);
@@ -1032,7 +1032,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     return (methodStartLine, methodEndLine);
                 }
 
-                var classStart = FindNearestDeclarationStart(lines, symbolLine, "class");
+                var classStart = FindNearestDeclarationStart(lines, symbolLine, declarationKind: "class");
                 if (classStart is >= 0)
                 {
                     var classEnd = FindMatchingBlockEnd(lines, classStart);
