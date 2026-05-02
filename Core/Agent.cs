@@ -1078,10 +1078,15 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             for (var i = anchorLineIndex; i >= 0; i--)
             {
                 var line = lines[i].Trim();
-                if (isMethod && LooksLikeMethodDeclaration(line))
+                if (isMethod)
+                {
+                    if (LooksLikeMethodDeclaration(line))
+                        return i;
+                }
+                else if (isClass && LooksLikeClassDeclaration(line))
+                {
                     return i;
-                if (isClass && LooksLikeClassDeclaration(line))
-                    return i;
+                }
             }
 
             return -1;
