@@ -1072,6 +1072,9 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static int FindNearestDeclarationStart(string[] lines, int anchorLineIndex, string declarationKind)
         {
+            if (lines.Length == 0)
+                return -1;
+
             var isMethod = declarationKind.Equals("method", StringComparison.OrdinalIgnoreCase);
             var isClass = declarationKind.Equals("class", StringComparison.OrdinalIgnoreCase);
             var startIndex = Math.Min(anchorLineIndex, lines.Length - 1);
