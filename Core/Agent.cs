@@ -1192,7 +1192,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     return i;
                 }
             }
-
             return -1;
         }
 
