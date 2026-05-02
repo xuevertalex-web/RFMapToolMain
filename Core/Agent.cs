@@ -1028,14 +1028,16 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 if (methodStart >= 0)
                 {
                     var methodEnd = FindMatchingBlockEnd(lines, methodStart);
-                    return (methodStart + 1, Math.Max(methodStart + 1, methodEnd + 1));
+                    var methodStartLine = methodStart + 1;
+                    return (methodStartLine, Math.Max(methodStartLine, methodEnd + 1));
                 }
 
                 var classStart = FindNearestDeclarationStart(lines, symbolLine, "class");
                 if (classStart >= 0)
                 {
                     var classEnd = FindMatchingBlockEnd(lines, classStart);
-                    return (classStart + 1, Math.Max(classStart + 1, classEnd + 1));
+                    var classStartLine = classStart + 1;
+                    return (classStartLine, Math.Max(classStartLine, classEnd + 1));
                 }
 
                 var startLine = Math.Max(1, symbolLine + 1);
