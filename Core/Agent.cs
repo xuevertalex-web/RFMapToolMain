@@ -1178,9 +1178,10 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             if (string.IsNullOrWhiteSpace(needle))
                 return -1;
 
+            const StringComparison NeedleComparison = StringComparison.OrdinalIgnoreCase;
             for (var i = 0; i < lines.Length; i++)
             {
-                if (lines[i].IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0)
+                if (lines[i].IndexOf(needle, NeedleComparison) >= 0)
                     return i;
             }
 
