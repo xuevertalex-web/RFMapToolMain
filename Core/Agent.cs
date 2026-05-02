@@ -1182,7 +1182,9 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             for (var i = 0; i < lines.Length; i++)
             {
                 if (lines[i].IndexOf(needle, NeedleComparison) >= 0)
+                {
                     return i;
+                }
             }
 
             return -1;
