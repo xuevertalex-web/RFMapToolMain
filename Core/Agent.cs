@@ -1109,17 +1109,17 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 var line = lines[i];
                 for (var j = 0; j < line.Length; j++)
                 {
-                    var ch = line[j];
-                    if (ch == '{')
+                    switch (line[j])
                     {
-                        braceDepth++;
-                        seenOpeningBrace = true;
-                    }
-                    else if (ch == '}')
-                    {
-                        braceDepth--;
-                        if (seenOpeningBrace && braceDepth <= 0)
-                            return i;
+                        case '{':
+                            braceDepth++;
+                            seenOpeningBrace = true;
+                            break;
+                        case '}':
+                            braceDepth--;
+                            if (seenOpeningBrace && braceDepth <= 0)
+                                return i;
+                            break;
                     }
                 }
             }
