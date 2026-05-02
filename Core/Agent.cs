@@ -1074,10 +1074,11 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         {
             var isMethod = declarationKind.Equals("method", StringComparison.OrdinalIgnoreCase);
             var isClass = declarationKind.Equals("class", StringComparison.OrdinalIgnoreCase);
+            var startIndex = Math.Min(anchorLineIndex, lines.Length - 1);
             if (!isMethod && !isClass)
                 return -1;
 
-            for (var i = anchorLineIndex; i >= 0; i--)
+            for (var i = startIndex; i >= 0; i--)
             {
                 var line = lines[i].Trim();
                 if (isMethod)
