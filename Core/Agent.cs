@@ -1014,7 +1014,9 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 .ToList();
 
             if (!searchOrder.Contains(candidate, StringComparer.OrdinalIgnoreCase))
+            {
                 searchOrder.Insert(0, candidate);
+            }
 
             foreach (var symbol in searchOrder)
             {
