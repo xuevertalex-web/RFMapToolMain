@@ -1103,6 +1103,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         {
             var braceDepth = 0;
             var seenOpeningBrace = false;
+            const int openingBraceDelta = 1;
+            const int closingBraceDelta = -1;
 
             for (var i = startLineIndex; i < lines.Length; i++)
             {
@@ -1112,11 +1114,11 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     switch (line[j])
                     {
                         case '{':
-                            braceDepth += 1;
+                            braceDepth += openingBraceDelta;
                             seenOpeningBrace = true;
                             break;
                         case '}':
-                            braceDepth -= 1;
+                            braceDepth += closingBraceDelta;
                             if (seenOpeningBrace && braceDepth <= 0)
                                 return i;
                             break;
