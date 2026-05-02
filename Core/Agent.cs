@@ -1031,7 +1031,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 {
                     var methodEnd = FindMatchingBlockEnd(lines, methodStart);
                     var methodStartLine = methodStart + 1;
-                    return (methodStartLine, Math.Max(methodStartLine, methodEnd + 1));
+                    var methodEndLine = Math.Max(methodStartLine, methodEnd + 1);
+                    return (methodStartLine, methodEndLine);
                 }
 
                 var classStart = FindNearestDeclarationStart(lines, symbolLine, "class");
@@ -1039,7 +1040,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 {
                     var classEnd = FindMatchingBlockEnd(lines, classStart);
                     var classStartLine = classStart + 1;
-                    return (classStartLine, Math.Max(classStartLine, classEnd + 1));
+                    var classEndLine = Math.Max(classStartLine, classEnd + 1);
+                    return (classStartLine, classEndLine);
                 }
 
                 var startLine = Math.Max(1, symbolLine + 1);
