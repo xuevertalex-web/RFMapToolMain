@@ -1148,12 +1148,13 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             if (string.IsNullOrWhiteSpace(symbol))
                 return -1;
 
+            const StringComparison SymbolComparison = StringComparison.Ordinal;
             for (var i = 0; i < lines.Length; i++)
             {
                 var line = lines[i].Trim();
-                if (LooksLikeMethodDeclaration(line) && line.Contains(symbol, StringComparison.Ordinal))
+                if (LooksLikeMethodDeclaration(line) && line.Contains(symbol, SymbolComparison))
                     return i;
-                else if (LooksLikeClassDeclaration(line) && line.Contains(symbol, StringComparison.Ordinal))
+                else if (LooksLikeClassDeclaration(line) && line.Contains(symbol, SymbolComparison))
                     return i;
             }
 
