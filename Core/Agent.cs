@@ -1053,14 +1053,14 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             if (lines.Length == 0)
                 return null;
 
-            var methodStart = FindNearestDeclarationStart(lines, anchorLineIndex, "method");
+            var methodStart = FindNearestDeclarationStart(lines, anchorLineIndex: anchorLineIndex, declarationKind: "method");
             if (methodStart is >= 0)
             {
                 var methodEnd = FindMatchingBlockEnd(lines, methodStart);
                 return (methodStart + 1, methodEnd > methodStart ? methodEnd + 1 : methodStart + 1);
             }
 
-            var classStart = FindNearestDeclarationStart(lines, anchorLineIndex, "class");
+            var classStart = FindNearestDeclarationStart(lines, anchorLineIndex: anchorLineIndex, declarationKind: "class");
             if (classStart is >= 0)
             {
                 var classEnd = FindMatchingBlockEnd(lines, classStart);
