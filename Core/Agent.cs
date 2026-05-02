@@ -944,7 +944,9 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             }
 
             if (ChangeHintBuilder.ExtractTargetSymbol(toolInput) is { Length: > 0 } targetSymbol)
+            {
                 candidates.Add(targetSymbol);
+            }
 
             var fallbackName = Path.GetFileNameWithoutExtension(filePath);
             if (fallbackName is { Length: > 0 })
