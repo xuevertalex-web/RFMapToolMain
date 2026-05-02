@@ -1022,7 +1022,9 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             {
                 var symbolLine = FindSymbolDeclarationLine(lines, symbol);
                 if (symbolLine is < 0)
+                {
                     continue;
+                }
 
                 var methodStart = FindNearestDeclarationStart(lines, symbolLine, "method");
                 if (methodStart >= 0)
