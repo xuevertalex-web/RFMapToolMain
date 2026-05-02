@@ -939,7 +939,9 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             var candidates = new List<string>(3);
 
             if (patchDecision.TargetMethod is { Length: > 0 })
+            {
                 candidates.Add(patchDecision.TargetMethod);
+            }
 
             if (ChangeHintBuilder.ExtractTargetSymbol(toolInput) is { Length: > 0 } targetSymbol)
                 candidates.Add(targetSymbol);
