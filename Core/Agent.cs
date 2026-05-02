@@ -1072,12 +1072,15 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static int FindNearestDeclarationStart(string[] lines, int anchorLineIndex, string declarationKind)
         {
+            var isMethod = declarationKind.Equals("method", StringComparison.OrdinalIgnoreCase);
+            var isClass = declarationKind.Equals("class", StringComparison.OrdinalIgnoreCase);
+
             for (var i = anchorLineIndex; i >= 0; i--)
             {
                 var line = lines[i].Trim();
-                if (declarationKind.Equals("method", StringComparison.OrdinalIgnoreCase) && LooksLikeMethodDeclaration(line))
+                if (isMethod && LooksLikeMethodDeclaration(line))
                     return i;
-                if (declarationKind.Equals("class", StringComparison.OrdinalIgnoreCase) && LooksLikeClassDeclaration(line))
+                if (isClass && LooksLikeClassDeclaration(line))
                     return i;
             }
 
