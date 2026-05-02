@@ -1112,11 +1112,11 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     switch (line[j])
                     {
                         case '{':
-                            braceDepth++;
+                            braceDepth += 1;
                             seenOpeningBrace = true;
                             break;
                         case '}':
-                            braceDepth--;
+                            braceDepth -= 1;
                             if (seenOpeningBrace && braceDepth <= 0)
                                 return i;
                             break;
