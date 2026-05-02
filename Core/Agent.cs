@@ -965,11 +965,12 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     continue;
                 }
 
+                var (startLine, endLine) = symbolRange.Value;
                 return new ChangedRange
                 {
                     File = filePath,
-                    StartLine = symbolRange.Value.startLine,
-                    EndLine = symbolRange.Value.endLine
+                    StartLine = startLine,
+                    EndLine = endLine
                 };
             }
 
