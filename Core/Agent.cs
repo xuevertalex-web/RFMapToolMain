@@ -974,7 +974,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 };
             }
 
-            foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+            foreach (var candidate in uniqueCandidates)
             {
                 var lineIndex = FindMatchingLine(lines, candidate);
                 if (lineIndex >= 0)
