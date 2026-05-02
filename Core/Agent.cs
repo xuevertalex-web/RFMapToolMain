@@ -1137,8 +1137,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 var line = lines[i].Trim();
                 if (LooksLikeMethodDeclaration(line) && line.Contains(symbol, StringComparison.Ordinal))
                     return i;
-
-                if (LooksLikeClassDeclaration(line) && line.Contains(symbol, StringComparison.Ordinal))
+                else if (LooksLikeClassDeclaration(line) && line.Contains(symbol, StringComparison.Ordinal))
                     return i;
             }
 
