@@ -1176,7 +1176,9 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         private static int FindMatchingLine(string[] lines, string needle)
         {
             if (string.IsNullOrWhiteSpace(needle))
+            {
                 return -1;
+            }
 
             const StringComparison NeedleComparison = StringComparison.OrdinalIgnoreCase;
             for (var i = 0; i < lines.Length; i++)
