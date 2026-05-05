@@ -959,8 +959,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                         return CreateChangedRange(filePath, enclosingRange.Value.startLine, enclosingRange.Value.endLine);
                     }
 
-                    var startLine = Math.Max(1, lineIndex + 1);
-                    return CreateChangedRange(filePath, startLine, startLine);
+                    return CreateSingleLineChangedRange(filePath, lineIndex);
                 }
             }
 
@@ -1008,6 +1007,12 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 StartLine = startLine,
                 EndLine = endLine
             };
+        }
+
+        private static ChangedRange CreateSingleLineChangedRange(string filePath, int lineIndex)
+        {
+            var startLine = Math.Max(1, lineIndex + 1);
+            return CreateChangedRange(filePath, startLine, startLine);
         }
 
         private static (int startLine, int endLine)? FindBestSymbolRangeForFile(string[] lines, List<string> indexedSymbols, string candidate)
