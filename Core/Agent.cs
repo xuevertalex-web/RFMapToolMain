@@ -1181,30 +1181,14 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             }
 
             const StringComparison NeedleComparison = StringComparison.OrdinalIgnoreCase;
-            var lineCount = lines.Length;
-            var localNeedle = needle;
-            var localLines = lines;
-            var notFound = NotFound;
-            var needleComparison = NeedleComparison;
-            var localLineCount = lineCount;
-            var startIndex = 0;
-            var localIndex = startIndex;
-            var loopStart = localIndex;
-            var loopEnd = localLineCount;
-            var index = loopStart;
-            var loopIndex = index;
-            var scanIndex = loopIndex;
-            var scanEnd = loopEnd;
-            var cursor = scanIndex;
-            var endCursor = scanEnd;
-            for (var i = cursor; i < endCursor; i++)
+            for (var i = 0; i < lines.Length; i++)
             {
-                if (localLines[i].IndexOf(localNeedle, needleComparison) >= 0)
+                if (lines[i].IndexOf(needle, NeedleComparison) >= 0)
                 {
                     return i;
                 }
             }
-            return notFound;
+            return NotFound;
         }
 
         private string BuildPromptWithContext(string task, int iteration, string previousResponse, string codeContext, string regressionAdvice, string promptShapingAdvice, string strategyBiasAdvice)
