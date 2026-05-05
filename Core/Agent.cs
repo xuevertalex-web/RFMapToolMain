@@ -1183,7 +1183,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 var trimmed = line.Trim();
                 return IsDeclarationLineContainingSymbol(trimmed, symbol, SymbolComparison);
             });
-            if (declarationMatch >= 0)
+            if (IsFoundLineIndex(declarationMatch))
             {
                 return declarationMatch;
             }
@@ -1213,6 +1213,11 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             }
 
             return NOT_FOUND_LINE_INDEX;
+        }
+
+        private static bool IsFoundLineIndex(int lineIndex)
+        {
+            return lineIndex >= 0;
         }
 
         private static int FindMatchingLine(string[] lines, string needle)
