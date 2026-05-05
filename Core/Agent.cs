@@ -1119,7 +1119,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             var isClass = declarationKind.Equals("class", KindComparison);
             var startIndex = ClampAnchorLineIndex(lines, anchorLineIndex);
             if (!isMethod && !isClass)
-                return -1;
+                return NOT_FOUND_LINE_INDEX;
 
             for (var i = startIndex; i >= 0; i--)
             {
@@ -1137,7 +1137,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     return i;
                 }
             }
-            return -1;
+            return NOT_FOUND_LINE_INDEX;
         }
 
         private static int ClampAnchorLineIndex(string[] lines, int anchorLineIndex)
