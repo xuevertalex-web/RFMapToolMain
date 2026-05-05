@@ -1167,7 +1167,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             for (var i = startLineIndex; i < lines.Length; i++)
             {
                 var line = lines[i];
-                for (var j = 0; j < line.Length; j++)
+                var lineLength = GetLineLength(line);
+                for (var j = 0; j < lineLength; j++)
                 {
                     switch (line[j])
                     {
@@ -1185,6 +1186,11 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             }
 
             return startLineIndex;
+        }
+
+        private static int GetLineLength(string line)
+        {
+            return line.Length;
         }
 
         private static bool IsBlockClosed(int braceDepth)
