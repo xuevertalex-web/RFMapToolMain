@@ -1189,6 +1189,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             var lineCount = lines.Length;
             var localNeedle = needle;
             var localLines = lines;
+            var notFound = NotFound;
             for (var i = 0; i < lineCount; i++)
             {
                 if (localLines[i].IndexOf(localNeedle, NeedleComparison) >= 0)
@@ -1196,7 +1197,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     return i;
                 }
             }
-            return NotFound;
+            return notFound;
         }
 
         private string BuildPromptWithContext(string task, int iteration, string previousResponse, string codeContext, string regressionAdvice, string promptShapingAdvice, string strategyBiasAdvice)
