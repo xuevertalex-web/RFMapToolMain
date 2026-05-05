@@ -991,10 +991,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         private static List<string> BuildChangedRangeCandidates(string filePath, string toolInput, ExecutionTracer.PatchDecision patchDecision)
         {
             var candidates = new List<string>(3);
-            if (patchDecision.TargetMethod is { Length: > 0 })
-            {
-                candidates.Add(patchDecision.TargetMethod);
-            }
+            AddTargetMethodCandidate(candidates, patchDecision);
 
             if (ChangeHintBuilder.ExtractTargetSymbol(toolInput) is { Length: > 0 } targetSymbol)
             {
@@ -1008,6 +1005,14 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             }
 
             return candidates;
+        }
+
+        private static void AddTargetMethodCandidate(List<string> candidates, ExecutionTracer.PatchDecision patchDecision)
+        {
+            if (patchDecision.TargetMethod is { Length: > 0 })
+            {
+                candidates.Add(patchDecision.TargetMethod);
+            }
         }
 
         private static string GetFallbackCandidateName(string filePath)
