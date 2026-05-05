@@ -1147,11 +1147,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             for (var i = 0; i < lines.Length; i++)
             {
                 var line = lines[i].Trim();
-                if (LooksLikeMethodDeclaration(line) && line.Contains(symbol, SymbolComparison))
-                {
-                    return i;
-                }
-                else if (LooksLikeClassDeclaration(line) && line.Contains(symbol, SymbolComparison))
+                if (IsDeclarationLineContainingSymbol(line, symbol, SymbolComparison))
                 {
                     return i;
                 }
@@ -1166,6 +1162,12 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             }
 
             return -1;
+        }
+
+        private static bool IsDeclarationLineContainingSymbol(string line, string symbol, StringComparison comparison)
+        {
+            return line.Contains(symbol, comparison) &&
+                   (LooksLikeMethodDeclaration(line) || LooksLikeClassDeclaration(line));
         }
 
         private static int FindMatchingLine(string[] lines, string needle)
