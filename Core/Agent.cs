@@ -1155,7 +1155,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
             for (var i = 0; i < lines.Length; i++)
             {
-                if (lines[i].IndexOf(symbol, StringComparison.OrdinalIgnoreCase) >= 0)
+                if (ContainsSymbolIgnoreCase(lines[i], symbol))
                 {
                     return i;
                 }
@@ -1168,6 +1168,11 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         {
             return line.Contains(symbol, comparison) &&
                    (LooksLikeMethodDeclaration(line) || LooksLikeClassDeclaration(line));
+        }
+
+        private static bool ContainsSymbolIgnoreCase(string line, string symbol)
+        {
+            return line.IndexOf(symbol, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static int FindMatchingLine(string[] lines, string needle)
