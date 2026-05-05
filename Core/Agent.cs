@@ -926,7 +926,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static ChangedRange? BuildChangedRange(string filePath, string toolInput, ExecutionTracer.PatchDecision patchDecision, ProjectSymbolDirectory? symbolDirectory)
         {
-            var lines = TryReadAllLines(filePath);
+            var lines = AgentSymbolRangeSupport.TryReadAllLines(filePath);
             if (lines is null)
             {
                 return null;
@@ -965,17 +965,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             }
 
             return null;
-        }
-
-        private static string[]? TryReadAllLines(string filePath)
-        {
-            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
-            {
-                return null;
-            }
-
-            var lines = File.ReadAllLines(filePath);
-            return lines.Length is 0 ? null : lines;
         }
 
         private static List<string> BuildChangedRangeCandidates(string filePath, string toolInput, ExecutionTracer.PatchDecision patchDecision)
