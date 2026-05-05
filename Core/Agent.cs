@@ -1161,24 +1161,17 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 return -1;
 
             const StringComparison SymbolComparison = StringComparison.Ordinal;
-            for (var i = 0; i < lines.Length; i++)
+            var declarationMatch = FindFirstLineIndex(lines, line =>
             {
-                var line = lines[i].Trim();
-                if (IsDeclarationLineContainingSymbol(line, symbol, SymbolComparison))
-                {
-                    return i;
-                }
+                var trimmed = line.Trim();
+                return IsDeclarationLineContainingSymbol(trimmed, symbol, SymbolComparison);
+            });
+            if (declarationMatch >= 0)
+            {
+                return declarationMatch;
             }
 
-            for (var i = 0; i < lines.Length; i++)
-            {
-                if (ContainsSymbolIgnoreCase(lines[i], symbol))
-                {
-                    return i;
-                }
-            }
-
-            return -1;
+            return FindFirstLineIndex(lines, line => ContainsSymbolIgnoreCase(line, symbol));
         }
 
         private static bool IsDeclarationLineContainingSymbol(string line, string symbol, StringComparison comparison)
@@ -1190,6 +1183,19 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         private static bool ContainsSymbolIgnoreCase(string line, string symbol)
         {
             return line.IndexOf(symbol, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static int FindFirstLineIndex(string[] lines, Func<string, bool> predicate)
+        {
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (predicate(lines[i]))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
         }
 
         private static int FindMatchingLine(string[] lines, string needle)
