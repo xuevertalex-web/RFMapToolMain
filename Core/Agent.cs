@@ -39,6 +39,7 @@ namespace LocalCursorAgent.Core
         private const int MAX_ITERATIONS = 3;
         private const int CONTEXT_WINDOW = 15;
         private const int CONTEXT_EXPANSION_BUFFER = 5;
+        private const int NOT_FOUND_LINE_INDEX = -1;
         private const bool VERBOSE_OUTPUT = false;
 
         public Agent(
@@ -1174,7 +1175,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         private static int FindSymbolDeclarationLine(string[] lines, string symbol)
         {
             if (string.IsNullOrWhiteSpace(symbol))
-                return -1;
+                return NOT_FOUND_LINE_INDEX;
 
             const StringComparison SymbolComparison = StringComparison.Ordinal;
             var declarationMatch = FindFirstLineIndex(lines, line =>
@@ -1211,15 +1212,14 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 }
             }
 
-            return -1;
+            return NOT_FOUND_LINE_INDEX;
         }
 
         private static int FindMatchingLine(string[] lines, string needle)
         {
-            const int NotFound = -1;
             if (ShouldReturnNotFound(lines, needle))
             {
-                return NotFound;
+                return NOT_FOUND_LINE_INDEX;
             }
 
             const StringComparison NeedleComparison = StringComparison.OrdinalIgnoreCase;
@@ -1230,7 +1230,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     return i;
                 }
             }
-            return NotFound;
+            return NOT_FOUND_LINE_INDEX;
         }
 
         private static bool ShouldReturnNotFound(string[] lines, string needle)
