@@ -1163,7 +1163,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 var lineLength = AgentSymbolRangeSupport.GetLineLength(line);
                 for (var j = 0; j < lineLength; j++)
                 {
-                    switch (GetCharAt(line, j))
+                    switch (AgentSymbolRangeSupport.GetCharAt(line, j))
                     {
                         case '{':
                             braceDepth += openingBraceDelta;
@@ -1179,11 +1179,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             }
 
             return startLineIndex;
-        }
-
-        private static char GetCharAt(string line, int index)
-        {
-            return line[index];
         }
 
         private static bool IsBlockClosed(int braceDepth)
