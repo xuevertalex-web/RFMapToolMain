@@ -1022,8 +1022,13 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static ChangedRange CreateSingleLineChangedRange(string filePath, int lineIndex)
         {
-            var startLine = Math.Max(1, lineIndex + 1);
+            var startLine = ToOneBasedLineNumber(lineIndex);
             return CreateChangedRange(filePath, startLine, startLine);
+        }
+
+        private static int ToOneBasedLineNumber(int zeroBasedLineIndex)
+        {
+            return Math.Max(1, zeroBasedLineIndex + 1);
         }
 
         private static (int startLine, int endLine)? FindBestSymbolRangeForFile(string[] lines, List<string> indexedSymbols, string candidate)
@@ -1050,7 +1055,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     return BuildBlockRangeFromDeclaration(lines, classStart);
                 }
 
-                var startLine = Math.Max(1, symbolLine + 1);
+                var startLine = ToOneBasedLineNumber(symbolLine);
                 return (startLine, startLine);
             }
 
