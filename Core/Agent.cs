@@ -996,13 +996,18 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 candidates.Add(targetSymbol);
             }
 
-            var fallbackName = Path.GetFileNameWithoutExtension(filePath);
+            var fallbackName = GetFallbackCandidateName(filePath);
             if (fallbackName is { Length: > 0 })
             {
                 candidates.Add(fallbackName);
             }
 
             return candidates;
+        }
+
+        private static string GetFallbackCandidateName(string filePath)
+        {
+            return Path.GetFileNameWithoutExtension(filePath);
         }
 
         private static ChangedRange CreateChangedRange(string filePath, int startLine, int endLine)
