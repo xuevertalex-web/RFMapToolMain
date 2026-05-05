@@ -936,23 +936,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 return null;
             }
 
-            var candidates = new List<string>(3);
-
-            if (patchDecision.TargetMethod is { Length: > 0 })
-            {
-                candidates.Add(patchDecision.TargetMethod);
-            }
-
-            if (ChangeHintBuilder.ExtractTargetSymbol(toolInput) is { Length: > 0 } targetSymbol)
-            {
-                candidates.Add(targetSymbol);
-            }
-
-            var fallbackName = Path.GetFileNameWithoutExtension(filePath);
-            if (fallbackName is { Length: > 0 })
-            {
-                candidates.Add(fallbackName);
-            }
+            var candidates = BuildChangedRangeCandidates(filePath, toolInput, patchDecision);
 
             var indexedSymbols = symbolDirectory?.GetSymbols(filePath) ?? [];
 
@@ -986,6 +970,28 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             }
 
             return null;
+        }
+
+        private static List<string> BuildChangedRangeCandidates(string filePath, string toolInput, ExecutionTracer.PatchDecision patchDecision)
+        {
+            var candidates = new List<string>(3);
+            if (patchDecision.TargetMethod is { Length: > 0 })
+            {
+                candidates.Add(patchDecision.TargetMethod);
+            }
+
+            if (ChangeHintBuilder.ExtractTargetSymbol(toolInput) is { Length: > 0 } targetSymbol)
+            {
+                candidates.Add(targetSymbol);
+            }
+
+            var fallbackName = Path.GetFileNameWithoutExtension(filePath);
+            if (fallbackName is { Length: > 0 })
+            {
+                candidates.Add(fallbackName);
+            }
+
+            return candidates;
         }
 
         private static ChangedRange CreateChangedRange(string filePath, int startLine, int endLine)
