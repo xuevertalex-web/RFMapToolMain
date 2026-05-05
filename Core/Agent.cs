@@ -935,7 +935,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
             var indexedSymbols = symbolDirectory?.GetSymbols(filePath) ?? [];
 
-            var uniqueCandidates = candidates.Distinct(StringComparer.OrdinalIgnoreCase);
+            var uniqueCandidates = DistinctIgnoreCase(candidates);
             foreach (var candidate in uniqueCandidates)
             {
                 var symbolRange = FindBestSymbolRangeForFile(lines, indexedSymbols, candidate);
@@ -964,6 +964,11 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             }
 
             return null;
+        }
+
+        private static IEnumerable<string> DistinctIgnoreCase(IEnumerable<string> values)
+        {
+            return values.Distinct(StringComparer.OrdinalIgnoreCase);
         }
 
         private static string[]? TryReadAllLines(string filePath)
