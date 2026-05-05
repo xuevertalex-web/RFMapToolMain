@@ -1180,7 +1180,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             const StringComparison SymbolComparison = StringComparison.Ordinal;
             var declarationMatch = FindFirstLineIndex(lines, line =>
             {
-                var trimmed = line.Trim();
+                var trimmed = NormalizeLineForDeclarationMatch(line);
                 return IsDeclarationLineContainingSymbol(trimmed, symbol, SymbolComparison);
             });
             if (IsFoundLineIndex(declarationMatch))
@@ -1195,6 +1195,11 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         {
             return line.Contains(symbol, comparison) &&
                    (LooksLikeMethodDeclaration(line) || LooksLikeClassDeclaration(line));
+        }
+
+        private static string NormalizeLineForDeclarationMatch(string line)
+        {
+            return line.Trim();
         }
 
         private static bool ContainsSymbolIgnoreCase(string line, string symbol)
