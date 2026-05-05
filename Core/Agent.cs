@@ -966,12 +966,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 }
 
                 var (startLine, endLine) = symbolRange.Value;
-                return new ChangedRange
-                {
-                    File = filePath,
-                    StartLine = startLine,
-                    EndLine = endLine
-                };
+                return CreateChangedRange(filePath, startLine, endLine);
             }
 
             foreach (var candidate in uniqueCandidates)
@@ -982,25 +977,25 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     var enclosingRange = FindNearestEnclosingSymbolRange(lines, lineIndex);
                     if (enclosingRange is not null)
                     {
-                        return new ChangedRange
-                        {
-                            File = filePath,
-                            StartLine = enclosingRange.Value.startLine,
-                            EndLine = enclosingRange.Value.endLine
-                        };
+                        return CreateChangedRange(filePath, enclosingRange.Value.startLine, enclosingRange.Value.endLine);
                     }
 
                     var startLine = Math.Max(1, lineIndex + 1);
-                    return new ChangedRange
-                    {
-                        File = filePath,
-                        StartLine = startLine,
-                        EndLine = startLine
-                    };
+                    return CreateChangedRange(filePath, startLine, startLine);
                 }
             }
 
             return null;
+        }
+
+        private static ChangedRange CreateChangedRange(string filePath, int startLine, int endLine)
+        {
+            return new ChangedRange
+            {
+                File = filePath,
+                StartLine = startLine,
+                EndLine = endLine
+            };
         }
 
         private static (int startLine, int endLine)? FindBestSymbolRangeForFile(string[] lines, List<string> indexedSymbols, string candidate)
