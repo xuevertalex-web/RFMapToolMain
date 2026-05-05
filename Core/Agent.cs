@@ -1197,7 +1197,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             var loopStart = localIndex;
             var loopEnd = localLineCount;
             var index = loopStart;
-            for (var i = index; i < loopEnd; i++)
+            var loopIndex = index;
+            for (var i = loopIndex; i < loopEnd; i++)
             {
                 if (localLines[i].IndexOf(localNeedle, needleComparison) >= 0)
                 {
