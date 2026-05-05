@@ -1186,7 +1186,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             }
 
             const StringComparison NeedleComparison = StringComparison.OrdinalIgnoreCase;
-            for (var i = 0; i < lines.Length; i++)
+            var lineCount = lines.Length;
+            for (var i = 0; i < lineCount; i++)
             {
                 if (lines[i].IndexOf(needle, NeedleComparison) >= 0)
                 {
