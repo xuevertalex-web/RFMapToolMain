@@ -1067,7 +1067,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static (int startLine, int endLine)? FindNearestEnclosingSymbolRange(string[] lines, int anchorLineIndex)
         {
-            if (HasNoLines(lines))
+            if (AgentSymbolRangeSupport.HasNoLines(lines))
                 return null;
 
             var methodStart = FindNearestDeclarationStart(lines, anchorLineIndex: anchorLineIndex, declarationKind: "method");
@@ -1095,7 +1095,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static int FindNearestDeclarationStart(string[] lines, int anchorLineIndex, string declarationKind)
         {
-            if (HasNoLines(lines))
+            if (AgentSymbolRangeSupport.HasNoLines(lines))
                 return -1;
 
             var isMethod = IsMethodDeclarationKind(declarationKind);
@@ -1274,12 +1274,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static bool ShouldReturnNotFound(string[] lines, string needle)
         {
-            return string.IsNullOrWhiteSpace(needle) || HasNoLines(lines);
-        }
-
-        private static bool HasNoLines(string[] lines)
-        {
-            return lines.Length == 0;
+            return string.IsNullOrWhiteSpace(needle) || AgentSymbolRangeSupport.HasNoLines(lines);
         }
 
         private string BuildPromptWithContext(string task, int iteration, string previousResponse, string codeContext, string regressionAdvice, string promptShapingAdvice, string strategyBiasAdvice)
