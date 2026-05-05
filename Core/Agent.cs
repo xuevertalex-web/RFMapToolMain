@@ -1193,7 +1193,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             var needleComparison = NeedleComparison;
             var localLineCount = lineCount;
             var startIndex = 0;
-            for (var i = startIndex; i < localLineCount; i++)
+            var localIndex = startIndex;
+            for (var i = localIndex; i < localLineCount; i++)
             {
                 if (localLines[i].IndexOf(localNeedle, needleComparison) >= 0)
                 {
