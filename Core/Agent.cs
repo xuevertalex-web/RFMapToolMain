@@ -934,9 +934,9 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
             var candidates = BuildChangedRangeCandidates(filePath, toolInput, patchDecision);
 
-            var indexedSymbols = GetIndexedSymbolsOrEmpty(symbolDirectory, filePath);
+            var indexedSymbols = AgentSymbolRangeSupport.GetIndexedSymbolsOrEmpty(symbolDirectory, filePath);
 
-            var uniqueCandidates = DistinctIgnoreCase(candidates);
+            var uniqueCandidates = AgentSymbolRangeSupport.DistinctIgnoreCase(candidates);
             foreach (var candidate in uniqueCandidates)
             {
                 var symbolRange = FindBestSymbolRangeForFile(lines, indexedSymbols, candidate);
@@ -965,16 +965,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             }
 
             return null;
-        }
-
-        private static List<string> GetIndexedSymbolsOrEmpty(ProjectSymbolDirectory? symbolDirectory, string filePath)
-        {
-            return symbolDirectory?.GetSymbols(filePath) ?? [];
-        }
-
-        private static IEnumerable<string> DistinctIgnoreCase(IEnumerable<string> values)
-        {
-            return values.Distinct(StringComparer.OrdinalIgnoreCase);
         }
 
         private static string[]? TryReadAllLines(string filePath)
