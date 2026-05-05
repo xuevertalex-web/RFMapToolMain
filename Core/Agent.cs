@@ -1021,19 +1021,13 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 var methodStart = FindNearestDeclarationStart(lines, anchorLineIndex: symbolLine, declarationKind: "method");
                 if (methodStart is >= 0)
                 {
-                    var methodEnd = FindMatchingBlockEnd(lines, methodStart);
-                    var methodStartLine = methodStart + 1;
-                    var methodEndLine = Math.Max(methodStartLine, methodEnd + 1);
-                    return (methodStartLine, methodEndLine);
+                    return BuildBlockRangeFromDeclaration(lines, methodStart);
                 }
 
                 var classStart = FindNearestDeclarationStart(lines, anchorLineIndex: symbolLine, declarationKind: "class");
                 if (classStart is >= 0)
                 {
-                    var classEnd = FindMatchingBlockEnd(lines, classStart);
-                    var classStartLine = classStart + 1;
-                    var classEndLine = Math.Max(classStartLine, classEnd + 1);
-                    return (classStartLine, classEndLine);
+                    return BuildBlockRangeFromDeclaration(lines, classStart);
                 }
 
                 var startLine = Math.Max(1, symbolLine + 1);
@@ -1051,18 +1045,24 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             var methodStart = FindNearestDeclarationStart(lines, anchorLineIndex: anchorLineIndex, declarationKind: "method");
             if (methodStart is >= 0)
             {
-                var methodEnd = FindMatchingBlockEnd(lines, methodStart);
-                return (methodStart + 1, Math.Max(methodStart + 1, methodEnd + 1));
+                return BuildBlockRangeFromDeclaration(lines, methodStart);
             }
 
             var classStart = FindNearestDeclarationStart(lines, anchorLineIndex: anchorLineIndex, declarationKind: "class");
             if (classStart is >= 0)
             {
-                var classEnd = FindMatchingBlockEnd(lines, classStart);
-                return (classStart + 1, Math.Max(classStart + 1, classEnd + 1));
+                return BuildBlockRangeFromDeclaration(lines, classStart);
             }
 
             return null;
+        }
+
+        private static (int startLine, int endLine) BuildBlockRangeFromDeclaration(string[] lines, int declarationStart)
+        {
+            var blockEnd = FindMatchingBlockEnd(lines, declarationStart);
+            var startLine = declarationStart + 1;
+            var endLine = Math.Max(startLine, blockEnd + 1);
+            return (startLine, endLine);
         }
 
         private static int FindNearestDeclarationStart(string[] lines, int anchorLineIndex, string declarationKind)
