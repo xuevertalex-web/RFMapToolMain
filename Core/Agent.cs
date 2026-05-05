@@ -1114,9 +1114,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             if (HasNoLines(lines))
                 return -1;
 
-            const StringComparison KindComparison = StringComparison.OrdinalIgnoreCase;
-            var isMethod = declarationKind.Equals("method", KindComparison);
-            var isClass = declarationKind.Equals("class", KindComparison);
+            var isMethod = IsMethodDeclarationKind(declarationKind);
+            var isClass = IsClassDeclarationKind(declarationKind);
             var startIndex = ClampAnchorLineIndex(lines, anchorLineIndex);
             if (!isMethod && !isClass)
                 return NOT_FOUND_LINE_INDEX;
@@ -1138,6 +1137,16 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 }
             }
             return NOT_FOUND_LINE_INDEX;
+        }
+
+        private static bool IsMethodDeclarationKind(string declarationKind)
+        {
+            return declarationKind.Equals("method", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsClassDeclarationKind(string declarationKind)
+        {
+            return declarationKind.Equals("class", StringComparison.OrdinalIgnoreCase);
         }
 
         private static int ClampAnchorLineIndex(string[] lines, int anchorLineIndex)
