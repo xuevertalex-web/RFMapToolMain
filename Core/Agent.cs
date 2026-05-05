@@ -1171,7 +1171,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                             break;
                         case '}':
                             braceDepth += closingBraceDelta;
-                            if (seenOpeningBrace && IsBlockClosed(braceDepth))
+                            if (seenOpeningBrace && AgentSymbolRangeSupport.IsBlockClosed(braceDepth))
                                 return i;
                             break;
                     }
@@ -1179,11 +1179,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             }
 
             return startLineIndex;
-        }
-
-        private static bool IsBlockClosed(int braceDepth)
-        {
-            return braceDepth <= 0;
         }
 
         private static int FindSymbolDeclarationLine(string[] lines, string symbol)

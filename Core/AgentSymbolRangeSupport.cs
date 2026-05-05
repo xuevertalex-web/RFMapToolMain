@@ -4,6 +4,11 @@ namespace LocalCursorAgent.Core
 {
     internal static class AgentSymbolRangeSupport
     {
+        internal static bool IsBlockClosed(int braceDepth)
+        {
+            return braceDepth <= 0;
+        }
+
         internal static char GetCharAt(string line, int index)
         {
             return line[index];
