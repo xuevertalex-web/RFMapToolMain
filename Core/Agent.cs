@@ -1173,11 +1173,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         private static int FindMatchingLine(string[] lines, string needle)
         {
             const int NotFound = -1;
-            if (string.IsNullOrWhiteSpace(needle))
-            {
-                return NotFound;
-            }
-            if (lines.Length == 0)
+            if (ShouldReturnNotFound(lines, needle))
             {
                 return NotFound;
             }
@@ -1191,6 +1187,11 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 }
             }
             return NotFound;
+        }
+
+        private static bool ShouldReturnNotFound(string[] lines, string needle)
+        {
+            return string.IsNullOrWhiteSpace(needle) || lines.Length == 0;
         }
 
         private string BuildPromptWithContext(string task, int iteration, string previousResponse, string codeContext, string regressionAdvice, string promptShapingAdvice, string strategyBiasAdvice)
