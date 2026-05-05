@@ -1009,15 +1009,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             if (string.IsNullOrWhiteSpace(candidate) || lines.Length is 0)
                 return null;
 
-            var searchOrder = indexedSymbols
-                .Where(symbol => !string.IsNullOrWhiteSpace(symbol))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (!searchOrder.Contains(candidate, StringComparer.OrdinalIgnoreCase))
-            {
-                searchOrder.Insert(0, candidate);
-            }
+            var searchOrder = BuildSearchOrder(indexedSymbols, candidate);
 
             foreach (var symbol in searchOrder)
             {
@@ -1041,6 +1033,20 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             }
 
             return null;
+        }
+
+        private static List<string> BuildSearchOrder(List<string> indexedSymbols, string candidate)
+        {
+            var searchOrder = indexedSymbols
+                .Where(symbol => !string.IsNullOrWhiteSpace(symbol))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (!searchOrder.Contains(candidate, StringComparer.OrdinalIgnoreCase))
+            {
+                searchOrder.Insert(0, candidate);
+            }
+
+            return searchOrder;
         }
 
         private static (int startLine, int endLine)? FindNearestEnclosingSymbolRange(string[] lines, int anchorLineIndex)
