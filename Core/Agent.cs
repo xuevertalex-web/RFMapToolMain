@@ -1170,7 +1170,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 var lineLength = GetLineLength(line);
                 for (var j = 0; j < lineLength; j++)
                 {
-                    switch (line[j])
+                    switch (GetCharAt(line, j))
                     {
                         case '{':
                             braceDepth += openingBraceDelta;
@@ -1191,6 +1191,11 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         private static int GetLineLength(string line)
         {
             return line.Length;
+        }
+
+        private static char GetCharAt(string line, int index)
+        {
+            return line[index];
         }
 
         private static bool IsBlockClosed(int braceDepth)
