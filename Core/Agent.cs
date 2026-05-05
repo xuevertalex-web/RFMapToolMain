@@ -1183,7 +1183,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static int FindSymbolDeclarationLine(string[] lines, string symbol)
         {
-            if (HasNoSymbol(symbol))
+            if (AgentSymbolRangeSupport.HasNoSymbol(symbol))
                 return NOT_FOUND_LINE_INDEX;
 
             const StringComparison SymbolComparison = StringComparison.Ordinal;
@@ -1204,11 +1204,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         {
             return line.Contains(symbol, comparison) &&
                    (LooksLikeMethodDeclaration(line) || LooksLikeClassDeclaration(line));
-        }
-
-        private static bool HasNoSymbol(string symbol)
-        {
-            return string.IsNullOrWhiteSpace(symbol);
         }
 
         private static string NormalizeLineForDeclarationMatch(string line)
