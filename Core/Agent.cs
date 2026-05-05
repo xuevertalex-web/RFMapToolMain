@@ -1107,7 +1107,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             const StringComparison KindComparison = StringComparison.OrdinalIgnoreCase;
             var isMethod = declarationKind.Equals("method", KindComparison);
             var isClass = declarationKind.Equals("class", KindComparison);
-            var startIndex = Math.Min(anchorLineIndex, lines.Length - 1);
+            var startIndex = ClampAnchorLineIndex(lines, anchorLineIndex);
             if (!isMethod && !isClass)
                 return -1;
 
@@ -1128,6 +1128,11 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 }
             }
             return -1;
+        }
+
+        private static int ClampAnchorLineIndex(string[] lines, int anchorLineIndex)
+        {
+            return Math.Min(anchorLineIndex, lines.Length - 1);
         }
 
         private static bool LooksLikeMethodDeclaration(string line)
