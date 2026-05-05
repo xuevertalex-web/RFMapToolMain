@@ -4,6 +4,11 @@ namespace LocalCursorAgent.Core
 {
     internal static class AgentSymbolRangeSupport
     {
+        internal static int ToOneBasedLineNumber(int zeroBasedLineIndex)
+        {
+            return Math.Max(1, zeroBasedLineIndex + 1);
+        }
+
         internal static string[]? TryReadAllLines(string filePath)
         {
             if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
