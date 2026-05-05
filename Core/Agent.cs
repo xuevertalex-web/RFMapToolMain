@@ -1191,7 +1191,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             var localLines = lines;
             var notFound = NotFound;
             var needleComparison = NeedleComparison;
-            for (var i = 0; i < lineCount; i++)
+            var localLineCount = lineCount;
+            for (var i = 0; i < localLineCount; i++)
             {
                 if (localLines[i].IndexOf(localNeedle, needleComparison) >= 0)
                 {
