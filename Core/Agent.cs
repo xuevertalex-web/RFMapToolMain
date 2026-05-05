@@ -1201,7 +1201,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             var scanIndex = loopIndex;
             var scanEnd = loopEnd;
             var cursor = scanIndex;
-            for (var i = cursor; i < scanEnd; i++)
+            var endCursor = scanEnd;
+            for (var i = cursor; i < endCursor; i++)
             {
                 if (localLines[i].IndexOf(localNeedle, needleComparison) >= 0)
                 {
