@@ -934,7 +934,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
             var candidates = BuildChangedRangeCandidates(filePath, toolInput, patchDecision);
 
-            var indexedSymbols = symbolDirectory?.GetSymbols(filePath) ?? [];
+            var indexedSymbols = GetIndexedSymbolsOrEmpty(symbolDirectory, filePath);
 
             var uniqueCandidates = DistinctIgnoreCase(candidates);
             foreach (var candidate in uniqueCandidates)
@@ -965,6 +965,11 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             }
 
             return null;
+        }
+
+        private static List<string> GetIndexedSymbolsOrEmpty(ProjectSymbolDirectory? symbolDirectory, string filePath)
+        {
+            return symbolDirectory?.GetSymbols(filePath) ?? [];
         }
 
         private static IEnumerable<string> DistinctIgnoreCase(IEnumerable<string> values)
