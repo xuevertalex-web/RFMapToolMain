@@ -4,6 +4,11 @@ namespace LocalCursorAgent.Core
 {
     internal static class AgentSymbolRangeSupport
     {
+        internal static int GetLineLength(string line)
+        {
+            return line.Length;
+        }
+
         internal static bool HasNoLines(string[] lines)
         {
             return lines.Length == 0;
