@@ -977,7 +977,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 candidates.Add(targetSymbol);
             }
 
-            var fallbackName = GetFallbackCandidateName(filePath);
+            var fallbackName = AgentSymbolRangeSupport.GetFallbackCandidateName(filePath);
             if (fallbackName is { Length: > 0 })
             {
                 candidates.Add(fallbackName);
@@ -992,11 +992,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             {
                 candidates.Add(patchDecision.TargetMethod);
             }
-        }
-
-        private static string GetFallbackCandidateName(string filePath)
-        {
-            return Path.GetFileNameWithoutExtension(filePath);
         }
 
         private static ChangedRange CreateChangedRange(string filePath, int startLine, int endLine)

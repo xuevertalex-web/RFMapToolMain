@@ -142,5 +142,10 @@ namespace LocalCursorAgent.Core
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }
+
+        internal static string GetFallbackCandidateName(string filePath)
+        {
+            return Path.GetFileNameWithoutExtension(filePath);
+        }
     }
 }
