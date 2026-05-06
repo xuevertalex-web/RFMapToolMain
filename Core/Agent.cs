@@ -624,11 +624,12 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
                                     if (string.Equals(lastBuildErrorSignature, errorMessage, StringComparison.Ordinal))
                                     {
+                                        var structuredBuildFailureCode = BuildFailureReasonCodeMapper.ToStructuredReasonCode(lastBuildFailureCode ?? string.Empty);
                                         var repeatedBuildFailure = string.IsNullOrWhiteSpace(lastBuildFailureCode)
                                             ? errorMessage
                                             : $"[{lastBuildFailureCode}] {errorMessage}";
                                         return FinalizeStructuredDiagnosticResult(
-                                            "BUILD_FAILED_AFTER_PATCH",
+                                            structuredBuildFailureCode,
                                             new StructuredDiagnostic
                                             {
                                                 RootCause = "The same build failure repeated after a fix attempt.",
