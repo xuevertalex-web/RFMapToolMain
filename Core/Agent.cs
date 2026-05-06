@@ -159,6 +159,7 @@ namespace LocalCursorAgent.Core
                 int? lastBuildExitCode = null;
                 bool? lastBuildTimedOut = null;
                 bool? lastBuildErrorMessageTruncated = null;
+                int? lastBuildErrorMessageLength = null;
                 string? lastDeniedToolResult = null;
                 var analysisOnlyTask = TaskPrecheckHeuristics.IsAnalysisOnlyTask(task);
                 var runtimeClient = _llmClient as ILlmRuntimeClient;
@@ -625,6 +626,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                                     lastBuildExitCode = buildResult.ExitCode;
                                     lastBuildTimedOut = buildResult.TimedOut;
                                     lastBuildErrorMessageTruncated = failureMessage.IsTruncated;
+                                    lastBuildErrorMessageLength = errorMessage.Length;
 
                                     if (TryRepairCs8802(buildResult, changedFiles, out var repairPrompt))
                                     {
@@ -786,6 +788,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                         BuildExitCode = lastBuildExitCode,
                         BuildTimedOut = lastBuildTimedOut,
                         BuildErrorMessageTruncated = lastBuildErrorMessageTruncated,
+                        BuildErrorMessageLength = lastBuildErrorMessageLength,
                         Timeline = TimelineBuilder.BuildMaxIterationsTimeline(actualIterationsUsed, MAX_ITERATIONS, lastSuccessfulStep, lastKnownAction)
                     });
             }
@@ -1160,6 +1163,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 BuildExitCode = failure?.BuildExitCode,
                 BuildTimedOut = failure?.BuildTimedOut,
                 BuildErrorMessageTruncated = failure?.BuildErrorMessageTruncated,
+                BuildErrorMessageLength = failure?.BuildErrorMessageLength,
                 Timeline = timeline ?? failure?.Timeline ?? Array.Empty<TimelinePayload>(),
                 ApprovalRequiredActions = ApprovalProposalMapper.MapApprovalProposals(approvalRequiredActions),
                 ExternalAttempts = actionCounters.ExternalAttempts,
@@ -1331,6 +1335,9 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             [JsonPropertyName("buildErrorMessageTruncated")]
             public bool? BuildErrorMessageTruncated { get; init; }
 
+            [JsonPropertyName("buildErrorMessageLength")]
+            public int? BuildErrorMessageLength { get; init; }
+
             [JsonPropertyName("timeline")]
             public TimelinePayload[] Timeline { get; init; } = Array.Empty<TimelinePayload>();
 
@@ -1471,6 +1478,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             public int? BuildExitCode { get; init; }
             public bool? BuildTimedOut { get; init; }
             public bool? BuildErrorMessageTruncated { get; init; }
+            public int? BuildErrorMessageLength { get; init; }
             public TimelinePayload[] Timeline { get; init; } = Array.Empty<TimelinePayload>();
         }
 
