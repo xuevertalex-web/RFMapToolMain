@@ -740,25 +740,25 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     { "max_iterations", MAX_ITERATIONS },
                     { "iterations_used", actualIterationsUsed },
                     { "last_successful_step", lastSuccessfulStep },
-                    { "failed_step", "MaxIterationsReached" },
+                    { "failed_step", MaxIterationsFailurePayloadFactory.FailureStep },
                     { "last_known_action", lastKnownAction },
                     { "model_call_started", modelCallStarted },
                     { "patch_started", patchStarted },
                     { "build_started", buildStarted },
-                    { "pipeline_stopped_reason", "Iteration budget exhausted before completion" }
+                    { "pipeline_stopped_reason", MaxIterationsFailurePayloadFactory.PipelineStoppedReason }
                 });
-                tracer.MarkStopPoint("AgentIterationLoop", "MAX_ITERATIONS_REACHED", finalMessage, buildStarted ? Array.Empty<string>() : new[] { "BuildVerification" });
-                tracer.LogActionEvent("RunFailedWithRootCause", "Agent", ExecutionTracer.ActionLogLevel.Warning, "failed", "MAX_ITERATIONS_REACHED", new Dictionary<string, object?>
+                tracer.MarkStopPoint("AgentIterationLoop", MaxIterationsFailurePayloadFactory.FailureCode, finalMessage, buildStarted ? Array.Empty<string>() : new[] { "BuildVerification" });
+                tracer.LogActionEvent("RunFailedWithRootCause", "Agent", ExecutionTracer.ActionLogLevel.Warning, "failed", MaxIterationsFailurePayloadFactory.FailureCode, new Dictionary<string, object?>
                 {
-                    { "root_cause_code", "MAX_ITERATIONS_REACHED" },
-                    { "failed_stage", "AgentIterationLoop" },
-                    { "failed_step", "MaxIterationsReached" }
+                    { "root_cause_code", MaxIterationsFailurePayloadFactory.FailureCode },
+                    { "failed_stage", MaxIterationsFailurePayloadFactory.FailureStage },
+                    { "failed_step", MaxIterationsFailurePayloadFactory.FailureStep }
                 });
                 return FinalizeRunResult(
                     false,
                     finalMessage,
                     "Maximum iterations reached",
-                    "MAX_ITERATIONS_REACHED",
+                    MaxIterationsFailurePayloadFactory.FailureCode,
                     Array.Empty<string>(),
                     Array.Empty<ChangedHint>(),
                     Array.Empty<ChangedRange>(),

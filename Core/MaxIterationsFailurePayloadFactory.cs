@@ -2,6 +2,11 @@ namespace LocalCursorAgent.Core
 {
     internal static class MaxIterationsFailurePayloadFactory
     {
+        internal const string FailureCode = "MAX_ITERATIONS_REACHED";
+        internal const string FailureStage = "AgentIterationLoop";
+        internal const string FailureStep = "MaxIterationsReached";
+        internal const string PipelineStoppedReason = "Iteration budget exhausted before completion";
+
         internal static Agent.FailurePayload Create(
             bool buildStarted,
             string lastSuccessfulStep,
@@ -18,15 +23,15 @@ namespace LocalCursorAgent.Core
         {
             return new Agent.FailurePayload
             {
-                RootCauseCode = "MAX_ITERATIONS_REACHED",
-                FailedStage = "AgentIterationLoop",
+                RootCauseCode = FailureCode,
+                FailedStage = FailureStage,
                 LastSuccessfulStep = lastSuccessfulStep,
-                FailedStep = "MaxIterationsReached",
-                ReasonCode = "MAX_ITERATIONS_REACHED",
+                FailedStep = FailureStep,
+                ReasonCode = FailureCode,
                 Explanation = "Max iterations reached. Task may not be fully complete.",
-                PipelineStoppedReason = "Iteration budget exhausted before completion",
+                PipelineStoppedReason = PipelineStoppedReason,
                 DownstreamNotStarted = buildStarted ? string.Empty : "BuildVerification",
-                LoopStage = "AgentIterationLoop",
+                LoopStage = FailureStage,
                 MaxIterations = maxIterations,
                 IterationsUsed = actualIterationsUsed,
                 LastKnownAction = lastKnownAction,
