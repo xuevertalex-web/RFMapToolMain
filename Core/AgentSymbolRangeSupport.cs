@@ -195,5 +195,13 @@ namespace LocalCursorAgent.Core
 
             return startLineIndex;
         }
+
+        internal static (int startLine, int endLine) BuildBlockRangeFromDeclaration(string[] lines, int declarationStart)
+        {
+            var blockEnd = FindMatchingBlockEnd(lines, declarationStart);
+            var startLine = declarationStart + 1;
+            var endLine = Math.Max(startLine, blockEnd + 1);
+            return (startLine, endLine);
+        }
     }
 }
