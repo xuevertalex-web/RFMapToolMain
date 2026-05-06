@@ -273,5 +273,32 @@ namespace LocalCursorAgent.Core
 
             return null;
         }
+
+        internal static List<string> BuildChangedRangeCandidates(string filePath, string toolInput, string? targetMethod)
+        {
+            var candidates = new List<string>(3);
+            AddTargetMethodCandidate(candidates, targetMethod);
+
+            if (ChangeHintBuilder.ExtractTargetSymbol(toolInput) is { Length: > 0 } targetSymbol)
+            {
+                candidates.Add(targetSymbol);
+            }
+
+            var fallbackName = GetFallbackCandidateName(filePath);
+            if (fallbackName is { Length: > 0 })
+            {
+                candidates.Add(fallbackName);
+            }
+
+            return candidates;
+        }
+
+        internal static void AddTargetMethodCandidate(List<string> candidates, string? targetMethod)
+        {
+            if (targetMethod is { Length: > 0 })
+            {
+                candidates.Add(targetMethod);
+            }
+        }
     }
 }
