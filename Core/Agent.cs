@@ -1063,7 +1063,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static (int startLine, int endLine) BuildBlockRangeFromDeclaration(string[] lines, int declarationStart)
         {
-            var blockEnd = FindMatchingBlockEnd(lines, declarationStart);
+            var blockEnd = AgentSymbolRangeSupport.FindMatchingBlockEnd(lines, declarationStart);
             var startLine = declarationStart + 1;
             var endLine = Math.Max(startLine, blockEnd + 1);
             return (startLine, endLine);
@@ -1097,37 +1097,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 }
             }
             return NOT_FOUND_LINE_INDEX;
-        }
-
-        private static int FindMatchingBlockEnd(string[] lines, int startLineIndex)
-        {
-            var braceDepth = 0;
-            var seenOpeningBrace = false;
-            const int openingBraceDelta = 1;
-            const int closingBraceDelta = -1;
-
-            for (var i = startLineIndex; i < lines.Length; i++)
-            {
-                var line = lines[i];
-                var lineLength = AgentSymbolRangeSupport.GetLineLength(line);
-                for (var j = 0; j < lineLength; j++)
-                {
-                    switch (AgentSymbolRangeSupport.GetCharAt(line, j))
-                    {
-                        case '{':
-                            braceDepth += openingBraceDelta;
-                            seenOpeningBrace = true;
-                            break;
-                        case '}':
-                            braceDepth += closingBraceDelta;
-                            if (seenOpeningBrace && AgentSymbolRangeSupport.IsBlockClosed(braceDepth))
-                                return i;
-                            break;
-                    }
-                }
-            }
-
-            return startLineIndex;
         }
 
         private static int FindSymbolDeclarationLine(string[] lines, string symbol)

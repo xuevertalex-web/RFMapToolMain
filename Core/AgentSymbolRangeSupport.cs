@@ -164,5 +164,36 @@ namespace LocalCursorAgent.Core
             return line.Contains(symbol, comparison) &&
                    (LooksLikeMethodDeclaration(line) || LooksLikeClassDeclaration(line));
         }
+
+        internal static int FindMatchingBlockEnd(string[] lines, int startLineIndex)
+        {
+            var braceDepth = 0;
+            var seenOpeningBrace = false;
+            const int openingBraceDelta = 1;
+            const int closingBraceDelta = -1;
+
+            for (var i = startLineIndex; i < lines.Length; i++)
+            {
+                var line = lines[i];
+                var lineLength = GetLineLength(line);
+                for (var j = 0; j < lineLength; j++)
+                {
+                    switch (GetCharAt(line, j))
+                    {
+                        case '{':
+                            braceDepth += openingBraceDelta;
+                            seenOpeningBrace = true;
+                            break;
+                        case '}':
+                            braceDepth += closingBraceDelta;
+                            if (seenOpeningBrace && IsBlockClosed(braceDepth))
+                                return i;
+                            break;
+                    }
+                }
+            }
+
+            return startLineIndex;
+        }
     }
 }
