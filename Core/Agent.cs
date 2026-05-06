@@ -1049,11 +1049,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             IReadOnlyList<ActionLifecycleEntry> actionLifecycleEntries)
         {
             var effectiveReasonCode = EffectiveReasonCodeResolver.Resolve(failure?.ReasonCode, reasonCode);
-            var planRequired = string.Equals(effectiveReasonCode, "NO_ACTIONABLE_STEPS", StringComparison.OrdinalIgnoreCase);
-            var continuationHint = ContinuationGuidanceBuilder.BuildContinuationHint(planRequired, effectiveReasonCode, failure?.LastKnownAction ?? string.Empty);
-            var continuationStep = failure?.LastSuccessfulStep ?? string.Empty;
-            var continuationAction = failure?.LastKnownAction ?? string.Empty;
-            var nextActionCandidates = ContinuationGuidanceBuilder.BuildNextActionCandidates(planRequired, effectiveReasonCode, continuationHint, continuationAction);
+            var continuation = ContinuationPayloadBuilder.Build(effectiveReasonCode, failure);
             var runtimeTuning = RuntimeTuningPayloadBuilder.Build(provider, model);
             var normalizedChangedArtifacts = ChangedArtifactPayloadBuilder.Normalize(changedFiles, changedHints, changedRanges, changedKinds);
             var normalizedChangedHints = normalizedChangedArtifacts.Hints
@@ -1115,14 +1111,14 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     failure?.FailedStage,
                     failure?.ReasonCode,
                     reasonCode),
-                PlanRequired = planRequired,
-                ContinuationHint = continuationHint,
+                PlanRequired = continuation.PlanRequired,
+                ContinuationHint = continuation.ContinuationHint,
                 SessionContinuation = new SessionContinuationPayload
                 {
-                    LastSuccessfulStep = continuationStep,
-                    LastKnownAction = continuationAction
+                    LastSuccessfulStep = continuation.LastSuccessfulStep,
+                    LastKnownAction = continuation.LastKnownAction
                 },
-                NextActionCandidates = nextActionCandidates,
+                NextActionCandidates = continuation.NextActionCandidates,
                 RootCauseCode = failure?.RootCauseCode ?? (!ok ? reasonCode : string.Empty),
                 FailedStage = failure?.FailedStage ?? string.Empty,
                 LastSuccessfulStep = failure?.LastSuccessfulStep ?? string.Empty,
@@ -1415,7 +1411,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             public bool IsInsideSandbox { get; init; }
         }
 
-        private sealed class FailurePayload
+        internal sealed class FailurePayload
         {
             public string RootCauseCode { get; init; } = string.Empty;
             public string FailedStage { get; init; } = string.Empty;
