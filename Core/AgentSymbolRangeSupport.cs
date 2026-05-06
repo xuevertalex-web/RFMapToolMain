@@ -305,5 +305,10 @@ namespace LocalCursorAgent.Core
         {
             return (filePath, startLine, endLine);
         }
+
+        internal static string? ExtractRequestedNewFilePath(string task)
+        {
+            return NewFilePathExtractor.ExtractRequestedNewFilePath(task);
+        }
     }
 }

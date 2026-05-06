@@ -833,7 +833,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static string? ExtractRequestedNewFilePath(string task)
         {
-            return NewFilePathExtractor.ExtractRequestedNewFilePath(task);
+            return AgentSymbolRangeSupport.ExtractRequestedNewFilePath(task);
         }
 
         private string FinalizeRunResult(
