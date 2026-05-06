@@ -733,7 +733,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 }
 
                 var finalMessage = MaxIterationsFailurePayloadFactory.FailureMessage;
-                _memory.Add("task_status", MaxIterationsFailurePayloadFactory.TaskStatusValue);
+                _memory.Add(MaxIterationsFailurePayloadFactory.TaskStatusKey, MaxIterationsFailurePayloadFactory.TaskStatusValue);
                 tracer.LogActionEvent("MaxIterationsReached", MaxIterationsFailurePayloadFactory.FailureStage, ExecutionTracer.ActionLogLevel.Warning, "failed", MaxIterationsFailurePayloadFactory.FailureCode, new Dictionary<string, object?>
                 {
                     { "loop_stage", MaxIterationsFailurePayloadFactory.FailureStage },
