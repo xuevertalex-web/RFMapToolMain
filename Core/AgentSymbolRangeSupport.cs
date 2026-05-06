@@ -4,6 +4,11 @@ namespace LocalCursorAgent.Core
 {
     internal static class AgentSymbolRangeSupport
     {
+        internal static bool ShouldReturnNotFound(string[] lines, string needle)
+        {
+            return string.IsNullOrWhiteSpace(needle) || HasNoLines(lines);
+        }
+
         internal static bool IsFoundLineIndex(int lineIndex)
         {
             return lineIndex >= 0;

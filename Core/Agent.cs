@@ -1221,7 +1221,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static int FindMatchingLine(string[] lines, string needle)
         {
-            if (ShouldReturnNotFound(lines, needle))
+            if (AgentSymbolRangeSupport.ShouldReturnNotFound(lines, needle))
             {
                 return NOT_FOUND_LINE_INDEX;
             }
@@ -1235,11 +1235,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 }
             }
             return NOT_FOUND_LINE_INDEX;
-        }
-
-        private static bool ShouldReturnNotFound(string[] lines, string needle)
-        {
-            return string.IsNullOrWhiteSpace(needle) || AgentSymbolRangeSupport.HasNoLines(lines);
         }
 
         private string BuildPromptWithContext(string task, int iteration, string previousResponse, string codeContext, string regressionAdvice, string promptShapingAdvice, string strategyBiasAdvice)
