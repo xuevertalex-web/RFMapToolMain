@@ -765,30 +765,19 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     Array.Empty<ChangedKind>(),
                     false,
                     buildStarted: buildStarted,
-                    failure: new FailurePayload
-                    {
-                        RootCauseCode = "MAX_ITERATIONS_REACHED",
-                        FailedStage = "AgentIterationLoop",
-                        LastSuccessfulStep = lastSuccessfulStep,
-                        FailedStep = "MaxIterationsReached",
-                        ReasonCode = "MAX_ITERATIONS_REACHED",
-                        Explanation = finalMessage,
-                        PipelineStoppedReason = "Iteration budget exhausted before completion",
-                        DownstreamNotStarted = buildStarted ? string.Empty : "BuildVerification",
-                        LoopStage = "AgentIterationLoop",
-                        MaxIterations = MAX_ITERATIONS,
-                        IterationsUsed = actualIterationsUsed,
-                        LastKnownAction = lastKnownAction,
-                        ModelCallStarted = modelCallStarted,
-                        PatchStarted = patchStarted,
-                        BuildStarted = buildStarted,
-                        BuildFailureCode = lastBuildFailureCode ?? string.Empty,
-                        BuildExitCode = lastBuildExitCode,
-                        BuildTimedOut = lastBuildTimedOut,
-                        BuildErrorMessageTruncated = lastBuildErrorMessageTruncated,
-                        BuildErrorMessageLength = lastBuildErrorMessageLength,
-                        Timeline = TimelineBuilder.BuildMaxIterationsTimeline(actualIterationsUsed, MAX_ITERATIONS, lastSuccessfulStep, lastKnownAction)
-                    });
+                    failure: MaxIterationsFailurePayloadFactory.Create(
+                        buildStarted,
+                        lastSuccessfulStep,
+                        lastKnownAction,
+                        actualIterationsUsed,
+                        MAX_ITERATIONS,
+                        modelCallStarted,
+                        patchStarted,
+                        lastBuildFailureCode ?? string.Empty,
+                        lastBuildExitCode,
+                        lastBuildTimedOut,
+                        lastBuildErrorMessageTruncated,
+                        lastBuildErrorMessageLength));
             }
             catch (Exception ex)
             {
