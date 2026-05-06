@@ -9,7 +9,6 @@ using LocalCursorAgent.Diagnostics;
 using LocalCursorAgent.Security;
 using LocalCursorAgent.LLM.Runtime;
 using System.Linq;
-using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -39,7 +38,6 @@ namespace LocalCursorAgent.Core
         private const int MAX_ITERATIONS = 3;
         private const int CONTEXT_WINDOW = 15;
         private const int CONTEXT_EXPANSION_BUFFER = 5;
-        private const int NOT_FOUND_LINE_INDEX = -1;
         private const bool VERBOSE_OUTPUT = false;
 
         public Agent(
