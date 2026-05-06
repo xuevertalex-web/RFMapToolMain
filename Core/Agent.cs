@@ -1137,7 +1137,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     buildStarted,
                     buildSucceeded,
                     failure?.FailedStage ?? string.Empty,
-                    failure?.ReasonCode ?? reasonCode),
+                    VerificationOutcomeReasonCodeResolver.Resolve(failure?.ReasonCode, reasonCode)),
                 PlanRequired = planRequired,
                 ContinuationHint = continuationHint,
                 SessionContinuation = new SessionContinuationPayload
