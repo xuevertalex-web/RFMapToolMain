@@ -1048,21 +1048,13 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
         private static List<string> BuildSearchOrder(List<string> indexedSymbols, string candidate)
         {
-            var searchOrder = NormalizeIndexedSymbols(indexedSymbols);
+            var searchOrder = AgentSymbolRangeSupport.NormalizeIndexedSymbols(indexedSymbols);
             if (!searchOrder.Contains(candidate, StringComparer.OrdinalIgnoreCase))
             {
                 searchOrder.Insert(0, candidate);
             }
 
             return searchOrder;
-        }
-
-        private static List<string> NormalizeIndexedSymbols(List<string> indexedSymbols)
-        {
-            return indexedSymbols
-                .Where(symbol => !string.IsNullOrWhiteSpace(symbol))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
         }
 
         private static (int startLine, int endLine)? FindNearestEnclosingSymbolRange(string[] lines, int anchorLineIndex)

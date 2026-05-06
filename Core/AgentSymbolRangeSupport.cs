@@ -134,5 +134,13 @@ namespace LocalCursorAgent.Core
         {
             return values.Distinct(StringComparer.OrdinalIgnoreCase);
         }
+
+        internal static List<string> NormalizeIndexedSymbols(List<string> indexedSymbols)
+        {
+            return indexedSymbols
+                .Where(symbol => !string.IsNullOrWhiteSpace(symbol))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
     }
 }
