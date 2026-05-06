@@ -658,7 +658,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                                     lastBuildFailureCode = buildFailureCode;
 
                                     // Provide error context to LLM for next iteration
-                                    currentResponse = $"Build errors encountered ({buildFailureCode}):\n{errorMessage}\n\nPlease fix these errors.";
+                                    currentResponse = BuildFailureRepairPromptBuilder.Build(buildFailureCode, errorMessage);
                                 }
                             }
                         }
