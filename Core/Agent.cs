@@ -1136,7 +1136,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     verificationStatus,
                     buildStarted,
                     buildSucceeded,
-                    failure?.FailedStage ?? string.Empty,
+                    VerificationOutcomeFailedStageResolver.Resolve(failure?.FailedStage),
                     VerificationOutcomeReasonCodeResolver.Resolve(failure?.ReasonCode, reasonCode)),
                 PlanRequired = planRequired,
                 ContinuationHint = continuationHint,
