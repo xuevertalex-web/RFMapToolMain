@@ -747,7 +747,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     { "build_started", buildStarted },
                     { "pipeline_stopped_reason", MaxIterationsFailurePayloadFactory.PipelineStoppedReason }
                 });
-                tracer.MarkStopPoint(MaxIterationsFailurePayloadFactory.FailureStage, MaxIterationsFailurePayloadFactory.FailureCode, finalMessage, buildStarted ? Array.Empty<string>() : new[] { MaxIterationsFailurePayloadFactory.DownstreamStageBuildVerification });
+                tracer.MarkStopPoint(MaxIterationsFailurePayloadFactory.FailureStage, MaxIterationsFailurePayloadFactory.FailureCode, finalMessage, MaxIterationsFailurePayloadFactory.BuildDownstreamNotStarted(buildStarted));
                 tracer.LogActionEvent("RunFailedWithRootCause", "Agent", ExecutionTracer.ActionLogLevel.Warning, "failed", MaxIterationsFailurePayloadFactory.FailureCode, new Dictionary<string, object?>
                 {
                     { "root_cause_code", MaxIterationsFailurePayloadFactory.FailureCode },

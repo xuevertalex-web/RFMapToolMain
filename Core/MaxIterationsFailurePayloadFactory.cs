@@ -9,6 +9,11 @@ namespace LocalCursorAgent.Core
         internal const string FailureMessage = "Max iterations reached. Task may not be fully complete.";
         internal const string DownstreamStageBuildVerification = "BuildVerification";
 
+        internal static string[] BuildDownstreamNotStarted(bool buildStarted)
+        {
+            return buildStarted ? Array.Empty<string>() : new[] { DownstreamStageBuildVerification };
+        }
+
         internal static Agent.FailurePayload Create(
             bool buildStarted,
             string lastSuccessfulStep,
