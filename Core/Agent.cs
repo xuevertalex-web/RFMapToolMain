@@ -155,6 +155,7 @@ namespace LocalCursorAgent.Core
                 var changedRanges = new Dictionary<string, ChangedRange>(StringComparer.OrdinalIgnoreCase);
                 var changedKinds = new Dictionary<string, ChangedKind>(StringComparer.OrdinalIgnoreCase);
                 string? lastBuildErrorSignature = null;
+                string? lastBuildFailureCode = null;
                 string? lastDeniedToolResult = null;
                 var analysisOnlyTask = TaskPrecheckHeuristics.IsAnalysisOnlyTask(task);
                 var runtimeClient = _llmClient as ILlmRuntimeClient;
@@ -623,13 +624,16 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
                                     if (string.Equals(lastBuildErrorSignature, errorMessage, StringComparison.Ordinal))
                                     {
+                                        var repeatedBuildFailure = string.IsNullOrWhiteSpace(lastBuildFailureCode)
+                                            ? errorMessage
+                                            : $"[{lastBuildFailureCode}] {errorMessage}";
                                         return FinalizeStructuredDiagnosticResult(
                                             "BUILD_FAILED_AFTER_PATCH",
                                             new StructuredDiagnostic
                                             {
                                                 RootCause = "The same build failure repeated after a fix attempt.",
                                                 AttemptedFix = mutationCall.Input,
-                                                WhyDenied = errorMessage,
+                                                WhyDenied = repeatedBuildFailure,
                                                 NextSafeAction = "Inspect the compiler error and regenerate one targeted edit that directly addresses it."
                                             },
                                             changedFiles,
@@ -639,6 +643,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                                     }
 
                                     lastBuildErrorSignature = errorMessage;
+                                    lastBuildFailureCode = buildFailureCode;
 
                                     // Provide error context to LLM for next iteration
                                     currentResponse = $"Build errors encountered ({buildFailureCode}):\n{errorMessage}\n\nPlease fix these errors.";
