@@ -1054,34 +1054,15 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             var continuationStep = failure?.LastSuccessfulStep ?? string.Empty;
             var continuationAction = failure?.LastKnownAction ?? string.Empty;
             var nextActionCandidates = ContinuationGuidanceBuilder.BuildNextActionCandidates(planRequired, effectiveReasonCode, continuationHint, continuationAction);
-            var normalizedChangedFiles = changedFiles
-                .Where(p => !string.IsNullOrWhiteSpace(p))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            var normalizedChangedHints = changedHints
-                .Where(h => h != null && !string.IsNullOrWhiteSpace(h.File) && !string.IsNullOrWhiteSpace(h.Hint))
-                .GroupBy(h => h.File, StringComparer.OrdinalIgnoreCase)
-                .Select(g => g.Last())
+            var normalizedChangedArtifacts = ChangedArtifactPayloadBuilder.Normalize(changedFiles, changedHints, changedRanges, changedKinds);
+            var normalizedChangedHints = normalizedChangedArtifacts.Hints
                 .Select(h => new ChangedHintPayload
                 {
                     File = h.File,
                     Hint = h.Hint
                 })
                 .ToArray();
-
-            if (normalizedChangedHints.Length == 0 && normalizedChangedFiles.Length > 0)
-            {
-                normalizedChangedHints = normalizedChangedFiles.Select(file => new ChangedHintPayload
-                {
-                    File = file,
-                    Hint = "Updated by agent"
-                }).ToArray();
-            }
-
-            var normalizedChangedRanges = changedRanges
-                .Where(r => r != null && !string.IsNullOrWhiteSpace(r.File) && r.StartLine > 0)
-                .GroupBy(r => r.File, StringComparer.OrdinalIgnoreCase)
-                .Select(g => g.Last())
+            var normalizedChangedRanges = normalizedChangedArtifacts.Ranges
                 .Select(r => new ChangedRangePayload
                 {
                     File = r.File,
@@ -1089,11 +1070,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     EndLine = r.EndLine > 0 ? r.EndLine : r.StartLine
                 })
                 .ToArray();
-
-            var normalizedChangedKinds = changedKinds
-                .Where(k => k != null && !string.IsNullOrWhiteSpace(k.File))
-                .GroupBy(k => k.File, StringComparer.OrdinalIgnoreCase)
-                .Select(g => g.Last())
+            var normalizedChangedKinds = normalizedChangedArtifacts.Kinds
                 .Select(k => new ChangedKindPayload
                 {
                     File = k.File,
@@ -1106,7 +1083,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 Ok = ok,
                 Message = message,
                 Summary = summary,
-                ChangedFiles = normalizedChangedFiles,
+                ChangedFiles = normalizedChangedArtifacts.Files,
                 ChangedHints = normalizedChangedHints,
                 ChangedRanges = normalizedChangedRanges,
                 ChangedKinds = normalizedChangedKinds,
@@ -1484,7 +1461,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             public string Hint { get; init; } = string.Empty;
         }
 
-        private sealed class ChangedRange
+        internal sealed class ChangedRange
         {
             public string File { get; init; } = string.Empty;
             public int StartLine { get; init; }
