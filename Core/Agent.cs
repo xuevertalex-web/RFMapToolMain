@@ -1019,7 +1019,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
             foreach (var symbol in searchOrder)
             {
-                var symbolLine = FindSymbolDeclarationLine(lines, symbol);
+                var symbolLine = AgentSymbolRangeSupport.FindSymbolDeclarationLine(lines, symbol);
                 if (symbolLine is < 0) continue;
 
                 var methodStart = AgentSymbolRangeSupport.FindNearestDeclarationStart(lines, anchorLineIndex: symbolLine, declarationKind: "method");
@@ -1059,25 +1059,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             }
 
             return null;
-        }
-
-        private static int FindSymbolDeclarationLine(string[] lines, string symbol)
-        {
-            if (AgentSymbolRangeSupport.HasNoSymbol(symbol))
-                return NOT_FOUND_LINE_INDEX;
-
-            const StringComparison SymbolComparison = StringComparison.Ordinal;
-            var declarationMatch = AgentSymbolRangeSupport.FindFirstLineIndex(lines, line =>
-            {
-                var trimmed = AgentSymbolRangeSupport.NormalizeLineForDeclarationMatch(line);
-                return AgentSymbolRangeSupport.IsDeclarationLineContainingSymbol(trimmed, symbol, SymbolComparison);
-            });
-            if (AgentSymbolRangeSupport.IsFoundLineIndex(declarationMatch))
-            {
-                return declarationMatch;
-            }
-
-            return AgentSymbolRangeSupport.FindFirstLineIndex(lines, line => AgentSymbolRangeSupport.ContainsSymbolIgnoreCase(line, symbol));
         }
 
         private string BuildPromptWithContext(string task, int iteration, string previousResponse, string codeContext, string regressionAdvice, string promptShapingAdvice, string strategyBiasAdvice)

@@ -234,5 +234,24 @@ namespace LocalCursorAgent.Core
 
             return -1;
         }
+
+        internal static int FindSymbolDeclarationLine(string[] lines, string symbol)
+        {
+            if (HasNoSymbol(symbol))
+                return -1;
+
+            const StringComparison SymbolComparison = StringComparison.Ordinal;
+            var declarationMatch = FindFirstLineIndex(lines, line =>
+            {
+                var trimmed = NormalizeLineForDeclarationMatch(line);
+                return IsDeclarationLineContainingSymbol(trimmed, symbol, SymbolComparison);
+            });
+            if (IsFoundLineIndex(declarationMatch))
+            {
+                return declarationMatch;
+            }
+
+            return FindFirstLineIndex(lines, line => ContainsSymbolIgnoreCase(line, symbol));
+        }
     }
 }
