@@ -143,6 +143,17 @@ namespace LocalCursorAgent.Core
                 .ToList();
         }
 
+        internal static List<string> BuildSearchOrder(List<string> indexedSymbols, string candidate)
+        {
+            var searchOrder = NormalizeIndexedSymbols(indexedSymbols);
+            if (!searchOrder.Contains(candidate, StringComparer.OrdinalIgnoreCase))
+            {
+                searchOrder.Insert(0, candidate);
+            }
+
+            return searchOrder;
+        }
+
         internal static string GetFallbackCandidateName(string filePath)
         {
             return Path.GetFileNameWithoutExtension(filePath);
