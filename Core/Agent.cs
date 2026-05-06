@@ -643,10 +643,10 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                                             structuredBuildFailureCode,
                                             new StructuredDiagnostic
                                             {
-                                                RootCause = "The same build failure repeated after a fix attempt.",
+                                                RootCause = RepeatedBuildFailureStructuredDiagnosticBuilder.RootCause,
                                                 AttemptedFix = mutationCall.Input,
                                                 WhyDenied = repeatedBuildFailure,
-                                                NextSafeAction = "Inspect the compiler error and regenerate one targeted edit that directly addresses it."
+                                                NextSafeAction = RepeatedBuildFailureStructuredDiagnosticBuilder.NextSafeAction
                                             },
                                             changedFiles,
                                             changedHints.Values,
