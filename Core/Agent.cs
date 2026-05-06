@@ -668,7 +668,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                         else
                         {
                             // Add feedback for next iteration
-                            currentResponse += "\n\nContinue implementing the task if not complete.";
+                            currentResponse += MutationContinuationPrompt.ContinueIfNotComplete;
                         }
                     }
                     else
