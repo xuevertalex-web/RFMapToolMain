@@ -618,12 +618,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                                     var buildFailureCode = BuildFailureClassifier.Classify(buildResult);
                                     var failureMessage = BuildFailureMessageResolver.Resolve(buildResult, buildFailureCode);
                                     var errorMessage = failureMessage.Message;
-                                    _memory.Add(BuildFailureMemoryKeys.ErrorMessage, errorMessage, BuildFailureMemoryKeys.Category);
-                                    _memory.Add(BuildFailureMemoryKeys.FailureCode, buildFailureCode, BuildFailureMemoryKeys.Category);
-                                    _memory.Add(BuildFailureMemoryKeys.ExitCode, buildResult.ExitCode.ToString(), BuildFailureMemoryKeys.Category);
-                                    _memory.Add(BuildFailureMemoryKeys.TimedOut, buildResult.TimedOut ? "true" : "false", BuildFailureMemoryKeys.Category);
-                                    _memory.Add(BuildFailureMemoryKeys.MessageTruncated, failureMessage.IsTruncated ? "true" : "false", BuildFailureMemoryKeys.Category);
-                                    _memory.Add(BuildFailureMemoryKeys.MessageLength, errorMessage.Length.ToString(), BuildFailureMemoryKeys.Category);
+                                    BuildFailureMemoryRecorder.Record(_memory, buildResult, buildFailureCode, failureMessage, errorMessage);
                                     lastBuildExitCode = buildResult.ExitCode;
                                     lastBuildTimedOut = buildResult.TimedOut;
                                     lastBuildErrorMessageTruncated = failureMessage.IsTruncated;
