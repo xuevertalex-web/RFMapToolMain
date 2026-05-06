@@ -4,6 +4,16 @@ namespace LocalCursorAgent.Core
 {
     internal static class AgentSymbolRangeSupport
     {
+        internal static bool IsMethodDeclarationKind(string declarationKind)
+        {
+            return declarationKind.Equals("method", StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal static bool IsClassDeclarationKind(string declarationKind)
+        {
+            return declarationKind.Equals("class", StringComparison.OrdinalIgnoreCase);
+        }
+
         internal static int ClampAnchorLineIndex(string[] lines, int anchorLineIndex)
         {
             return Math.Min(anchorLineIndex, lines.Length - 1);
