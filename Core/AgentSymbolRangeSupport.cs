@@ -4,6 +4,11 @@ namespace LocalCursorAgent.Core
 {
     internal static class AgentSymbolRangeSupport
     {
+        internal static string NormalizeLineForDeclarationMatch(string line)
+        {
+            return line.Trim();
+        }
+
         internal static bool HasNoSymbol(string symbol)
         {
             return string.IsNullOrWhiteSpace(symbol);
