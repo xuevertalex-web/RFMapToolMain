@@ -158,5 +158,11 @@ namespace LocalCursorAgent.Core
         {
             return Path.GetFileNameWithoutExtension(filePath);
         }
+
+        internal static bool IsDeclarationLineContainingSymbol(string line, string symbol, StringComparison comparison)
+        {
+            return line.Contains(symbol, comparison) &&
+                   (LooksLikeMethodDeclaration(line) || LooksLikeClassDeclaration(line));
+        }
     }
 }

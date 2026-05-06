@@ -1139,7 +1139,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             var declarationMatch = AgentSymbolRangeSupport.FindFirstLineIndex(lines, line =>
             {
                 var trimmed = AgentSymbolRangeSupport.NormalizeLineForDeclarationMatch(line);
-                return IsDeclarationLineContainingSymbol(trimmed, symbol, SymbolComparison);
+                return AgentSymbolRangeSupport.IsDeclarationLineContainingSymbol(trimmed, symbol, SymbolComparison);
             });
             if (AgentSymbolRangeSupport.IsFoundLineIndex(declarationMatch))
             {
@@ -1147,12 +1147,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             }
 
             return AgentSymbolRangeSupport.FindFirstLineIndex(lines, line => AgentSymbolRangeSupport.ContainsSymbolIgnoreCase(line, symbol));
-        }
-
-        private static bool IsDeclarationLineContainingSymbol(string line, string symbol, StringComparison comparison)
-        {
-            return line.Contains(symbol, comparison) &&
-                   (AgentSymbolRangeSupport.LooksLikeMethodDeclaration(line) || AgentSymbolRangeSupport.LooksLikeClassDeclaration(line));
         }
 
         private string BuildPromptWithContext(string task, int iteration, string previousResponse, string codeContext, string regressionAdvice, string promptShapingAdvice, string strategyBiasAdvice)
