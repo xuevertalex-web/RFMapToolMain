@@ -620,10 +620,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                                     var errorMessage = failureMessage.Message;
                                     BuildFailureMemoryRecorder.Record(_memory, buildResult, buildFailureCode, failureMessage, errorMessage);
                                     var failureState = BuildFailureStateUpdater.From(buildResult, failureMessage, errorMessage);
-                                    lastBuildExitCode = failureState.ExitCode;
-                                    lastBuildTimedOut = failureState.TimedOut;
-                                    lastBuildErrorMessageTruncated = failureState.ErrorMessageTruncated;
-                                    lastBuildErrorMessageLength = failureState.ErrorMessageLength;
+                                    (lastBuildExitCode, lastBuildTimedOut, lastBuildErrorMessageTruncated, lastBuildErrorMessageLength) =
+                                        BuildFailureStateAssignment.ToTuple(failureState);
 
                                     if (TryRepairCs8802(buildResult, changedFiles, out var repairPrompt))
                                     {
