@@ -1109,30 +1109,18 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 var line = lines[i].Trim();
                 if (isMethod)
                 {
-                    if (LooksLikeMethodDeclaration(line))
+                    if (AgentSymbolRangeSupport.LooksLikeMethodDeclaration(line))
                     {
                         return i;
                     }
                 }
 
-                if (isClass && LooksLikeClassDeclaration(line))
+                if (isClass && AgentSymbolRangeSupport.LooksLikeClassDeclaration(line))
                 {
                     return i;
                 }
             }
             return NOT_FOUND_LINE_INDEX;
-        }
-
-        private static bool LooksLikeMethodDeclaration(string line)
-        {
-            return !string.IsNullOrWhiteSpace(line) &&
-                   Regex.IsMatch(line, @"(?:public|private|protected|internal)(?:\s+static)?(?:\s+async)?\s+(?:virtual\s+)?(?:override\s+)?[\w<>\.\[\],]+\s+\w+\s*\(");
-        }
-
-        private static bool LooksLikeClassDeclaration(string line)
-        {
-            return !string.IsNullOrWhiteSpace(line) &&
-                   Regex.IsMatch(line, @"(?:public|private|protected|internal)?\s*(?:abstract|sealed|static)?\s*(?:partial\s+)?class\s+\w+");
         }
 
         private static int FindMatchingBlockEnd(string[] lines, int startLineIndex)
@@ -1188,7 +1176,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         private static bool IsDeclarationLineContainingSymbol(string line, string symbol, StringComparison comparison)
         {
             return line.Contains(symbol, comparison) &&
-                   (LooksLikeMethodDeclaration(line) || LooksLikeClassDeclaration(line));
+                   (AgentSymbolRangeSupport.LooksLikeMethodDeclaration(line) || AgentSymbolRangeSupport.LooksLikeClassDeclaration(line));
         }
 
         private static int FindFirstLineIndex(string[] lines, Func<string, bool> predicate)

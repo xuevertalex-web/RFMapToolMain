@@ -1,4 +1,5 @@
 using LocalCursorAgent.Indexing;
+using System.Text.RegularExpressions;
 
 namespace LocalCursorAgent.Core
 {
@@ -12,6 +13,18 @@ namespace LocalCursorAgent.Core
         internal static bool IsClassDeclarationKind(string declarationKind)
         {
             return declarationKind.Equals("class", StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal static bool LooksLikeMethodDeclaration(string line)
+        {
+            return !string.IsNullOrWhiteSpace(line) &&
+                   Regex.IsMatch(line, @"(?:public|private|protected|internal)(?:\s+static)?(?:\s+async)?\s+(?:virtual\s+)?(?:override\s+)?[\w<>\.\[\],]+\s+\w+\s*\(");
+        }
+
+        internal static bool LooksLikeClassDeclaration(string line)
+        {
+            return !string.IsNullOrWhiteSpace(line) &&
+                   Regex.IsMatch(line, @"(?:public|private|protected|internal)?\s*(?:abstract|sealed|static)?\s*(?:partial\s+)?class\s+\w+");
         }
 
         internal static int ClampAnchorLineIndex(string[] lines, int anchorLineIndex)
