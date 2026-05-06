@@ -16,6 +16,11 @@ namespace LocalCursorAgent.Core
                 return "BUILD_TIMEOUT";
             }
 
+            if (string.Equals(buildResult.ReasonCode, "BUILD_COMPILER_ERRORS", StringComparison.OrdinalIgnoreCase))
+            {
+                return "BUILD_COMPILER_ERRORS";
+            }
+
             if (buildResult.Errors.Any(e => e.Contains("error CS", StringComparison.OrdinalIgnoreCase)))
             {
                 return "BUILD_COMPILER_ERRORS";
