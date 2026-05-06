@@ -1022,13 +1022,13 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 var symbolLine = FindSymbolDeclarationLine(lines, symbol);
                 if (symbolLine is < 0) continue;
 
-                var methodStart = FindNearestDeclarationStart(lines, anchorLineIndex: symbolLine, declarationKind: "method");
+                var methodStart = AgentSymbolRangeSupport.FindNearestDeclarationStart(lines, anchorLineIndex: symbolLine, declarationKind: "method");
                 if (methodStart is >= 0)
                 {
                     return AgentSymbolRangeSupport.BuildBlockRangeFromDeclaration(lines, methodStart);
                 }
 
-                var classStart = FindNearestDeclarationStart(lines, anchorLineIndex: symbolLine, declarationKind: "class");
+                var classStart = AgentSymbolRangeSupport.FindNearestDeclarationStart(lines, anchorLineIndex: symbolLine, declarationKind: "class");
                 if (classStart is >= 0)
                 {
                     return AgentSymbolRangeSupport.BuildBlockRangeFromDeclaration(lines, classStart);
@@ -1046,49 +1046,19 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             if (AgentSymbolRangeSupport.HasNoLines(lines))
                 return null;
 
-            var methodStart = FindNearestDeclarationStart(lines, anchorLineIndex: anchorLineIndex, declarationKind: "method");
+            var methodStart = AgentSymbolRangeSupport.FindNearestDeclarationStart(lines, anchorLineIndex: anchorLineIndex, declarationKind: "method");
             if (methodStart is >= 0)
             {
                 return AgentSymbolRangeSupport.BuildBlockRangeFromDeclaration(lines, methodStart);
             }
 
-            var classStart = FindNearestDeclarationStart(lines, anchorLineIndex: anchorLineIndex, declarationKind: "class");
+            var classStart = AgentSymbolRangeSupport.FindNearestDeclarationStart(lines, anchorLineIndex: anchorLineIndex, declarationKind: "class");
             if (classStart is >= 0)
             {
                 return AgentSymbolRangeSupport.BuildBlockRangeFromDeclaration(lines, classStart);
             }
 
             return null;
-        }
-
-        private static int FindNearestDeclarationStart(string[] lines, int anchorLineIndex, string declarationKind)
-        {
-            if (AgentSymbolRangeSupport.HasNoLines(lines))
-                return -1;
-
-            var isMethod = AgentSymbolRangeSupport.IsMethodDeclarationKind(declarationKind);
-            var isClass = AgentSymbolRangeSupport.IsClassDeclarationKind(declarationKind);
-            var startIndex = AgentSymbolRangeSupport.ClampAnchorLineIndex(lines, anchorLineIndex);
-            if (!isMethod && !isClass)
-                return NOT_FOUND_LINE_INDEX;
-
-            for (var i = startIndex; i >= 0; i--)
-            {
-                var line = lines[i].Trim();
-                if (isMethod)
-                {
-                    if (AgentSymbolRangeSupport.LooksLikeMethodDeclaration(line))
-                    {
-                        return i;
-                    }
-                }
-
-                if (isClass && AgentSymbolRangeSupport.LooksLikeClassDeclaration(line))
-                {
-                    return i;
-                }
-            }
-            return NOT_FOUND_LINE_INDEX;
         }
 
         private static int FindSymbolDeclarationLine(string[] lines, string symbol)

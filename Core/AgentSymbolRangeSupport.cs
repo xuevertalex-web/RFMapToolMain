@@ -203,5 +203,36 @@ namespace LocalCursorAgent.Core
             var endLine = Math.Max(startLine, blockEnd + 1);
             return (startLine, endLine);
         }
+
+        internal static int FindNearestDeclarationStart(string[] lines, int anchorLineIndex, string declarationKind)
+        {
+            if (HasNoLines(lines))
+                return -1;
+
+            var isMethod = IsMethodDeclarationKind(declarationKind);
+            var isClass = IsClassDeclarationKind(declarationKind);
+            var startIndex = ClampAnchorLineIndex(lines, anchorLineIndex);
+            if (!isMethod && !isClass)
+                return -1;
+
+            for (var i = startIndex; i >= 0; i--)
+            {
+                var line = lines[i].Trim();
+                if (isMethod)
+                {
+                    if (LooksLikeMethodDeclaration(line))
+                    {
+                        return i;
+                    }
+                }
+
+                if (isClass && LooksLikeClassDeclaration(line))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
     }
 }
