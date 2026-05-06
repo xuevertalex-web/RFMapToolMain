@@ -639,13 +639,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                                         BuildFailureMemoryRecorder.RecordRepeatedFailureReasonCode(_memory, structuredBuildFailureCode);
                                         return FinalizeStructuredDiagnosticResult(
                                             structuredBuildFailureCode,
-                                            new StructuredDiagnostic
-                                            {
-                                                RootCause = RepeatedBuildFailureStructuredDiagnosticBuilder.RootCause,
-                                                AttemptedFix = mutationCall.Input,
-                                                WhyDenied = repeatedBuildFailure,
-                                                NextSafeAction = RepeatedBuildFailureStructuredDiagnosticBuilder.NextSafeAction
-                                            },
+                                            RepeatedBuildFailureDiagnosticPayloadBuilder.Build(mutationCall.Input, repeatedBuildFailure),
                                             changedFiles,
                                             changedHints.Values,
                                             changedRanges.Values,
