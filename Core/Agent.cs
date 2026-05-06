@@ -614,11 +614,13 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                                 else
                                 {
                                     var buildFailureCode = BuildFailureClassifier.Classify(buildResult);
-                                    var errorMessage = BuildFailureMessageResolver.Resolve(buildResult, buildFailureCode);
+                                    var failureMessage = BuildFailureMessageResolver.Resolve(buildResult, buildFailureCode);
+                                    var errorMessage = failureMessage.Message;
                                     _memory.Add("build_errors", errorMessage, "BuildVerificationFailed");
                                     _memory.Add("build_failure_code", buildFailureCode, "BuildVerificationFailed");
                                     _memory.Add("build_exit_code", buildResult.ExitCode.ToString(), "BuildVerificationFailed");
                                     _memory.Add("build_timed_out", buildResult.TimedOut ? "true" : "false", "BuildVerificationFailed");
+                                    _memory.Add("build_error_message_truncated", failureMessage.IsTruncated ? "true" : "false", "BuildVerificationFailed");
                                     lastBuildExitCode = buildResult.ExitCode;
                                     lastBuildTimedOut = buildResult.TimedOut;
 

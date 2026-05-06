@@ -6,7 +6,7 @@ namespace LocalCursorAgent.Core
     {
         private const int MaxFailureMessageLength = 4000;
 
-        internal static string Resolve(BuildVerifier.BuildResult buildResult, string buildFailureCode)
+        internal static BuildFailureMessageResolution Resolve(BuildVerifier.BuildResult buildResult, string buildFailureCode)
         {
             var errorMessage = string.Join("\n", buildResult.Errors.Where(e => !string.IsNullOrWhiteSpace(e)));
             if (!string.IsNullOrWhiteSpace(errorMessage))
@@ -23,14 +23,28 @@ namespace LocalCursorAgent.Core
             return Truncate(fallback);
         }
 
-        private static string Truncate(string value)
+        private static BuildFailureMessageResolution Truncate(string value)
         {
             if (value.Length <= MaxFailureMessageLength)
             {
-                return value;
+                return new BuildFailureMessageResolution
+                {
+                    Message = value,
+                    IsTruncated = false
+                };
             }
 
-            return value.Substring(0, MaxFailureMessageLength) + "\n...<truncated>";
+            return new BuildFailureMessageResolution
+            {
+                Message = value.Substring(0, MaxFailureMessageLength) + "\n...<truncated>",
+                IsTruncated = true
+            };
         }
+    }
+
+    internal sealed class BuildFailureMessageResolution
+    {
+        public string Message { get; init; } = string.Empty;
+        public bool IsTruncated { get; init; }
     }
 }
