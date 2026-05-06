@@ -631,12 +631,13 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                                         continue;
                                     }
 
-                                    if (string.Equals(lastBuildErrorSignature, errorMessage, StringComparison.Ordinal))
+                                    if (RepeatedBuildFailureDiagnosticFactory.TryCreate(
+                                        lastBuildErrorSignature,
+                                        lastBuildFailureCode,
+                                        errorMessage,
+                                        out var structuredBuildFailureCode,
+                                        out var repeatedBuildFailure))
                                     {
-                                        var structuredBuildFailureCode = BuildFailureReasonCodeMapper.ToStructuredReasonCode(lastBuildFailureCode ?? string.Empty);
-                                        var repeatedBuildFailure = string.IsNullOrWhiteSpace(lastBuildFailureCode)
-                                            ? errorMessage
-                                            : $"[{lastBuildFailureCode}] {errorMessage}";
                                         BuildFailureMemoryRecorder.RecordRepeatedFailureReasonCode(_memory, structuredBuildFailureCode);
                                         return FinalizeStructuredDiagnosticResult(
                                             structuredBuildFailureCode,
