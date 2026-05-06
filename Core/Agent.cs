@@ -1100,7 +1100,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
             var isMethod = IsMethodDeclarationKind(declarationKind);
             var isClass = IsClassDeclarationKind(declarationKind);
-            var startIndex = ClampAnchorLineIndex(lines, anchorLineIndex);
+            var startIndex = AgentSymbolRangeSupport.ClampAnchorLineIndex(lines, anchorLineIndex);
             if (!isMethod && !isClass)
                 return NOT_FOUND_LINE_INDEX;
 
@@ -1131,11 +1131,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         private static bool IsClassDeclarationKind(string declarationKind)
         {
             return declarationKind.Equals("class", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static int ClampAnchorLineIndex(string[] lines, int anchorLineIndex)
-        {
-            return Math.Min(anchorLineIndex, lines.Length - 1);
         }
 
         private static bool LooksLikeMethodDeclaration(string line)
