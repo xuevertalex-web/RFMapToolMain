@@ -611,8 +611,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                                 }
                                 else
                                 {
-                                    var errorMessage = string.Join("\n", buildResult.Errors);
                                     var buildFailureCode = BuildFailureClassifier.Classify(buildResult);
+                                    var errorMessage = BuildFailureMessageResolver.Resolve(buildResult, buildFailureCode);
                                     _memory.Add("build_errors", errorMessage, "BuildVerificationFailed");
                                     _memory.Add("build_failure_code", buildFailureCode, "BuildVerificationFailed");
 
