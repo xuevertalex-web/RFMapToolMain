@@ -300,5 +300,10 @@ namespace LocalCursorAgent.Core
                 candidates.Add(targetMethod);
             }
         }
+
+        internal static (string filePath, int startLine, int endLine) CreateChangedRangeData(string filePath, int startLine, int endLine)
+        {
+            return (filePath, startLine, endLine);
+        }
     }
 }

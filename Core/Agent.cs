@@ -946,7 +946,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 }
 
                 var (startLine, endLine) = symbolRange.Value;
-                return CreateChangedRange(filePath, startLine, endLine);
+                var changedRangeData = AgentSymbolRangeSupport.CreateChangedRangeData(filePath, startLine, endLine);
+                return new ChangedRange { File = changedRangeData.filePath, StartLine = changedRangeData.startLine, EndLine = changedRangeData.endLine };
             }
 
             foreach (var candidate in uniqueCandidates)
@@ -957,25 +958,17 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     var enclosingRange = AgentSymbolRangeSupport.FindNearestEnclosingSymbolRange(lines, lineIndex);
                     if (enclosingRange is not null)
                     {
-                        return CreateChangedRange(filePath, enclosingRange.Value.startLine, enclosingRange.Value.endLine);
+                        var enclosingRangeData = AgentSymbolRangeSupport.CreateChangedRangeData(filePath, enclosingRange.Value.startLine, enclosingRange.Value.endLine);
+                        return new ChangedRange { File = enclosingRangeData.filePath, StartLine = enclosingRangeData.startLine, EndLine = enclosingRangeData.endLine };
                     }
 
                     var startLine = AgentSymbolRangeSupport.ToOneBasedLineNumber(lineIndex);
-                    return CreateChangedRange(filePath, startLine, startLine);
+                    var singleLineRangeData = AgentSymbolRangeSupport.CreateChangedRangeData(filePath, startLine, startLine);
+                    return new ChangedRange { File = singleLineRangeData.filePath, StartLine = singleLineRangeData.startLine, EndLine = singleLineRangeData.endLine };
                 }
             }
 
             return null;
-        }
-
-        private static ChangedRange CreateChangedRange(string filePath, int startLine, int endLine)
-        {
-            return new ChangedRange
-            {
-                File = filePath,
-                StartLine = startLine,
-                EndLine = endLine
-            };
         }
 
         private static (int startLine, int endLine)? FindBestSymbolRangeForFile(string[] lines, List<string> indexedSymbols, string candidate)
