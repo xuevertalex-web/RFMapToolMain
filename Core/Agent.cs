@@ -1048,7 +1048,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             int tracerDeniedActions,
             IReadOnlyList<ActionLifecycleEntry> actionLifecycleEntries)
         {
-            var effectiveReasonCode = (failure?.ReasonCode ?? reasonCode) ?? string.Empty;
+            var effectiveReasonCode = EffectiveReasonCodeResolver.Resolve(failure?.ReasonCode, reasonCode);
             var planRequired = string.Equals(effectiveReasonCode, "NO_ACTIONABLE_STEPS", StringComparison.OrdinalIgnoreCase);
             var continuationHint = ContinuationGuidanceBuilder.BuildContinuationHint(planRequired, effectiveReasonCode, failure?.LastKnownAction ?? string.Empty);
             var continuationStep = failure?.LastSuccessfulStep ?? string.Empty;
