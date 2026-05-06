@@ -611,7 +611,9 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                                 else
                                 {
                                     var errorMessage = string.Join("\n", buildResult.Errors);
+                                    var buildFailureCode = BuildFailureClassifier.Classify(buildResult);
                                     _memory.Add("build_errors", errorMessage, "BuildVerificationFailed");
+                                    _memory.Add("build_failure_code", buildFailureCode, "BuildVerificationFailed");
 
                                     if (TryRepairCs8802(buildResult, changedFiles, out var repairPrompt))
                                     {
@@ -639,7 +641,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                                     lastBuildErrorSignature = errorMessage;
 
                                     // Provide error context to LLM for next iteration
-                                    currentResponse = $"Build errors encountered:\n{errorMessage}\n\nPlease fix these errors.";
+                                    currentResponse = $"Build errors encountered ({buildFailureCode}):\n{errorMessage}\n\nPlease fix these errors.";
                                 }
                             }
                         }

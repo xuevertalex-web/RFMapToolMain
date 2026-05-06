@@ -28,6 +28,9 @@ namespace LocalCursorAgent.Execution
             public List<string> Errors { get; set; } = new();
             public List<string> Warnings { get; set; } = new();
             public string FullOutput { get; set; } = string.Empty;
+            public string ReasonCode { get; set; } = string.Empty;
+            public bool TimedOut { get; set; }
+            public int ExitCode { get; set; }
         }
 
         /// <summary>
@@ -45,6 +48,7 @@ namespace LocalCursorAgent.Execution
             if (!Directory.Exists(projectPath))
             {
                 result.Success = false;
+                result.ReasonCode = PermissionReasonCodes.InvalidWorkingDirectory;
                 result.Errors.Add($"Project path not found: {projectPath}");
                 _tracer?.LogActionEvent("BuildVerification", "BuildVerifier", ExecutionTracer.ActionLogLevel.Warning, "failed", PermissionReasonCodes.InvalidWorkingDirectory, new Dictionary<string, object?>
                 {
@@ -84,6 +88,9 @@ namespace LocalCursorAgent.Execution
 
             result.FullOutput = string.Join("\n", new[] { safeResult.StdOut, safeResult.StdErr }.Where(s => !string.IsNullOrWhiteSpace(s)));
             result.Success = safeResult.Success && !safeResult.TimedOut;
+            result.ReasonCode = safeResult.ReasonCode ?? string.Empty;
+            result.TimedOut = safeResult.TimedOut;
+            result.ExitCode = safeResult.ExitCode;
             if (!safeResult.Success && !string.IsNullOrWhiteSpace(safeResult.Message))
             {
                 result.Errors.Add(safeResult.Message);
@@ -150,7 +157,7 @@ namespace LocalCursorAgent.Execution
                 Command = "dotnet",
                 Arguments = "build",
                 WorkingDirectory = workingDirectory,
-                ReasonCode = PermissionReasonCodes.Allowed
+                ReasonCode = process.ExitCode == 0 ? PermissionReasonCodes.Allowed : "BUILD_FAILED"
             };
         }
     }
