@@ -1197,18 +1197,13 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 return declarationMatch;
             }
 
-            return FindFirstLineIndex(lines, line => ContainsSymbolIgnoreCase(line, symbol));
+            return FindFirstLineIndex(lines, line => AgentSymbolRangeSupport.ContainsSymbolIgnoreCase(line, symbol));
         }
 
         private static bool IsDeclarationLineContainingSymbol(string line, string symbol, StringComparison comparison)
         {
             return line.Contains(symbol, comparison) &&
                    (LooksLikeMethodDeclaration(line) || LooksLikeClassDeclaration(line));
-        }
-
-        private static bool ContainsSymbolIgnoreCase(string line, string symbol)
-        {
-            return line.IndexOf(symbol, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static int FindFirstLineIndex(string[] lines, Func<string, bool> predicate)

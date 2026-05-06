@@ -4,6 +4,11 @@ namespace LocalCursorAgent.Core
 {
     internal static class AgentSymbolRangeSupport
     {
+        internal static bool ContainsSymbolIgnoreCase(string line, string symbol)
+        {
+            return line.IndexOf(symbol, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         internal static string NormalizeLineForDeclarationMatch(string line)
         {
             return line.Trim();
