@@ -1132,14 +1132,12 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 FinalStatus = finalStatus ?? string.Empty,
                 BuildSucceeded = buildSucceeded,
                 BuildStarted = buildStarted,
-                Verification = new VerificationOutcomePayload
-                {
-                    Status = verificationStatus.ToString(),
-                    BuildStarted = buildStarted,
-                    BuildSucceeded = buildSucceeded,
-                    FailedStage = failure?.FailedStage ?? string.Empty,
-                    ReasonCode = failure?.ReasonCode ?? reasonCode
-                },
+                Verification = VerificationOutcomePayloadBuilder.Build(
+                    verificationStatus,
+                    buildStarted,
+                    buildSucceeded,
+                    failure?.FailedStage ?? string.Empty,
+                    failure?.ReasonCode ?? reasonCode),
                 PlanRequired = planRequired,
                 ContinuationHint = continuationHint,
                 SessionContinuation = new SessionContinuationPayload
