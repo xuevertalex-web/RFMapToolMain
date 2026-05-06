@@ -8,6 +8,7 @@ namespace LocalCursorAgent.Core
         internal const string PipelineStoppedReason = "Iteration budget exhausted before completion";
         internal const string FailureMessage = "Max iterations reached. Task may not be fully complete.";
         internal const string DownstreamStageBuildVerification = "BuildVerification";
+        internal const string TaskStatusValue = "max_iterations";
 
         internal static string[] BuildDownstreamNotStarted(bool buildStarted)
         {
