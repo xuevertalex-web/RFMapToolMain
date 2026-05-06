@@ -1048,6 +1048,11 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             int tracerDeniedActions,
             IReadOnlyList<ActionLifecycleEntry> actionLifecycleEntries)
         {
+            var verificationStatus = !buildStarted
+                ? VerificationOutcomeStatus.NotStarted
+                : buildSucceeded
+                    ? VerificationOutcomeStatus.Succeeded
+                    : VerificationOutcomeStatus.Failed;
             var effectiveReasonCode = (failure?.ReasonCode ?? reasonCode) ?? string.Empty;
             var planRequired = string.Equals(effectiveReasonCode, "NO_ACTIONABLE_STEPS", StringComparison.OrdinalIgnoreCase);
             var continuationHint = ContinuationGuidanceBuilder.BuildContinuationHint(planRequired, effectiveReasonCode, failure?.LastKnownAction ?? string.Empty);
@@ -1131,6 +1136,14 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 FinalStatus = finalStatus ?? string.Empty,
                 BuildSucceeded = buildSucceeded,
                 BuildStarted = buildStarted,
+                Verification = new VerificationOutcomePayload
+                {
+                    Status = verificationStatus.ToString(),
+                    BuildStarted = buildStarted,
+                    BuildSucceeded = buildSucceeded,
+                    FailedStage = failure?.FailedStage ?? string.Empty,
+                    ReasonCode = failure?.ReasonCode ?? reasonCode
+                },
                 PlanRequired = planRequired,
                 ContinuationHint = continuationHint,
                 SessionContinuation = new SessionContinuationPayload
@@ -1257,6 +1270,9 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
             [JsonPropertyName("buildStarted")]
             public bool BuildStarted { get; init; }
+
+            [JsonPropertyName("verification")]
+            public VerificationOutcomePayload Verification { get; init; } = new();
 
             [JsonPropertyName("planRequired")]
             public bool PlanRequired { get; init; }
