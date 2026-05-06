@@ -1143,7 +1143,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 LastKnownAction = failure?.LastKnownAction ?? string.Empty,
                 ModelCallStarted = failure?.ModelCallStarted,
                 PatchStarted = failure?.PatchStarted,
-                BuildFailureCode = failure?.BuildFailureCode ?? string.Empty,
+                BuildFailureCode = BuildFailureReasonCodeMapper.ToStructuredReasonCode(failure?.BuildFailureCode ?? string.Empty),
                 Timeline = timeline ?? failure?.Timeline ?? Array.Empty<TimelinePayload>(),
                 ApprovalRequiredActions = ApprovalProposalMapper.MapApprovalProposals(approvalRequiredActions),
                 ExternalAttempts = actionCounters.ExternalAttempts,
