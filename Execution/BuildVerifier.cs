@@ -109,11 +109,19 @@ namespace LocalCursorAgent.Execution
                 }
             }
 
+            if (!result.Success && result.Errors.Any(e => e.Contains("error CS", StringComparison.OrdinalIgnoreCase)))
+            {
+                result.ReasonCode = "BUILD_COMPILER_ERRORS";
+            }
+
             _tracer?.LogActionEvent("BuildVerification", "BuildVerifier", result.Success ? ExecutionTracer.ActionLogLevel.Info : ExecutionTracer.ActionLogLevel.Warning, result.Success ? "completed" : "failed", result.Success ? PermissionReasonCodes.Allowed : "BUILD_FAILED", new Dictionary<string, object?>
             {
                 { "project_path", projectPath },
                 { "error_count", result.Errors.Count },
-                { "warning_count", result.Warnings.Count }
+                { "warning_count", result.Warnings.Count },
+                { "reason_code", result.ReasonCode },
+                { "timed_out", result.TimedOut },
+                { "exit_code", result.ExitCode }
             }, durationMs: (long)(DateTime.UtcNow - startedAt).TotalMilliseconds);
             return result;
         }
