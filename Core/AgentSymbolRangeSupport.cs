@@ -60,6 +60,25 @@ namespace LocalCursorAgent.Core
             return -1;
         }
 
+        internal static int FindMatchingLine(string[] lines, string needle)
+        {
+            if (ShouldReturnNotFound(lines, needle))
+            {
+                return -1;
+            }
+
+            const StringComparison NeedleComparison = StringComparison.OrdinalIgnoreCase;
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (lines[i].IndexOf(needle, NeedleComparison) >= 0)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
         internal static string NormalizeLineForDeclarationMatch(string line)
         {
             return line.Trim();

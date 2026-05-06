@@ -951,7 +951,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
             foreach (var candidate in uniqueCandidates)
             {
-                var lineIndex = FindMatchingLine(lines, candidate);
+                var lineIndex = AgentSymbolRangeSupport.FindMatchingLine(lines, candidate);
                 if (lineIndex >= 0)
                 {
                     var enclosingRange = FindNearestEnclosingSymbolRange(lines, lineIndex);
@@ -1177,24 +1177,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
         {
             return line.Contains(symbol, comparison) &&
                    (AgentSymbolRangeSupport.LooksLikeMethodDeclaration(line) || AgentSymbolRangeSupport.LooksLikeClassDeclaration(line));
-        }
-
-        private static int FindMatchingLine(string[] lines, string needle)
-        {
-            if (AgentSymbolRangeSupport.ShouldReturnNotFound(lines, needle))
-            {
-                return NOT_FOUND_LINE_INDEX;
-            }
-
-            const StringComparison NeedleComparison = StringComparison.OrdinalIgnoreCase;
-            for (var i = 0; i < lines.Length; i++)
-            {
-                if (lines[i].IndexOf(needle, NeedleComparison) >= 0)
-                {
-                    return i;
-                }
-            }
-            return NOT_FOUND_LINE_INDEX;
         }
 
         private string BuildPromptWithContext(string task, int iteration, string previousResponse, string codeContext, string regressionAdvice, string promptShapingAdvice, string strategyBiasAdvice)
