@@ -1048,11 +1048,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             int tracerDeniedActions,
             IReadOnlyList<ActionLifecycleEntry> actionLifecycleEntries)
         {
-            var verificationStatus = !buildStarted
-                ? VerificationOutcomeStatus.NotStarted
-                : buildSucceeded
-                    ? VerificationOutcomeStatus.Succeeded
-                    : VerificationOutcomeStatus.Failed;
+            var verificationStatus = VerificationOutcomeBuilder.BuildStatus(buildStarted, buildSucceeded);
             var effectiveReasonCode = (failure?.ReasonCode ?? reasonCode) ?? string.Empty;
             var planRequired = string.Equals(effectiveReasonCode, "NO_ACTIONABLE_STEPS", StringComparison.OrdinalIgnoreCase);
             var continuationHint = ContinuationGuidanceBuilder.BuildContinuationHint(planRequired, effectiveReasonCode, failure?.LastKnownAction ?? string.Empty);
