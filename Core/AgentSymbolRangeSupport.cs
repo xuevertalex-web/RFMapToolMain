@@ -47,6 +47,19 @@ namespace LocalCursorAgent.Core
             return line.IndexOf(symbol, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
+        internal static int FindFirstLineIndex(string[] lines, Func<string, bool> predicate)
+        {
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (predicate(lines[i]))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
         internal static string NormalizeLineForDeclarationMatch(string line)
         {
             return line.Trim();

@@ -1160,7 +1160,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 return NOT_FOUND_LINE_INDEX;
 
             const StringComparison SymbolComparison = StringComparison.Ordinal;
-            var declarationMatch = FindFirstLineIndex(lines, line =>
+            var declarationMatch = AgentSymbolRangeSupport.FindFirstLineIndex(lines, line =>
             {
                 var trimmed = AgentSymbolRangeSupport.NormalizeLineForDeclarationMatch(line);
                 return IsDeclarationLineContainingSymbol(trimmed, symbol, SymbolComparison);
@@ -1170,26 +1170,13 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 return declarationMatch;
             }
 
-            return FindFirstLineIndex(lines, line => AgentSymbolRangeSupport.ContainsSymbolIgnoreCase(line, symbol));
+            return AgentSymbolRangeSupport.FindFirstLineIndex(lines, line => AgentSymbolRangeSupport.ContainsSymbolIgnoreCase(line, symbol));
         }
 
         private static bool IsDeclarationLineContainingSymbol(string line, string symbol, StringComparison comparison)
         {
             return line.Contains(symbol, comparison) &&
                    (AgentSymbolRangeSupport.LooksLikeMethodDeclaration(line) || AgentSymbolRangeSupport.LooksLikeClassDeclaration(line));
-        }
-
-        private static int FindFirstLineIndex(string[] lines, Func<string, bool> predicate)
-        {
-            for (var i = 0; i < lines.Length; i++)
-            {
-                if (predicate(lines[i]))
-                {
-                    return i;
-                }
-            }
-
-            return NOT_FOUND_LINE_INDEX;
         }
 
         private static int FindMatchingLine(string[] lines, string needle)
