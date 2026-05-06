@@ -1054,6 +1054,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             var continuationStep = failure?.LastSuccessfulStep ?? string.Empty;
             var continuationAction = failure?.LastKnownAction ?? string.Empty;
             var nextActionCandidates = ContinuationGuidanceBuilder.BuildNextActionCandidates(planRequired, effectiveReasonCode, continuationHint, continuationAction);
+            var runtimeTuning = RuntimeTuningPayloadBuilder.Build(provider, model);
             var normalizedChangedArtifacts = ChangedArtifactPayloadBuilder.Normalize(changedFiles, changedHints, changedRanges, changedKinds);
             var normalizedChangedHints = normalizedChangedArtifacts.Hints
                 .Select(h => new ChangedHintPayload
@@ -1092,15 +1093,15 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 RuntimeElapsedMs = runStartedUtc.HasValue ? Math.Max(0, (long)(DateTime.UtcNow - runStartedUtc.Value).TotalMilliseconds) : null,
                 Provider = provider ?? string.Empty,
                 Model = model ?? string.Empty,
-                RuntimeProfile = RuntimeTuningResolver.ResolveRuntimeProfileId(provider, model),
-                RuntimeEndpoint = RuntimeTuningResolver.ResolveRuntimeEndpoint(provider),
-                ConfiguredContextWindow = RuntimeTuningResolver.ResolveConfiguredContextWindow(provider),
-                ConfiguredGpuOffloadOptions = RuntimeTuningResolver.ResolveConfiguredGpuOffloadOptions(provider),
-                RuntimeTuningProfile = RuntimeTuningResolver.ResolveRuntimeTuningProfile(provider, model),
-                RuntimeTuningOptions = RuntimeTuningResolver.ResolveRuntimeTuningOptions(provider, model),
-                RuntimeTuningSource = RuntimeTuningResolver.ResolveRuntimeTuningSource(provider, model),
-                RuntimeTuningApplied = RuntimeTuningResolver.ResolveRuntimeTuningApplied(provider, model),
-                RuntimeTuningWarnings = RuntimeTuningResolver.ResolveRuntimeTuningWarnings(provider, model),
+                RuntimeProfile = runtimeTuning.RuntimeProfile,
+                RuntimeEndpoint = runtimeTuning.RuntimeEndpoint,
+                ConfiguredContextWindow = runtimeTuning.ConfiguredContextWindow,
+                ConfiguredGpuOffloadOptions = runtimeTuning.ConfiguredGpuOffloadOptions,
+                RuntimeTuningProfile = runtimeTuning.RuntimeTuningProfile,
+                RuntimeTuningOptions = runtimeTuning.RuntimeTuningOptions,
+                RuntimeTuningSource = runtimeTuning.RuntimeTuningSource,
+                RuntimeTuningApplied = runtimeTuning.RuntimeTuningApplied,
+                RuntimeTuningWarnings = runtimeTuning.RuntimeTuningWarnings,
                 GpuUsageMeasured = false,
                 DegradedFlags = (degradedFlags ?? Array.Empty<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
                 FallbackReason = fallbackReason ?? string.Empty,
