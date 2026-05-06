@@ -1051,6 +1051,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             var effectiveReasonCode = EffectiveReasonCodeResolver.Resolve(failure?.ReasonCode, reasonCode);
             var continuation = ContinuationPayloadBuilder.Build(effectiveReasonCode, failure);
             var runtimeTuning = RuntimeTuningPayloadBuilder.Build(provider, model);
+            var actionCounters = ActionOutcomeCountersBuilder.Build(approvalRequiredActions, tracerDeniedActions, actionLifecycleEntries);
             var normalizedChangedArtifacts = ChangedArtifactPayloadBuilder.Normalize(changedFiles, changedHints, changedRanges, changedKinds);
             var normalizedChangedHints = normalizedChangedArtifacts.Hints
                 .Select(h => new ChangedHintPayload
@@ -1135,14 +1136,14 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 PatchStarted = failure?.PatchStarted,
                 Timeline = timeline ?? failure?.Timeline ?? Array.Empty<TimelinePayload>(),
                 ApprovalRequiredActions = ApprovalProposalMapper.MapApprovalProposals(approvalRequiredActions),
-                ExternalAttempts = approvalRequiredActions.Count,
-                OutsideBoundaryAttempts = approvalRequiredActions.Count(x => x is not null && !x.IsInsideSandbox),
-                HighRiskApprovalRequiredActions = approvalRequiredActions.Count(x => x is not null && string.Equals(x.RiskLevel, "high", StringComparison.OrdinalIgnoreCase)),
-                DeniedActions = tracerDeniedActions,
-                RequestedActions = actionLifecycleEntries.Count(e => e.LifecycleState == ActionLifecycleState.Requested),
-                BlockedActions = actionLifecycleEntries.Count(e => e.LifecycleState == ActionLifecycleState.Blocked),
-                ExecutedActions = actionLifecycleEntries.Count(e => e.LifecycleState == ActionLifecycleState.Executed),
-                FailedActions = actionLifecycleEntries.Count(e => e.LifecycleState == ActionLifecycleState.Failed),
+                ExternalAttempts = actionCounters.ExternalAttempts,
+                OutsideBoundaryAttempts = actionCounters.OutsideBoundaryAttempts,
+                HighRiskApprovalRequiredActions = actionCounters.HighRiskApprovalRequiredActions,
+                DeniedActions = actionCounters.DeniedActions,
+                RequestedActions = actionCounters.RequestedActions,
+                BlockedActions = actionCounters.BlockedActions,
+                ExecutedActions = actionCounters.ExecutedActions,
+                FailedActions = actionCounters.FailedActions,
                 HostBoundaryPreserved = true,
                 ActionLifecycle = ActionLifecycleMapper.MapActionLifecycle(actionLifecycleEntries),
                 ApprovalStatusSummary = ApprovalStatusSummaryBuilder.Build(actionLifecycleEntries)
