@@ -114,7 +114,7 @@ namespace LocalCursorAgent.Execution
                 result.ReasonCode = "BUILD_COMPILER_ERRORS";
             }
 
-            _tracer?.LogActionEvent("BuildVerification", "BuildVerifier", result.Success ? ExecutionTracer.ActionLogLevel.Info : ExecutionTracer.ActionLogLevel.Warning, result.Success ? "completed" : "failed", result.Success ? PermissionReasonCodes.Allowed : "BUILD_FAILED", new Dictionary<string, object?>
+            _tracer?.LogActionEvent("BuildVerification", "BuildVerifier", result.Success ? ExecutionTracer.ActionLogLevel.Info : ExecutionTracer.ActionLogLevel.Warning, result.Success ? "completed" : "failed", result.Success ? PermissionReasonCodes.Allowed : (string.IsNullOrWhiteSpace(result.ReasonCode) ? "BUILD_FAILED" : result.ReasonCode), new Dictionary<string, object?>
             {
                 { "project_path", projectPath },
                 { "error_count", result.Errors.Count },
