@@ -615,6 +615,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                                     var errorMessage = BuildFailureMessageResolver.Resolve(buildResult, buildFailureCode);
                                     _memory.Add("build_errors", errorMessage, "BuildVerificationFailed");
                                     _memory.Add("build_failure_code", buildFailureCode, "BuildVerificationFailed");
+                                    _memory.Add("build_exit_code", buildResult.ExitCode.ToString(), "BuildVerificationFailed");
+                                    _memory.Add("build_timed_out", buildResult.TimedOut ? "true" : "false", "BuildVerificationFailed");
 
                                     if (TryRepairCs8802(buildResult, changedFiles, out var repairPrompt))
                                     {
