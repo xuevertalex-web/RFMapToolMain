@@ -156,6 +156,8 @@ namespace LocalCursorAgent.Core
                 var changedKinds = new Dictionary<string, ChangedKind>(StringComparer.OrdinalIgnoreCase);
                 string? lastBuildErrorSignature = null;
                 string? lastBuildFailureCode = null;
+                int? lastBuildExitCode = null;
+                bool? lastBuildTimedOut = null;
                 string? lastDeniedToolResult = null;
                 var analysisOnlyTask = TaskPrecheckHeuristics.IsAnalysisOnlyTask(task);
                 var runtimeClient = _llmClient as ILlmRuntimeClient;
@@ -617,6 +619,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                                     _memory.Add("build_failure_code", buildFailureCode, "BuildVerificationFailed");
                                     _memory.Add("build_exit_code", buildResult.ExitCode.ToString(), "BuildVerificationFailed");
                                     _memory.Add("build_timed_out", buildResult.TimedOut ? "true" : "false", "BuildVerificationFailed");
+                                    lastBuildExitCode = buildResult.ExitCode;
+                                    lastBuildTimedOut = buildResult.TimedOut;
 
                                     if (TryRepairCs8802(buildResult, changedFiles, out var repairPrompt))
                                     {
@@ -775,6 +779,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                         PatchStarted = patchStarted,
                         BuildStarted = buildStarted,
                         BuildFailureCode = lastBuildFailureCode ?? string.Empty,
+                        BuildExitCode = lastBuildExitCode,
+                        BuildTimedOut = lastBuildTimedOut,
                         Timeline = TimelineBuilder.BuildMaxIterationsTimeline(actualIterationsUsed, MAX_ITERATIONS, lastSuccessfulStep, lastKnownAction)
                     });
             }
@@ -1146,6 +1152,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 ModelCallStarted = failure?.ModelCallStarted,
                 PatchStarted = failure?.PatchStarted,
                 BuildFailureCode = BuildFailureReasonCodeMapper.ToStructuredReasonCode(failure?.BuildFailureCode ?? string.Empty),
+                BuildExitCode = failure?.BuildExitCode,
+                BuildTimedOut = failure?.BuildTimedOut,
                 Timeline = timeline ?? failure?.Timeline ?? Array.Empty<TimelinePayload>(),
                 ApprovalRequiredActions = ApprovalProposalMapper.MapApprovalProposals(approvalRequiredActions),
                 ExternalAttempts = actionCounters.ExternalAttempts,
@@ -1308,6 +1316,12 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             [JsonPropertyName("buildFailureCode")]
             public string BuildFailureCode { get; init; } = string.Empty;
 
+            [JsonPropertyName("buildExitCode")]
+            public int? BuildExitCode { get; init; }
+
+            [JsonPropertyName("buildTimedOut")]
+            public bool? BuildTimedOut { get; init; }
+
             [JsonPropertyName("timeline")]
             public TimelinePayload[] Timeline { get; init; } = Array.Empty<TimelinePayload>();
 
@@ -1445,6 +1459,8 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             public bool PatchStarted { get; init; }
             public bool BuildStarted { get; init; }
             public string BuildFailureCode { get; init; } = string.Empty;
+            public int? BuildExitCode { get; init; }
+            public bool? BuildTimedOut { get; init; }
             public TimelinePayload[] Timeline { get; init; } = Array.Empty<TimelinePayload>();
         }
 
