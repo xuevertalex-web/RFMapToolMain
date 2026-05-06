@@ -771,6 +771,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                         ModelCallStarted = modelCallStarted,
                         PatchStarted = patchStarted,
                         BuildStarted = buildStarted,
+                        BuildFailureCode = lastBuildFailureCode ?? string.Empty,
                         Timeline = TimelineBuilder.BuildMaxIterationsTimeline(actualIterationsUsed, MAX_ITERATIONS, lastSuccessfulStep, lastKnownAction)
                     });
             }
@@ -1141,6 +1142,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 LastKnownAction = failure?.LastKnownAction ?? string.Empty,
                 ModelCallStarted = failure?.ModelCallStarted,
                 PatchStarted = failure?.PatchStarted,
+                BuildFailureCode = failure?.BuildFailureCode ?? string.Empty,
                 Timeline = timeline ?? failure?.Timeline ?? Array.Empty<TimelinePayload>(),
                 ApprovalRequiredActions = ApprovalProposalMapper.MapApprovalProposals(approvalRequiredActions),
                 ExternalAttempts = actionCounters.ExternalAttempts,
@@ -1300,6 +1302,9 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             [JsonPropertyName("patchStarted")]
             public bool? PatchStarted { get; init; }
 
+            [JsonPropertyName("buildFailureCode")]
+            public string BuildFailureCode { get; init; } = string.Empty;
+
             [JsonPropertyName("timeline")]
             public TimelinePayload[] Timeline { get; init; } = Array.Empty<TimelinePayload>();
 
@@ -1436,6 +1441,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             public bool ModelCallStarted { get; init; }
             public bool PatchStarted { get; init; }
             public bool BuildStarted { get; init; }
+            public string BuildFailureCode { get; init; } = string.Empty;
             public TimelinePayload[] Timeline { get; init; } = Array.Empty<TimelinePayload>();
         }
 
