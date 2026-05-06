@@ -19,5 +19,10 @@ namespace LocalCursorAgent.Core
             memory.Add(BuildFailureMemoryKeys.MessageTruncated, failureMessage.IsTruncated ? "true" : "false", BuildFailureMemoryKeys.Category);
             memory.Add(BuildFailureMemoryKeys.MessageLength, errorMessage.Length.ToString(), BuildFailureMemoryKeys.Category);
         }
+
+        internal static void RecordRepeatedFailureReasonCode(MemoryStore memory, string reasonCode)
+        {
+            memory.Add(BuildFailureMemoryKeys.RepeatedFailureReasonCode, reasonCode, BuildFailureMemoryKeys.Category);
+        }
     }
 }

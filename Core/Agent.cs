@@ -636,7 +636,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                                         var repeatedBuildFailure = string.IsNullOrWhiteSpace(lastBuildFailureCode)
                                             ? errorMessage
                                             : $"[{lastBuildFailureCode}] {errorMessage}";
-                                        _memory.Add(BuildFailureMemoryKeys.RepeatedFailureReasonCode, structuredBuildFailureCode, BuildFailureMemoryKeys.Category);
+                                        BuildFailureMemoryRecorder.RecordRepeatedFailureReasonCode(_memory, structuredBuildFailureCode);
                                         return FinalizeStructuredDiagnosticResult(
                                             structuredBuildFailureCode,
                                             new StructuredDiagnostic
