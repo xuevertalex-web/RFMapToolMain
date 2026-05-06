@@ -11,7 +11,7 @@ namespace LocalCursorAgent.Core
         {
             return new VerificationOutcomePayload
             {
-                Status = status.ToString(),
+                Status = VerificationOutcomeStatusMapper.ToWireValue(status),
                 BuildStarted = buildStarted,
                 BuildSucceeded = buildSucceeded,
                 FailedStage = failedStage,
