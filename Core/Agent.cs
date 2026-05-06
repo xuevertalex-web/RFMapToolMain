@@ -623,6 +623,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                                     _memory.Add("build_exit_code", buildResult.ExitCode.ToString(), "BuildVerificationFailed");
                                     _memory.Add("build_timed_out", buildResult.TimedOut ? "true" : "false", "BuildVerificationFailed");
                                     _memory.Add("build_error_message_truncated", failureMessage.IsTruncated ? "true" : "false", "BuildVerificationFailed");
+                                    _memory.Add("build_error_message_length", errorMessage.Length.ToString(), "BuildVerificationFailed");
                                     lastBuildExitCode = buildResult.ExitCode;
                                     lastBuildTimedOut = buildResult.TimedOut;
                                     lastBuildErrorMessageTruncated = failureMessage.IsTruncated;
