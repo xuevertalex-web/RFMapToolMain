@@ -734,9 +734,9 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
                 var finalMessage = "Max iterations reached. Task may not be fully complete.";
                 _memory.Add("task_status", "max_iterations");
-                tracer.LogActionEvent("MaxIterationsReached", "AgentIterationLoop", ExecutionTracer.ActionLogLevel.Warning, "failed", "MAX_ITERATIONS_REACHED", new Dictionary<string, object?>
+                tracer.LogActionEvent("MaxIterationsReached", MaxIterationsFailurePayloadFactory.FailureStage, ExecutionTracer.ActionLogLevel.Warning, "failed", MaxIterationsFailurePayloadFactory.FailureCode, new Dictionary<string, object?>
                 {
-                    { "loop_stage", "AgentIterationLoop" },
+                    { "loop_stage", MaxIterationsFailurePayloadFactory.FailureStage },
                     { "max_iterations", MAX_ITERATIONS },
                     { "iterations_used", actualIterationsUsed },
                     { "last_successful_step", lastSuccessfulStep },
@@ -747,7 +747,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     { "build_started", buildStarted },
                     { "pipeline_stopped_reason", MaxIterationsFailurePayloadFactory.PipelineStoppedReason }
                 });
-                tracer.MarkStopPoint("AgentIterationLoop", MaxIterationsFailurePayloadFactory.FailureCode, finalMessage, buildStarted ? Array.Empty<string>() : new[] { "BuildVerification" });
+                tracer.MarkStopPoint(MaxIterationsFailurePayloadFactory.FailureStage, MaxIterationsFailurePayloadFactory.FailureCode, finalMessage, buildStarted ? Array.Empty<string>() : new[] { "BuildVerification" });
                 tracer.LogActionEvent("RunFailedWithRootCause", "Agent", ExecutionTracer.ActionLogLevel.Warning, "failed", MaxIterationsFailurePayloadFactory.FailureCode, new Dictionary<string, object?>
                 {
                     { "root_cause_code", MaxIterationsFailurePayloadFactory.FailureCode },
