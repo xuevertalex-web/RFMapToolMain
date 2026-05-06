@@ -253,5 +253,25 @@ namespace LocalCursorAgent.Core
 
             return FindFirstLineIndex(lines, line => ContainsSymbolIgnoreCase(line, symbol));
         }
+
+        internal static (int startLine, int endLine)? FindNearestEnclosingSymbolRange(string[] lines, int anchorLineIndex)
+        {
+            if (HasNoLines(lines))
+                return null;
+
+            var methodStart = FindNearestDeclarationStart(lines, anchorLineIndex: anchorLineIndex, declarationKind: "method");
+            if (methodStart is >= 0)
+            {
+                return BuildBlockRangeFromDeclaration(lines, methodStart);
+            }
+
+            var classStart = FindNearestDeclarationStart(lines, anchorLineIndex: anchorLineIndex, declarationKind: "class");
+            if (classStart is >= 0)
+            {
+                return BuildBlockRangeFromDeclaration(lines, classStart);
+            }
+
+            return null;
+        }
     }
 }

@@ -954,7 +954,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 var lineIndex = AgentSymbolRangeSupport.FindMatchingLine(lines, candidate);
                 if (lineIndex >= 0)
                 {
-                    var enclosingRange = FindNearestEnclosingSymbolRange(lines, lineIndex);
+                    var enclosingRange = AgentSymbolRangeSupport.FindNearestEnclosingSymbolRange(lines, lineIndex);
                     if (enclosingRange is not null)
                     {
                         return CreateChangedRange(filePath, enclosingRange.Value.startLine, enclosingRange.Value.endLine);
@@ -1036,26 +1036,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
                 var startLine = AgentSymbolRangeSupport.ToOneBasedLineNumber(symbolLine);
                 return (startLine, startLine);
-            }
-
-            return null;
-        }
-
-        private static (int startLine, int endLine)? FindNearestEnclosingSymbolRange(string[] lines, int anchorLineIndex)
-        {
-            if (AgentSymbolRangeSupport.HasNoLines(lines))
-                return null;
-
-            var methodStart = AgentSymbolRangeSupport.FindNearestDeclarationStart(lines, anchorLineIndex: anchorLineIndex, declarationKind: "method");
-            if (methodStart is >= 0)
-            {
-                return AgentSymbolRangeSupport.BuildBlockRangeFromDeclaration(lines, methodStart);
-            }
-
-            var classStart = AgentSymbolRangeSupport.FindNearestDeclarationStart(lines, anchorLineIndex: anchorLineIndex, declarationKind: "class");
-            if (classStart is >= 0)
-            {
-                return AgentSymbolRangeSupport.BuildBlockRangeFromDeclaration(lines, classStart);
             }
 
             return null;
