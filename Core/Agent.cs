@@ -732,7 +732,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     });
                 }
 
-                var finalMessage = "Max iterations reached. Task may not be fully complete.";
+                var finalMessage = MaxIterationsFailurePayloadFactory.FailureMessage;
                 _memory.Add("task_status", "max_iterations");
                 tracer.LogActionEvent("MaxIterationsReached", MaxIterationsFailurePayloadFactory.FailureStage, ExecutionTracer.ActionLogLevel.Warning, "failed", MaxIterationsFailurePayloadFactory.FailureCode, new Dictionary<string, object?>
                 {
