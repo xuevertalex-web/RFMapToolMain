@@ -7,6 +7,7 @@ namespace LocalCursorAgent.Core
         internal const string FailureStep = "MaxIterationsReached";
         internal const string PipelineStoppedReason = "Iteration budget exhausted before completion";
         internal const string FailureMessage = "Max iterations reached. Task may not be fully complete.";
+        internal const string DownstreamStageBuildVerification = "BuildVerification";
 
         internal static Agent.FailurePayload Create(
             bool buildStarted,
@@ -31,7 +32,7 @@ namespace LocalCursorAgent.Core
                 ReasonCode = FailureCode,
                 Explanation = FailureMessage,
                 PipelineStoppedReason = PipelineStoppedReason,
-                DownstreamNotStarted = buildStarted ? string.Empty : "BuildVerification",
+                DownstreamNotStarted = buildStarted ? string.Empty : DownstreamStageBuildVerification,
                 LoopStage = FailureStage,
                 MaxIterations = maxIterations,
                 IterationsUsed = actualIterationsUsed,
