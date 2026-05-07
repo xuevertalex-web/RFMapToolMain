@@ -30,6 +30,7 @@ namespace LocalCursorAgent.Memory
             if (record == null) throw new ArgumentNullException(nameof(record));
 
             record.Timestamp = DateTime.UtcNow;
+            MemoryRecordProvenance.Ensure(record);
 
             if (MemoryRecordGovernance.IsConsecutiveDuplicate(record, _failureRecords.LastOrDefault()))
                 return;
@@ -76,6 +77,7 @@ namespace LocalCursorAgent.Memory
             if (record == null) throw new ArgumentNullException(nameof(record));
 
             record.Timestamp = DateTime.UtcNow;
+            MemoryRecordProvenance.Ensure(record);
 
             if (MemoryRecordGovernance.IsConsecutiveDuplicate(record, _successRecords.LastOrDefault()))
                 return;
@@ -352,6 +354,8 @@ namespace LocalCursorAgent.Memory
     {
         public Guid Id { get; set; } = Guid.NewGuid();
         public DateTime Timestamp { get; set; }
+        public string? Source { get; set; }
+        public string? ProjectScope { get; set; }
         public string Query { get; set; } = string.Empty;
         public List<string> SelectedFiles { get; set; } = new();
         public string PatchSummary { get; set; } = string.Empty;
@@ -365,6 +369,8 @@ namespace LocalCursorAgent.Memory
     {
         public Guid Id { get; set; } = Guid.NewGuid();
         public DateTime Timestamp { get; set; }
+        public string? Source { get; set; }
+        public string? ProjectScope { get; set; }
         public string Query { get; set; } = string.Empty;
         public List<string> SelectedFiles { get; set; } = new();
         public List<string> SymbolMatches { get; set; } = new();
