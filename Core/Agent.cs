@@ -88,18 +88,9 @@ namespace LocalCursorAgent.Core
                 { "requested_new_file", requestedNewFile ?? string.Empty }
             });
 
-            if (TaskPrecheckHeuristics.IsSuspiciousInjectedToolTask(task))
+            if (TryRejectTaskBeforeExecution(task, tracer, out var precheckResult))
             {
-                var message = "Task contains raw tool syntax. Provide a normal natural-language task instead.";
-                tracer.MarkStopPoint("Agent", "TASK_CONTAINS_TOOL_SYNTAX", message, new[] { "Indexing", "ModelRequest", "PatchApply", "BuildVerification" });
-                return FinalizeRunResult(false, message, "Task rejected before execution", "TASK_CONTAINS_TOOL_SYNTAX", Array.Empty<string>(), Array.Empty<ChangedHint>(), Array.Empty<ChangedRange>(), Array.Empty<ChangedKind>(), false);
-            }
-
-            if (TaskPrecheckHeuristics.IsLowSignalTask(task))
-            {
-                var message = "Task is too short or ambiguous. Provide a concrete natural-language request.";
-                tracer.MarkStopPoint("Agent", "NON_ACTIONABLE_TASK", message, new[] { "Indexing", "ModelRequest", "PatchApply", "BuildVerification" });
-                return FinalizeRunResult(false, message, "Task rejected before execution", "NON_ACTIONABLE_TASK", Array.Empty<string>(), Array.Empty<ChangedHint>(), Array.Empty<ChangedRange>(), Array.Empty<ChangedKind>(), false);
+                return precheckResult;
             }
 
             try
@@ -290,115 +281,27 @@ namespace LocalCursorAgent.Core
                     _memory.Add("llm_response", currentResponse.Length > 100 ? currentResponse.Substring(0, 100) + "..." : currentResponse);
 
                     var isHardFailure = runtimeResult?.IsFailure ?? LlmFailureDetector.IsHardLlmFailureResponse(currentResponse);
-                    if (isHardFailure)
-                    {
-                        _memory.Add("llm_failure", currentResponse, "LlmUnavailableOrRequestFailed");
-                        if (analysisOnlyTask)
-                        {
-                            var fallbackReason = FallbackReasonResolver.Resolve(runtimeResult, currentResponse, TimeoutResponseHeuristics.IsModelTimeoutResponse);
-                            if (string.Equals(fallbackReason, "MODEL_TIMEOUT", StringComparison.Ordinal))
-                            {
-                                tracer.LogActionEvent("ModelCallTimedOut", "Agent", ExecutionTracer.ActionLogLevel.Warning, "timed_out", fallbackReason, metadata: new Dictionary<string, object?>
-                                {
-                                    { "iteration", iteration }
-                                });
-                            }
-
-                            tracer.LogActionEvent("AnalysisFallbackStarted", "Agent", ExecutionTracer.ActionLogLevel.Warning, "started", fallbackReason, metadata: new Dictionary<string, object?>
-                            {
-                                { "fallback_mode", "INDEXED_CONTEXT_SUMMARY" },
-                                { "provider_outcome", runtimeResult?.Status.ToString() ?? "legacy_classifier" },
-                                { "response_length", currentResponse?.Length ?? 0 },
-                                { "response_preview", string.IsNullOrWhiteSpace(currentResponse) ? string.Empty : (currentResponse.Length > 120 ? currentResponse[..120] : currentResponse) }
-                            });
-                            var fallbackSummary = AnalysisFallbackFormatter.BuildAnalysisFallbackSummary(contextInfo, fallbackReason);
-                            tracer.LogActionEvent("AnalysisFallback", "Agent", ExecutionTracer.ActionLogLevel.Warning, "used", fallbackReason, metadata: new Dictionary<string, object?>
-                            {
-                                { "selected_files", contextInfo.SelectedFiles.ToArray() },
-                                { "file_count", contextInfo.SelectedFiles.Count }
-                            });
-                            tracer.LogActionEvent("AnalysisFallbackCompleted", "Agent", ExecutionTracer.ActionLogLevel.Info, "completed", fallbackReason, metadata: new Dictionary<string, object?>
-                            {
-                                { "fallback_mode", "INDEXED_CONTEXT_SUMMARY" },
-                                { "file_count", contextInfo.SelectedFiles.Count }
-                            });
-
-                            return FinalizeRunResult(
-                                true,
-                                fallbackSummary,
-                                "Analysis summary generated from indexed project context",
-                                "ANALYSIS_FALLBACK_USED",
-                                Array.Empty<string>(),
-                                Array.Empty<ChangedHint>(),
-                                Array.Empty<ChangedRange>(),
-                                Array.Empty<ChangedKind>(),
-                                false,
-                                runStartedUtc: runStartedUtc,
-                                workspace: _sessionContext?.ActiveWorkspaceRoot,
-                                provider: LlmClientIdentityResolver.ResolveProviderName(_llmClient, runtimeMetadata),
-                                model: LlmClientIdentityResolver.ResolveModelName(_llmClient, runtimeMetadata),
-                                degradedFlags: new[] { "ANALYSIS_FALLBACK_USED" },
-                                fallbackReason: fallbackReason,
-                                fallbackMode: "INDEXED_CONTEXT_SUMMARY",
-                                payloadFinalStatus: "fallback-success",
-                                timeline: TimelineBuilder.BuildAnalysisTimeline(modelTimedOut: string.Equals(fallbackReason, "MODEL_TIMEOUT", StringComparison.Ordinal), fallbackUsed: true));
-                        }
-
-                        return FinalizeStructuredDiagnosticResult(
-                            "LLM_REQUEST_FAILED",
-                            new StructuredDiagnostic
-                            {
-                                RootCause = "The configured LLM provider failed before the agent could plan or execute tool calls.",
-                                AttemptedFix = "Requested a completion from the active LLM provider.",
-                                WhyDenied = currentResponse,
-                                NextSafeAction = "Start the configured LLM service, switch to an available provider, or configure a fallback provider and retry the same task."
-                            },
+                    if (isHardFailure &&
+                        TryHandleHardModelFailure(
+                            analysisOnlyTask,
+                            runtimeResult,
+                            contextInfo,
+                            iteration,
+                            currentResponse,
                             changedFiles,
-                            changedHints.Values,
-                            changedRanges.Values,
-                            changedKinds.Values);
+                            changedHints,
+                            changedRanges,
+                            changedKinds,
+                            runStartedUtc,
+                            runtimeMetadata,
+                            out var hardFailureResult))
+                    {
+                        return hardFailureResult;
                     }
 
-                    if (analysisOnlyTask &&
-                        !string.IsNullOrWhiteSpace(currentResponse) &&
-                        !currentResponse.TrimStart().StartsWith("TOOL:", StringComparison.OrdinalIgnoreCase))
+                    if (TryHandleAnalysisDirectResponse(task, analysisOnlyTask, currentResponse, contextInfo, runStartedUtc, runtimeMetadata, out var analysisResult))
                     {
-                        if (TaskIntentClassifier.IsTechnicalAnalysisIntent(task) &&
-                            (contextInfo.SelectedFiles.Count == 0 || NoToolResponseHeuristics.IsNonSubstantiveNoToolResponse(currentResponse) || NoToolResponseHeuristics.IsNeedsMoreDataResponse(currentResponse)))
-                        {
-                            _memory.Add("task_status", "needs_action_plan");
-                            return FinalizeRunResult(
-                                false,
-                                "Technical analysis request did not produce grounded workspace analysis. Produce actionable target/context steps first.",
-                                "No actionable steps produced for technical analysis intent",
-                                "NO_ACTIONABLE_STEPS",
-                                Array.Empty<string>(),
-                                Array.Empty<ChangedHint>(),
-                                Array.Empty<ChangedRange>(),
-                                Array.Empty<ChangedKind>(),
-                                false);
-                        }
-
-                        _memory.Add("final_response", currentResponse);
-                        return FinalizeRunResult(
-                            true,
-                            currentResponse,
-                            "Analysis response generated",
-                            "SUCCESS_ANALYSIS_RESPONSE",
-                            Array.Empty<string>(),
-                            Array.Empty<ChangedHint>(),
-                            Array.Empty<ChangedRange>(),
-                            Array.Empty<ChangedKind>(),
-                            false,
-                            runStartedUtc: runStartedUtc,
-                            workspace: _sessionContext?.ActiveWorkspaceRoot,
-                            provider: LlmClientIdentityResolver.ResolveProviderName(_llmClient, runtimeMetadata),
-                            model: LlmClientIdentityResolver.ResolveModelName(_llmClient, runtimeMetadata),
-                            degradedFlags: Array.Empty<string>(),
-                            fallbackReason: string.Empty,
-                            fallbackMode: string.Empty,
-                            payloadFinalStatus: "success",
-                            timeline: TimelineBuilder.BuildAnalysisTimeline(modelTimedOut: false, fallbackUsed: false));
+                        return analysisResult;
                     }
 
                     // Check for tool calls
@@ -409,86 +312,26 @@ namespace LocalCursorAgent.Core
                         lastKnownAction = $"Parsed {toolCalls.Count} tool calls";
                         if (toolCalls.Count == 0)
                         {
-                            if (NoToolResponseHeuristics.IsNonSubstantiveNoToolResponse(currentResponse))
+                            var emptyToolDecision = HandleEmptyParsedToolCalls(task, analysisOnlyTask, currentResponse);
+                            if (emptyToolDecision.IsHandled)
                             {
-                                currentResponse = "Your previous response did not contain the final analysis. Provide the final answer now. Do not say what you will do. Do not ask for more steps. Do not emit a tool call.";
-                                continue;
-                            }
+                                if (emptyToolDecision.ShouldContinue)
+                                {
+                                    currentResponse = emptyToolDecision.Payload;
+                                    continue;
+                                }
 
-                            if (!analysisOnlyTask && (TaskIntentClassifier.IsBroadEngineeringIntent(task) || TaskIntentClassifier.IsTechnicalAnalysisIntent(task)))
-                            {
-                                _memory.Add("task_status", "needs_action_plan");
-                                return FinalizeRunResult(
-                                    false,
-                                    "The task requires an actionable engineering plan or concrete edits, but no tool/action step was produced.",
-                                    "No actionable steps produced for broad engineering intent",
-                                    "NO_ACTIONABLE_STEPS",
-                                    Array.Empty<string>(),
-                                    Array.Empty<ChangedHint>(),
-                                    Array.Empty<ChangedRange>(),
-                                    Array.Empty<ChangedKind>(),
-                                    false);
+                                return emptyToolDecision.Payload;
                             }
-
-                            _memory.Add("final_response", currentResponse);
-                            return FinalizeRunResult(
-                                true,
-                                string.IsNullOrWhiteSpace(currentResponse) ? "Agent run completed successfully." : currentResponse,
-                                analysisOnlyTask ? "Analysis response generated" : "Agent completed without tool calls",
-                                analysisOnlyTask ? "SUCCESS_ANALYSIS_RESPONSE" : "SUCCESS_NO_TOOL_CALLS",
-                                Array.Empty<string>(),
-                                Array.Empty<ChangedHint>(),
-                                Array.Empty<ChangedRange>(),
-                                Array.Empty<ChangedKind>(),
-                                false);
                         }
 
                         var mutationIntentTask = MutationIntentDetector.IsMutationIntentTask(task) || requestedNewFile != null;
 
                         var mutationCall = toolCalls.FirstOrDefault(ToolCallMutationHeuristics.IsMutationLikeToolCall);
-                        if (mutationCall != null)
+                        if (mutationCall != null &&
+                            TryValidateMutationToolCalls(task, toolCalls, mutationCall, targetResolution, tracer, out var gateFailureResult))
                         {
-                            var intentGate = new IntentConfirmationGate(_contextBuilder.Tracer);
-                            var intentDecision = intentGate.Evaluate(task, mutationCall.Input, targetResolution);
-                            _memory.Add("intent_confirmation_gate", $"{intentDecision.ReasonCode}:{intentDecision.ClassifiedKind}:{intentDecision.Outcome}");
-
-                            if (intentDecision.IsRejected)
-                            {
-                                var safeFailure = intentDecision.Reason;
-                                _memory.Add("context_failure", safeFailure, intentDecision.ReasonCode);
-                                tracer.MarkStopPoint("IntentConfirmationGate", intentDecision.ReasonCode, safeFailure, new[] { "MultiFileGate", "PatchApply", "BuildVerification" });
-                                return FinalizeRunResult(
-                                    false,
-                                    safeFailure,
-                                    $"Intent confirmation gate failed: {intentDecision.ReasonCode}",
-                                    intentDecision.ReasonCode,
-                                    Array.Empty<string>(),
-                                    Array.Empty<ChangedHint>(),
-                                    Array.Empty<ChangedRange>(),
-                                    Array.Empty<ChangedKind>(),
-                                    false);
-                            }
-
-                            var multiFileGate = new MultiFileEditGate(_contextBuilder.Tracer);
-                            var multiFileDecision = multiFileGate.Evaluate(task, toolCalls, targetResolution, intentDecision);
-                            _memory.Add("multi_file_edit_gate", $"{multiFileDecision.ReasonCode}:{multiFileDecision.ClassifiedKind}:{multiFileDecision.Outcome}");
-
-                            if (multiFileDecision.IsRejected)
-                            {
-                                var safeFailure = multiFileDecision.Reason;
-                                _memory.Add("context_failure", safeFailure, multiFileDecision.ReasonCode);
-                                tracer.MarkStopPoint("MultiFileEditGate", multiFileDecision.ReasonCode, safeFailure, new[] { "PatchApply", "BuildVerification" });
-                                return FinalizeRunResult(
-                                    false,
-                                    safeFailure,
-                                    $"Multi-file edit gate failed: {multiFileDecision.ReasonCode}",
-                                    multiFileDecision.ReasonCode,
-                                    Array.Empty<string>(),
-                                    Array.Empty<ChangedHint>(),
-                                    Array.Empty<ChangedRange>(),
-                                    Array.Empty<ChangedKind>(),
-                                    false);
-                            }
+                            return gateFailureResult;
                         }
 
                         patchStarted = patchStarted || toolCalls.Any(ToolCallMutationHeuristics.IsMutationLikeToolCall);
@@ -527,35 +370,7 @@ namespace LocalCursorAgent.Core
                                 lastDeniedToolResult = result;
                             }
 
-                            // Mark files as Hot after patch, then re-index them
-                            foreach (var call in toolCalls)
-                            {
-                                if (call.ToolName.Equals("file", StringComparison.OrdinalIgnoreCase) && 
-                                    call.Input.StartsWith("write:", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    var filePath = WriteTargetPathExtractor.ExtractWriteTargetPath(call.Input);
-                                    if (!string.IsNullOrWhiteSpace(filePath))
-                                    {
-                                        changedFiles.Add(filePath);
-                                        tracer.MarkChangedFile(filePath);
-                                        var patchDecision = PatchDecisionBuilder.BuildPatchDecision(filePath, call.Input, resolvedFiles);
-                                        _contextBuilder.Tracer.LogPatchDecision(patchDecision);
-                                        changedHints[filePath] = ChangedHintComposer.BuildChangedHint(filePath, call.Input, patchDecision);
-                                        var changedRange = ChangedRangeResolver.BuildChangedRange(filePath, call.Input, patchDecision, _projectIndexer.SymbolDirectory);
-                                        if (changedRange != null)
-                                        {
-                                            changedRanges[filePath] = changedRange;
-                                        }
-                                        changedKinds[filePath] = ChangedKindBuilder.BuildChangedKind(task, call.Input, patchDecision, buildResult: null);
-                                        
-                                        // Mark as Hot immediately after patch (highest priority)
-                                        _fileStateManager.MarkHot(filePath);
-                                        
-                                        // Re-index will mark as Clean after successful embedding
-                                        await _projectIndexer.ReindexFile(filePath);
-                                    }
-                                }
-                            }
+                            await RecordWriteToolEffectsAsync(task, toolCalls, resolvedFiles, changedFiles, changedHints, changedRanges, changedKinds, tracer);
                         }
 
                         if (!string.IsNullOrWhiteSpace(unknownToolError))
@@ -673,47 +488,17 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                     }
                     else
                     {
-                        // No tool calls - this might be the final response
-                        if (MutationIntentDetector.IsMutationIntentTask(task) || requestedNewFile != null)
+                        var noToolDecision = HandleNoToolCallResponse(task, currentResponse, requestedNewFile);
+                        if (noToolDecision.IsHandled)
                         {
-                            currentResponse = requestedNewFile != null
-                                ? $"This is a file creation task. Use the file tool now to write:{requestedNewFile}:... and create the requested file. Do not answer with explanation only."
-                                : "This is a code change task. Use the file tool now to write Program.cs and make a concrete edit. Do not answer with code only.";
-                            continue;
-                        }
+                            if (noToolDecision.ShouldContinue)
+                            {
+                                currentResponse = noToolDecision.Payload;
+                                continue;
+                            }
 
-                        if (NoToolResponseHeuristics.IsNonSubstantiveNoToolResponse(currentResponse))
-                        {
-                            currentResponse = "Your previous response did not contain the final analysis. Provide the final answer now. Do not say what you will do. Do not ask for more steps. Do not emit a tool call.";
-                            continue;
+                            return noToolDecision.Payload;
                         }
-
-                        _memory.Add("final_response", currentResponse);
-                        if (TaskIntentClassifier.IsBroadEngineeringIntent(task) || TaskIntentClassifier.IsTechnicalAnalysisIntent(task))
-                        {
-                            _memory.Add("task_status", "needs_action_plan");
-                            return FinalizeRunResult(
-                                false,
-                                "The task requires an actionable engineering plan or concrete edits, but no tool/action step was produced.",
-                                "No actionable steps produced for broad engineering intent",
-                                "NO_ACTIONABLE_STEPS",
-                                Array.Empty<string>(),
-                                Array.Empty<ChangedHint>(),
-                                Array.Empty<ChangedRange>(),
-                                Array.Empty<ChangedKind>(),
-                                false);
-                        }
-
-                        return FinalizeRunResult(
-                            true,
-                            string.IsNullOrWhiteSpace(currentResponse) ? "Agent run completed successfully." : currentResponse,
-                            "Agent completed without tool calls",
-                            "SUCCESS_NO_TOOL_CALLS",
-                            Array.Empty<string>(),
-                            Array.Empty<ChangedHint>(),
-                            Array.Empty<ChangedRange>(),
-                            Array.Empty<ChangedKind>(),
-                            false);
                     }
 
                     tracer.LogActionEvent("IterationCompleted", "AgentIterationLoop", ExecutionTracer.ActionLogLevel.Info, "completed", metadata: new Dictionary<string, object?>
