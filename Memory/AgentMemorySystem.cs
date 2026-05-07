@@ -370,6 +370,42 @@ namespace LocalCursorAgent.Memory
             return removedFailures + removedSuccesses;
         }
 
+        public int InvalidateLowConfidenceRecords(string projectScope, double minConfidence)
+        {
+            var normalizedScope = MemoryProjectScopeResolver.NormalizeScope(projectScope);
+            var threshold = MemoryConfidenceNormalizer.Normalize(minConfidence);
+
+            var removedFailures = _failureRecords.RemoveAll(r =>
+                MemoryProjectScopeResolver.IsSameScope(r.ProjectScope, normalizedScope) &&
+                MemoryConfidenceNormalizer.Normalize(r.ConfidenceScore ?? 0) < threshold);
+
+            var removedSuccesses = _successRecords.RemoveAll(r =>
+                MemoryProjectScopeResolver.IsSameScope(r.ProjectScope, normalizedScope) &&
+                MemoryConfidenceNormalizer.Normalize(r.ConfidenceScore ?? 0) < threshold);
+
+            return removedFailures + removedSuccesses;
+        }
+
+        public int RecalibrateConfidenceByProjectScope(string projectScope, bool success)
+        {
+            var normalizedScope = MemoryProjectScopeResolver.NormalizeScope(projectScope);
+            var updated = 0;
+
+            foreach (var failure in _failureRecords.Where(r => MemoryProjectScopeResolver.IsSameScope(r.ProjectScope, normalizedScope)))
+            {
+                failure.ConfidenceScore = MemoryConfidenceRecalibrator.Recalibrate(failure.ConfidenceScore ?? 0, success);
+                updated++;
+            }
+
+            foreach (var successRecord in _successRecords.Where(r => MemoryProjectScopeResolver.IsSameScope(r.ProjectScope, normalizedScope)))
+            {
+                successRecord.ConfidenceScore = MemoryConfidenceRecalibrator.Recalibrate(successRecord.ConfidenceScore ?? 0, success);
+                updated++;
+            }
+
+            return updated;
+        }
+
         public int FailureCount => _failureRecords.Count;
         public int SuccessCount => _successRecords.Count;
         public int ProfileCount => _taskProfiles.Count;

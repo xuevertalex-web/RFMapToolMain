@@ -14,5 +14,7 @@ namespace LocalCursorAgent.Memory
         public const double DefaultFailureCriticalConfidence = 0.9;
         public const double DefaultFailureFallbackConfidence = 0.4;
         public const double RelevanceScoreThreshold = 0.1;
+        public const double ConfidenceRecalibrationSuccessDelta = 0.05;
+        public const double ConfidenceRecalibrationFailureDelta = 0.07;
     }
 }

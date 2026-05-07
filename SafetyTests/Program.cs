@@ -50,6 +50,7 @@ RunExtractRequestedNewFilePath_MultiDotFileNameRegression();
 RunExtractRequestedNewFilePath_UrlNegativeRegression();
 RunExtractRequestedNewFilePath_RussianIntentRegression();
 RunMemoryProjectScopeResolverRegression();
+RunMemoryGovernanceRecalibrationRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1646,6 +1647,42 @@ static void RunMemoryProjectScopeResolverRegression()
     AssertTrue(MemoryProjectScopeResolver.IsSameScope(null, "default"), "IsSameScope must treat null as default.");
 
     Console.WriteLine("PASS MemoryProjectScopeResolver");
+}
+
+static void RunMemoryGovernanceRecalibrationRegression()
+{
+    var memory = new AgentMemorySystem();
+
+    memory.RecordFailure(new FailureRecord
+    {
+        Query = "scope:agent-core fix compile issue",
+        ProjectScope = "agent-core",
+        ConfidenceScore = 0.40,
+        FailureType = FailureType.CompilationError,
+        Severity = FailureSeverity.Medium
+    });
+
+    memory.RecordSuccess(new SuccessRecord
+    {
+        Query = "scope:agent-core apply small patch",
+        ProjectScope = "agent-core",
+        ConfidenceScore = 0.60
+    });
+
+    var raised = memory.RecalibrateConfidenceByProjectScope("agent-core", success: true);
+    AssertTrue(raised == 2, "Expected recalibration to update both records in the target scope.");
+
+    var relevantAfterRaise = memory.GetRelevantFailures("scope:agent-core fix compile issue", 10).ToList();
+    AssertTrue(relevantAfterRaise.Count > 0, "Expected relevant failures for scope after recalibration.");
+    AssertTrue((relevantAfterRaise[0].ConfidenceScore ?? 0) > 0.40, "Expected confidence to increase on success recalibration.");
+
+    var lowered = memory.RecalibrateConfidenceByProjectScope("agent-core", success: false);
+    AssertTrue(lowered == 2, "Expected failure recalibration to update both records in scope.");
+
+    var removedLowConfidence = memory.InvalidateLowConfidenceRecords("agent-core", 0.50);
+    AssertTrue(removedLowConfidence >= 1, "Expected low-confidence invalidation to remove at least one record.");
+
+    Console.WriteLine("PASS MemoryGovernanceRecalibration");
 }
 
 
