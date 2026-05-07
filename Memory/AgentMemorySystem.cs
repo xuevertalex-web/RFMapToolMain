@@ -130,6 +130,18 @@ namespace LocalCursorAgent.Memory
             _failureRecords.RemoveAll(f => f.Timestamp < cutoffTime);
             _successRecords.RemoveAll(s => s.Timestamp < cutoffTime);
 
+            foreach (var failure in _failureRecords)
+            {
+                if (failure.ConfidenceScore.HasValue)
+                    failure.ConfidenceScore = MemoryConfidenceDecay.Apply(failure.ConfidenceScore.Value, _decaySettings.ProfileDecayRate);
+            }
+
+            foreach (var success in _successRecords)
+            {
+                if (success.ConfidenceScore.HasValue)
+                    success.ConfidenceScore = MemoryConfidenceDecay.Apply(success.ConfidenceScore.Value, _decaySettings.ProfileDecayRate);
+            }
+
             // Угасание веса профилей задач
             foreach (var profile in _taskProfiles.Values)
             {
