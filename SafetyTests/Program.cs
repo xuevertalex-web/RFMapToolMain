@@ -49,6 +49,7 @@ RunExtractRequestedNewFilePath_RelativeDotSlashRegression();
 RunExtractRequestedNewFilePath_MultiDotFileNameRegression();
 RunExtractRequestedNewFilePath_UrlNegativeRegression();
 RunExtractRequestedNewFilePath_RussianIntentRegression();
+RunMemoryProjectScopeResolverRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1632,6 +1633,19 @@ static void RunExtractRequestedNewFilePath_RussianIntentRegression()
     }
 
     Console.WriteLine("PASS ExtractRequestedNewFilePath_RussianIntentRegression");
+}
+
+static void RunMemoryProjectScopeResolverRegression()
+{
+    AssertTrue(string.Equals(MemoryProjectScopeResolver.Resolve(""), MemoryGovernanceDefaults.DefaultProjectScope, StringComparison.Ordinal), "Empty query must resolve to default scope.");
+    AssertTrue(string.Equals(MemoryProjectScopeResolver.Resolve("refactor module scope:agent-core"), "agent-core", StringComparison.Ordinal), "scope: marker must be parsed.");
+    AssertTrue(string.Equals(MemoryProjectScopeResolver.Resolve("fix bug project:payments-api quickly"), "payments-api", StringComparison.Ordinal), "project: marker must be parsed.");
+    AssertTrue(string.Equals(MemoryProjectScopeResolver.Resolve("analyze workspace:tools/runtime, then summarize"), "tools/runtime", StringComparison.Ordinal), "workspace: marker must be parsed.");
+    AssertTrue(string.Equals(MemoryProjectScopeResolver.Resolve("analyze everything"), MemoryGovernanceDefaults.DefaultProjectScope, StringComparison.Ordinal), "Query without explicit marker must resolve to default scope.");
+    AssertTrue(string.Equals(MemoryProjectScopeResolver.NormalizeScope("  qa-scope  "), "qa-scope", StringComparison.Ordinal), "NormalizeScope must trim value.");
+    AssertTrue(MemoryProjectScopeResolver.IsSameScope(null, "default"), "IsSameScope must treat null as default.");
+
+    Console.WriteLine("PASS MemoryProjectScopeResolver");
 }
 
 

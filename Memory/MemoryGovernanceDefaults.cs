@@ -1,6 +1,6 @@
 namespace LocalCursorAgent.Memory
 {
-    internal static class MemoryGovernanceDefaults
+    public static class MemoryGovernanceDefaults
     {
         public const string DefaultMemorySource = "local-agent";
         public const string DefaultProjectScope = "default";
