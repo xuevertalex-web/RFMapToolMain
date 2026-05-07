@@ -28,9 +28,14 @@ namespace LocalCursorAgent.Memory
         public void RecordFailure(FailureRecord record)
         {
             if (record == null) throw new ArgumentNullException(nameof(record));
-            
+
             record.Timestamp = DateTime.UtcNow;
+
+            if (MemoryRecordGovernance.IsConsecutiveDuplicate(record, _failureRecords.LastOrDefault()))
+                return;
+
             _failureRecords.Add(record);
+            MemoryRecordGovernance.TrimFailureRecords(_failureRecords);
 
             UpdateTaskProfileOnFailure(record);
         }
@@ -69,9 +74,14 @@ namespace LocalCursorAgent.Memory
         public void RecordSuccess(SuccessRecord record)
         {
             if (record == null) throw new ArgumentNullException(nameof(record));
-            
+
             record.Timestamp = DateTime.UtcNow;
+
+            if (MemoryRecordGovernance.IsConsecutiveDuplicate(record, _successRecords.LastOrDefault()))
+                return;
+
             _successRecords.Add(record);
+            MemoryRecordGovernance.TrimSuccessRecords(_successRecords);
 
             UpdateTaskProfileOnSuccess(record);
         }
