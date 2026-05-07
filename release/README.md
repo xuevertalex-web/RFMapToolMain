@@ -14,6 +14,12 @@ Validate snapshot contents:
 .\scripts\Verify-SourceSnapshot.ps1 -ArchivePath .\release\LocalCursorAgent-source-YYYYMMDD-HHMMSS.zip
 ```
 
+Dry-run report for snapshot contents:
+
+```powershell
+.\scripts\Report-SourceSnapshotContents.ps1 -ArchivePath .\release\LocalCursorAgent-source-YYYYMMDD-HHMMSS.zip
+```
+
 One-step create + verify:
 
 ```powershell
