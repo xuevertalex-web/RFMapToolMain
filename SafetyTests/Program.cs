@@ -51,6 +51,7 @@ RunExtractRequestedNewFilePath_UrlNegativeRegression();
 RunExtractRequestedNewFilePath_RussianIntentRegression();
 RunMemoryProjectScopeResolverRegression();
 RunMemoryGovernanceRecalibrationRegression();
+RunMemoryScopedRetrievalRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1683,6 +1684,42 @@ static void RunMemoryGovernanceRecalibrationRegression()
     AssertTrue(removedLowConfidence >= 1, "Expected low-confidence invalidation to remove at least one record.");
 
     Console.WriteLine("PASS MemoryGovernanceRecalibration");
+}
+
+static void RunMemoryScopedRetrievalRegression()
+{
+    var memory = new AgentMemorySystem();
+
+    memory.RecordFailure(new FailureRecord
+    {
+        Query = "fix parser crash in module",
+        ProjectScope = "alpha",
+        ConfidenceScore = 0.8,
+        FailureType = FailureType.CompilationError,
+        Severity = FailureSeverity.High
+    });
+
+    memory.RecordFailure(new FailureRecord
+    {
+        Query = "fix parser crash in module",
+        ProjectScope = "beta",
+        ConfidenceScore = 0.8,
+        FailureType = FailureType.CompilationError,
+        Severity = FailureSeverity.High
+    });
+
+    var alpha = memory.GetRelevantFailures("fix parser crash in module", "alpha", 10).ToList();
+    var beta = memory.GetRelevantFailures("fix parser crash in module", "beta", 10).ToList();
+
+    AssertTrue(alpha.Count == 1, "Expected scoped retrieval to return only alpha scope records.");
+    AssertTrue(beta.Count == 1, "Expected scoped retrieval to return only beta scope records.");
+    AssertTrue(MemoryProjectScopeResolver.IsSameScope(alpha[0].ProjectScope, "alpha"), "Expected alpha scoped record.");
+    AssertTrue(MemoryProjectScopeResolver.IsSameScope(beta[0].ProjectScope, "beta"), "Expected beta scoped record.");
+
+    var removed = memory.InvalidateLowConfidenceRecords("alpha");
+    AssertTrue(removed == 0, "Expected default quality-floor invalidation to keep high-confidence records.");
+
+    Console.WriteLine("PASS MemoryScopedRetrieval");
 }
 
 

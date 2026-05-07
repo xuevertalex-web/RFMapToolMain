@@ -44,11 +44,18 @@ namespace LocalCursorAgent.Memory
 
         public IEnumerable<FailureRecord> GetRelevantFailures(string query, int maxResults = 5)
         {
+            return GetRelevantFailures(query, projectScope: null, maxResults);
+        }
+
+        public IEnumerable<FailureRecord> GetRelevantFailures(string query, string? projectScope, int maxResults = 5)
+        {
             ApplyDecay();
-            var projectScope = MemoryProjectScopeResolver.Resolve(query);
+            var effectiveScope = projectScope is null
+                ? MemoryProjectScopeResolver.Resolve(query)
+                : MemoryProjectScopeResolver.NormalizeScope(projectScope);
 
             var scored = _failureRecords
-                .Where(f => MemoryProjectScopeResolver.IsSameScope(f.ProjectScope, projectScope))
+                .Where(f => MemoryProjectScopeResolver.IsSameScope(f.ProjectScope, effectiveScope))
                 .Select(f => new { Record = f, Score = CalculateFailureRelevance(f, query) })
                 .Where(x => x.Score > MemoryGovernanceDefaults.RelevanceScoreThreshold)
                 .OrderByDescending(x => x.Score)
@@ -95,11 +102,18 @@ namespace LocalCursorAgent.Memory
 
         public IEnumerable<SuccessRecord> GetRelevantSuccesses(string query, int maxResults = 5)
         {
+            return GetRelevantSuccesses(query, projectScope: null, maxResults);
+        }
+
+        public IEnumerable<SuccessRecord> GetRelevantSuccesses(string query, string? projectScope, int maxResults = 5)
+        {
             ApplyDecay();
-            var projectScope = MemoryProjectScopeResolver.Resolve(query);
+            var effectiveScope = projectScope is null
+                ? MemoryProjectScopeResolver.Resolve(query)
+                : MemoryProjectScopeResolver.NormalizeScope(projectScope);
 
             var scored = _successRecords
-                .Where(s => MemoryProjectScopeResolver.IsSameScope(s.ProjectScope, projectScope))
+                .Where(s => MemoryProjectScopeResolver.IsSameScope(s.ProjectScope, effectiveScope))
                 .Select(s => new { Record = s, Score = CalculateSuccessRelevance(s, query) })
                 .Where(x => x.Score > MemoryGovernanceDefaults.RelevanceScoreThreshold)
                 .OrderByDescending(x => x.Score)
@@ -384,6 +398,11 @@ namespace LocalCursorAgent.Memory
                 MemoryConfidenceNormalizer.Normalize(r.ConfidenceScore ?? 0) < threshold);
 
             return removedFailures + removedSuccesses;
+        }
+
+        public int InvalidateLowConfidenceRecords(string projectScope)
+        {
+            return InvalidateLowConfidenceRecords(projectScope, MemoryGovernanceDefaults.LowConfidenceInvalidationThreshold);
         }
 
         public int RecalibrateConfidenceByProjectScope(string projectScope, bool success)

@@ -12,8 +12,11 @@ namespace LocalCursorAgent.Memory
                 return false;
 
             return string.Equals(candidate.Query, last.Query, StringComparison.Ordinal) &&
+                   string.Equals(candidate.ProjectScope, last.ProjectScope, StringComparison.Ordinal) &&
+                   string.Equals(candidate.Source, last.Source, StringComparison.Ordinal) &&
                    candidate.FailureType == last.FailureType &&
                    candidate.Severity == last.Severity &&
+                   Nullable.Equals(candidate.ConfidenceScore, last.ConfidenceScore) &&
                    string.Equals(candidate.Reason, last.Reason, StringComparison.Ordinal) &&
                    string.Equals(candidate.PatchSummary, last.PatchSummary, StringComparison.Ordinal) &&
                    string.Equals(candidate.BuildError, last.BuildError, StringComparison.Ordinal) &&
@@ -26,6 +29,9 @@ namespace LocalCursorAgent.Memory
                 return false;
 
             return string.Equals(candidate.Query, last.Query, StringComparison.Ordinal) &&
+                   string.Equals(candidate.ProjectScope, last.ProjectScope, StringComparison.Ordinal) &&
+                   string.Equals(candidate.Source, last.Source, StringComparison.Ordinal) &&
+                   Nullable.Equals(candidate.ConfidenceScore, last.ConfidenceScore) &&
                    string.Equals(candidate.PatchType, last.PatchType, StringComparison.Ordinal) &&
                    string.Equals(candidate.TaskType, last.TaskType, StringComparison.Ordinal) &&
                    candidate.ContextSize == last.ContextSize &&
