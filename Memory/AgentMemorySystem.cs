@@ -349,11 +349,10 @@ namespace LocalCursorAgent.Memory
 
         public int InvalidateByProjectScope(string projectScope)
         {
-            if (string.IsNullOrWhiteSpace(projectScope))
-                return 0;
+            var normalizedScope = MemoryProjectScopeResolver.NormalizeScope(projectScope);
 
-            var removedFailures = _failureRecords.RemoveAll(r => string.Equals(r.ProjectScope, projectScope, StringComparison.Ordinal));
-            var removedSuccesses = _successRecords.RemoveAll(r => string.Equals(r.ProjectScope, projectScope, StringComparison.Ordinal));
+            var removedFailures = _failureRecords.RemoveAll(r => string.Equals(MemoryProjectScopeResolver.NormalizeScope(r.ProjectScope), normalizedScope, StringComparison.Ordinal));
+            var removedSuccesses = _successRecords.RemoveAll(r => string.Equals(MemoryProjectScopeResolver.NormalizeScope(r.ProjectScope), normalizedScope, StringComparison.Ordinal));
             return removedFailures + removedSuccesses;
         }
 

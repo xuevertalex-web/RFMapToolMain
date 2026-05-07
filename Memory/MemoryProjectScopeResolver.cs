@@ -8,5 +8,10 @@ namespace LocalCursorAgent.Memory
         {
             return string.IsNullOrWhiteSpace(query) ? DefaultScope : DefaultScope;
         }
+
+        public static string NormalizeScope(string? projectScope)
+        {
+            return string.IsNullOrWhiteSpace(projectScope) ? DefaultScope : projectScope.Trim();
+        }
     }
 }
