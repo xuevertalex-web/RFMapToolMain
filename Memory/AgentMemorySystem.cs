@@ -67,8 +67,9 @@ namespace LocalCursorAgent.Memory
             double querySimilarity = (double)matchingTokens / Math.Max(record.Query.Split().Length, query.Split().Length);
             
             double ageFactor = CalculateDecayFactor(record.Timestamp);
-            
-            return baseScore * querySimilarity * ageFactor * _scoringWeights.FailureRelevanceWeight;
+            var confidenceWeight = MemoryConfidenceWeightResolver.Resolve(record.ConfidenceScore);
+
+            return baseScore * querySimilarity * ageFactor * confidenceWeight * _scoringWeights.FailureRelevanceWeight;
         }
 
         #endregion
@@ -113,8 +114,9 @@ namespace LocalCursorAgent.Memory
             int matchingTokens = CountMatchingTokens(record.Query, query);
             double querySimilarity = (double)matchingTokens / Math.Max(record.Query.Split().Length, query.Split().Length);
             double ageFactor = CalculateDecayFactor(record.Timestamp);
-            
-            return querySimilarity * ageFactor * _scoringWeights.SuccessRelevanceWeight;
+            var confidenceWeight = MemoryConfidenceWeightResolver.Resolve(record.ConfidenceScore);
+
+            return querySimilarity * ageFactor * confidenceWeight * _scoringWeights.SuccessRelevanceWeight;
         }
 
         #endregion
