@@ -45,8 +45,10 @@ namespace LocalCursorAgent.Memory
         public IEnumerable<FailureRecord> GetRelevantFailures(string query, int maxResults = 5)
         {
             ApplyDecay();
+            var projectScope = MemoryProjectScopeResolver.Resolve(query);
 
             var scored = _failureRecords
+                .Where(f => string.Equals(f.ProjectScope ?? "default", projectScope, StringComparison.Ordinal))
                 .Select(f => new { Record = f, Score = CalculateFailureRelevance(f, query) })
                 .Where(x => x.Score > 0.1)
                 .OrderByDescending(x => x.Score)
@@ -93,8 +95,10 @@ namespace LocalCursorAgent.Memory
         public IEnumerable<SuccessRecord> GetRelevantSuccesses(string query, int maxResults = 5)
         {
             ApplyDecay();
+            var projectScope = MemoryProjectScopeResolver.Resolve(query);
 
             var scored = _successRecords
+                .Where(s => string.Equals(s.ProjectScope ?? "default", projectScope, StringComparison.Ordinal))
                 .Select(s => new { Record = s, Score = CalculateSuccessRelevance(s, query) })
                 .Where(x => x.Score > 0.1)
                 .OrderByDescending(x => x.Score)
