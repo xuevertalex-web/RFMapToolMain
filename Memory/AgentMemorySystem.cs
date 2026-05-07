@@ -502,7 +502,7 @@ namespace LocalCursorAgent.Memory
             HighRelevanceWindow = TimeSpan.FromHours(2),
             MediumRelevanceWindow = TimeSpan.FromDays(1),
             LowRelevanceWindow = TimeSpan.FromDays(7),
-            ProfileDecayRate = 0.01
+            ProfileDecayRate = MemoryGovernanceDefaults.ProfileDecayRate
         };
 
         public TimeSpan MaximumRecordAge { get; init; }
