@@ -31,3 +31,9 @@ One-step create + report + verify:
 ```powershell
 .\scripts\Create-Report-Verify-SourceSnapshot.ps1
 ```
+
+List generated source snapshots:
+
+```powershell
+.\scripts\List-SourceSnapshots.ps1
+```
