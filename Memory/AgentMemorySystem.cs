@@ -49,13 +49,20 @@ namespace LocalCursorAgent.Memory
 
         public IEnumerable<FailureRecord> GetRelevantFailures(string query, string? projectScope, int maxResults = 5)
         {
+            return GetRelevantFailures(query, projectScope, source: null, maxResults);
+        }
+
+        public IEnumerable<FailureRecord> GetRelevantFailures(string query, string? projectScope, string? source, int maxResults = 5)
+        {
             ApplyDecay();
             var effectiveScope = projectScope is null
                 ? MemoryProjectScopeResolver.Resolve(query)
                 : MemoryProjectScopeResolver.NormalizeScope(projectScope);
+            var effectiveSource = string.IsNullOrWhiteSpace(source) ? null : source.Trim();
 
             var scored = _failureRecords
                 .Where(f => MemoryProjectScopeResolver.IsSameScope(f.ProjectScope, effectiveScope))
+                .Where(f => effectiveSource is null || string.Equals(f.Source, effectiveSource, StringComparison.Ordinal))
                 .Select(f => new { Record = f, Score = CalculateFailureRelevance(f, query) })
                 .Where(x => x.Score > MemoryGovernanceDefaults.RelevanceScoreThreshold)
                 .OrderByDescending(x => x.Score)
@@ -107,13 +114,20 @@ namespace LocalCursorAgent.Memory
 
         public IEnumerable<SuccessRecord> GetRelevantSuccesses(string query, string? projectScope, int maxResults = 5)
         {
+            return GetRelevantSuccesses(query, projectScope, source: null, maxResults);
+        }
+
+        public IEnumerable<SuccessRecord> GetRelevantSuccesses(string query, string? projectScope, string? source, int maxResults = 5)
+        {
             ApplyDecay();
             var effectiveScope = projectScope is null
                 ? MemoryProjectScopeResolver.Resolve(query)
                 : MemoryProjectScopeResolver.NormalizeScope(projectScope);
+            var effectiveSource = string.IsNullOrWhiteSpace(source) ? null : source.Trim();
 
             var scored = _successRecords
                 .Where(s => MemoryProjectScopeResolver.IsSameScope(s.ProjectScope, effectiveScope))
+                .Where(s => effectiveSource is null || string.Equals(s.Source, effectiveSource, StringComparison.Ordinal))
                 .Select(s => new { Record = s, Score = CalculateSuccessRelevance(s, query) })
                 .Where(x => x.Score > MemoryGovernanceDefaults.RelevanceScoreThreshold)
                 .OrderByDescending(x => x.Score)

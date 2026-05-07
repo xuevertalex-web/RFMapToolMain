@@ -53,6 +53,7 @@ RunMemoryProjectScopeResolverRegression();
 RunMemoryGovernanceRecalibrationRegression();
 RunMemoryScopedRetrievalRegression();
 RunMemoryFactoryAndInvalidationHookRegression();
+RunMemorySourceScopedRetrievalRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1749,6 +1750,38 @@ static void RunMemoryFactoryAndInvalidationHookRegression()
     AssertTrue(remaining.Count == 0, "Expected low-confidence failure record to be pruned.");
 
     Console.WriteLine("PASS MemoryFactoryAndInvalidationHook");
+}
+
+static void RunMemorySourceScopedRetrievalRegression()
+{
+    var memory = new AgentMemorySystem();
+
+    memory.RecordFailure(MemoryRecordFactory.CreateFailure(
+        query: "scope:agent-core fix source scope test",
+        failureType: FailureType.CompilationError,
+        severity: FailureSeverity.High,
+        projectScope: "agent-core",
+        source: "source-a",
+        confidenceScore: 0.8));
+
+    memory.RecordFailure(MemoryRecordFactory.CreateFailure(
+        query: "scope:agent-core fix source scope test",
+        failureType: FailureType.CompilationError,
+        severity: FailureSeverity.High,
+        projectScope: "agent-core",
+        source: "source-b",
+        confidenceScore: 0.8));
+
+    var fromA = memory.GetRelevantFailures("scope:agent-core fix source scope test", "agent-core", "source-a", 10).ToList();
+    var fromB = memory.GetRelevantFailures("scope:agent-core fix source scope test", "agent-core", "source-b", 10).ToList();
+
+    AssertTrue(fromA.Count == 1 && string.Equals(fromA[0].Source, "source-a", StringComparison.Ordinal), "Expected source-a scoped retrieval.");
+    AssertTrue(fromB.Count == 1 && string.Equals(fromB[0].Source, "source-b", StringComparison.Ordinal), "Expected source-b scoped retrieval.");
+
+    var pruned = MemoryScopePruneHelper.PruneStaleScopeRecords(memory, "agent-core");
+    AssertTrue(pruned == 0, "Expected prune helper to keep high-confidence records.");
+
+    Console.WriteLine("PASS MemorySourceScopedRetrieval");
 }
 
 
