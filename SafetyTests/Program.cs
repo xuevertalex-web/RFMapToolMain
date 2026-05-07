@@ -54,6 +54,7 @@ RunMemoryGovernanceRecalibrationRegression();
 RunMemoryScopedRetrievalRegression();
 RunMemoryFactoryAndInvalidationHookRegression();
 RunMemorySourceScopedRetrievalRegression();
+RunMemorySourceInvalidationRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1782,6 +1783,35 @@ static void RunMemorySourceScopedRetrievalRegression()
     AssertTrue(pruned == 0, "Expected prune helper to keep high-confidence records.");
 
     Console.WriteLine("PASS MemorySourceScopedRetrieval");
+}
+
+static void RunMemorySourceInvalidationRegression()
+{
+    var memory = new AgentMemorySystem();
+
+    memory.RecordFailure(MemoryRecordFactory.CreateFailure(
+        query: "scope:agent-core source invalidation test",
+        failureType: FailureType.CompilationError,
+        severity: FailureSeverity.High,
+        projectScope: "agent-core",
+        source: "source-a",
+        confidenceScore: 0.8));
+
+    memory.RecordFailure(MemoryRecordFactory.CreateFailure(
+        query: "scope:agent-core source invalidation test",
+        failureType: FailureType.CompilationError,
+        severity: FailureSeverity.High,
+        projectScope: "agent-core",
+        source: "source-b",
+        confidenceScore: 0.8));
+
+    var removed = memory.InvalidateBySource("source-a");
+    AssertTrue(removed == 1, "Expected invalidation by source to remove only source-a record.");
+
+    var remainingB = memory.GetRelevantFailures("scope:agent-core source invalidation test", "agent-core", "source-b", 10).ToList();
+    AssertTrue(remainingB.Count == 1, "Expected source-b record to remain after source-a invalidation.");
+
+    Console.WriteLine("PASS MemorySourceInvalidation");
 }
 
 

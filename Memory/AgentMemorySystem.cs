@@ -419,6 +419,17 @@ namespace LocalCursorAgent.Memory
             return InvalidateLowConfidenceRecords(projectScope, MemoryGovernanceDefaults.LowConfidenceInvalidationThreshold);
         }
 
+        public int InvalidateBySource(string source)
+        {
+            if (string.IsNullOrWhiteSpace(source))
+                return 0;
+
+            var normalized = source.Trim();
+            var removedFailures = _failureRecords.RemoveAll(r => string.Equals(r.Source, normalized, StringComparison.Ordinal));
+            var removedSuccesses = _successRecords.RemoveAll(r => string.Equals(r.Source, normalized, StringComparison.Ordinal));
+            return removedFailures + removedSuccesses;
+        }
+
         public int RecalibrateConfidenceByProjectScope(string projectScope, bool success)
         {
             var normalizedScope = MemoryProjectScopeResolver.NormalizeScope(projectScope);
