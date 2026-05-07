@@ -50,7 +50,7 @@ namespace LocalCursorAgent.Memory
             var scored = _failureRecords
                 .Where(f => MemoryProjectScopeResolver.IsSameScope(f.ProjectScope, projectScope))
                 .Select(f => new { Record = f, Score = CalculateFailureRelevance(f, query) })
-                .Where(x => x.Score > 0.1)
+                .Where(x => x.Score > MemoryGovernanceDefaults.RelevanceScoreThreshold)
                 .OrderByDescending(x => x.Score)
                 .Take(maxResults)
                 .Select(x => x.Record);
@@ -101,7 +101,7 @@ namespace LocalCursorAgent.Memory
             var scored = _successRecords
                 .Where(s => MemoryProjectScopeResolver.IsSameScope(s.ProjectScope, projectScope))
                 .Select(s => new { Record = s, Score = CalculateSuccessRelevance(s, query) })
-                .Where(x => x.Score > 0.1)
+                .Where(x => x.Score > MemoryGovernanceDefaults.RelevanceScoreThreshold)
                 .OrderByDescending(x => x.Score)
                 .Take(maxResults)
                 .Select(x => x.Record);
