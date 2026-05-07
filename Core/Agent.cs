@@ -231,54 +231,13 @@ namespace LocalCursorAgent.Core
                         ? AnalysisContextFormatter.BuildCompactAnalysisContext(contextInfo)
                         : _contextBuilder.FormatContext(contextInfo);
 
-                    // Build prompt with context
-                    var regressionAdvice = _regressionAdvisor?.BuildAdvice(task) ?? RegressionAdvice.Empty;
-                    if (regressionAdvice.HasAdvice)
-                    {
-                        tracer.LogActionEvent("RegressionAdvice", "Agent", ExecutionTracer.ActionLogLevel.Info, "selected", metadata: new Dictionary<string, object?>
-                        {
-                            { "record_count", regressionAdvice.Records.Count },
-                            { "outcome_classes", regressionAdvice.Records.Select(x => x.OutcomeClass).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() },
-                            { "prompt_shaping", regressionAdvice.PromptShapingText },
-                            { "strategy_bias", regressionAdvice.StrategyBiasText }
-                        });
-                    }
-
-                    var promptKind = analysisOnlyTask ? "BuildAnalysisPromptWithContext" : "BuildPromptWithContext";
-                    var prompt = analysisOnlyTask
-                        ? AnalysisPromptBuilder.BuildAnalysisPromptWithContext(task, iteration, currentResponse, contextString, ResponseLanguageHelper.BuildResponseLanguageRule(task))
-                        : BuildPromptWithContext(task, iteration, currentResponse, contextString, regressionAdvice.Text, regressionAdvice.PromptShapingText, regressionAdvice.StrategyBiasText);
-                    _memory.Add("prompt_sent", prompt.Length > 100 ? prompt.Substring(0, 100) + "..." : prompt);
-
-                    // Call LLM
-                    tracer.LogActionEvent("ModelCallStarted", "Agent", ExecutionTracer.ActionLogLevel.Info, "started", metadata: new Dictionary<string, object?>
-                    {
-                        { "operation_kind", "task_iteration" },
-                        { "prompt_kind", promptKind },
-                        { "iteration", iteration }
-                    });
-                    tracer.LogActionEvent("ModelRequest", "Agent", ExecutionTracer.ActionLogLevel.Info, "started", metadata: new Dictionary<string, object?>
-                    {
-                        { "operation_kind", "task_iteration" },
-                        { "prompt_kind", promptKind },
-                        { "prompt_preview", prompt.Length > 200 ? prompt[..200] : prompt },
-                        { "iteration", iteration }
-                    });
-                    var modelStart = DateTime.UtcNow;
+                    var (promptKind, prompt) = BuildIterationPrompt(task, analysisOnlyTask, iteration, currentResponse, contextString, tracer);
                     modelCallStarted = true;
-                    var runtimeResult = runtimeClient is null
-                        ? null
-                        : await runtimeClient.GenerateNormalized(prompt, CancellationToken.None);
-                    currentResponse = runtimeResult?.Completion ?? await _llmClient.Generate(prompt, CancellationToken.None);
-                    tracer.LogActionEvent("ModelRequest", "Agent", ExecutionTracer.ActionLogLevel.Info, "completed", metadata: new Dictionary<string, object?>
-                    {
-                        { "operation_kind", "task_iteration" },
-                        { "response_preview", currentResponse.Length > 200 ? currentResponse[..200] : currentResponse },
-                        { "iteration", iteration }
-                    }, durationMs: (long)(DateTime.UtcNow - modelStart).TotalMilliseconds);
+                    var modelRequest = await ExecuteModelRequestAsync(prompt, promptKind, iteration, runtimeClient, tracer);
+                    var runtimeResult = modelRequest.RuntimeResult;
+                    currentResponse = modelRequest.Response;
                     lastSuccessfulStep = "ModelRequestCompleted";
                     lastKnownAction = "Model response received";
-                    _memory.Add("llm_response", currentResponse.Length > 100 ? currentResponse.Substring(0, 100) + "..." : currentResponse);
 
                     var isHardFailure = runtimeResult?.IsFailure ?? LlmFailureDetector.IsHardLlmFailureResponse(currentResponse);
                     if (isHardFailure &&
