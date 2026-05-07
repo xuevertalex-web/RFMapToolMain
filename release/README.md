@@ -13,3 +13,9 @@ Validate snapshot contents:
 ```powershell
 .\scripts\Verify-SourceSnapshot.ps1 -ArchivePath .\release\LocalCursorAgent-source-YYYYMMDD-HHMMSS.zip
 ```
+
+One-step create + verify:
+
+```powershell
+.\scripts\Create-AndVerify-SourceSnapshot.ps1
+```
