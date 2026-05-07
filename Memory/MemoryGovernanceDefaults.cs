@@ -2,6 +2,7 @@ namespace LocalCursorAgent.Memory
 {
     internal static class MemoryGovernanceDefaults
     {
+        public const string DefaultMemorySource = "local-agent";
         public const string DefaultProjectScope = "default";
         public const double ProfileDecayRate = 0.01;
         public const int MaxFailureRecords = 500;
