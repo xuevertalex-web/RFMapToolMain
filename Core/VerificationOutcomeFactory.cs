@@ -9,16 +9,26 @@ namespace LocalCursorAgent.Core
             string? failureReasonCode,
             string fallbackReasonCode)
         {
-            var status = VerificationOutcomeBuilder.BuildStatus(buildStarted, buildSucceeded);
-            var resolvedFailedStage = VerificationOutcomeFailedStageResolver.Resolve(failedStage);
-            var resolvedReasonCode = VerificationOutcomeReasonCodeResolver.Resolve(failureReasonCode, fallbackReasonCode);
+            return new VerificationOutcomePayload
+            {
+                Status = BuildStatus(buildStarted, buildSucceeded).ToString(),
+                BuildStarted = buildStarted,
+                BuildSucceeded = buildSucceeded,
+                FailedStage = failedStage ?? string.Empty,
+                ReasonCode = failureReasonCode ?? fallbackReasonCode
+            };
+        }
 
-            return VerificationOutcomePayloadBuilder.Build(
-                status,
-                buildStarted,
-                buildSucceeded,
-                resolvedFailedStage,
-                resolvedReasonCode);
+        private static VerificationOutcomeStatus BuildStatus(bool buildStarted, bool buildSucceeded)
+        {
+            if (!buildStarted)
+            {
+                return VerificationOutcomeStatus.NotStarted;
+            }
+
+            return buildSucceeded
+                ? VerificationOutcomeStatus.Succeeded
+                : VerificationOutcomeStatus.Failed;
         }
     }
 }

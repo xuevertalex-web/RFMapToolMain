@@ -541,7 +541,7 @@ namespace LocalCursorAgent.Core
                                         var patchDecision = PatchDecisionBuilder.BuildPatchDecision(filePath, call.Input, resolvedFiles);
                                         _contextBuilder.Tracer.LogPatchDecision(patchDecision);
                                         changedHints[filePath] = ChangedHintComposer.BuildChangedHint(filePath, call.Input, patchDecision);
-                                        var changedRange = BuildChangedRange(filePath, call.Input, patchDecision, _projectIndexer.SymbolDirectory);
+                                        var changedRange = ChangedRangeResolver.BuildChangedRange(filePath, call.Input, patchDecision, _projectIndexer.SymbolDirectory);
                                         if (changedRange != null)
                                         {
                                             changedRanges[filePath] = changedRange;
@@ -834,11 +834,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
             return true;
         }
 
-        private static string? ExtractRequestedNewFilePath(string task)
-        {
-            return AgentSymbolRangeSupport.ExtractRequestedNewFilePath(task);
-        }
-
         private string FinalizeRunResult(
             bool ok,
             string message,
@@ -895,6 +890,11 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 _contextBuilder.Tracer.GetActionLedger());
         }
 
+        private static string? ExtractRequestedNewFilePath(string task)
+        {
+            return NewFilePathExtractor.ExtractRequestedNewFilePath(task);
+        }
+
         private string FinalizeStructuredDiagnosticResult(string reasonCode, StructuredDiagnostic diagnostic, IEnumerable<string> changedFiles, IEnumerable<ChangedHint> changedHints, IEnumerable<ChangedRange> changedRanges, IEnumerable<ChangedKind> changedKinds)
         {
             _contextBuilder.Tracer.MarkStopPoint("Agent", reasonCode, diagnostic.WhyDenied, Array.Empty<string>());
@@ -925,84 +925,6 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 approvalRequiredActions: Array.Empty<ActionApprovalProposal>(),
                 tracerDeniedActions: 0,
                 actionLifecycleEntries: Array.Empty<ActionLifecycleEntry>());
-        }
-
-        private static ChangedRange? BuildChangedRange(string filePath, string toolInput, ExecutionTracer.PatchDecision patchDecision, ProjectSymbolDirectory? symbolDirectory)
-        {
-            var lines = AgentSymbolRangeSupport.TryReadAllLines(filePath);
-            if (lines is null)
-            {
-                return null;
-            }
-
-            var candidates = AgentSymbolRangeSupport.BuildChangedRangeCandidates(filePath, toolInput, patchDecision.TargetMethod);
-
-            var indexedSymbols = AgentSymbolRangeSupport.GetIndexedSymbolsOrEmpty(symbolDirectory, filePath);
-
-            var uniqueCandidates = AgentSymbolRangeSupport.DistinctIgnoreCase(candidates);
-            foreach (var candidate in uniqueCandidates)
-            {
-                var symbolRange = FindBestSymbolRangeForFile(lines, indexedSymbols, candidate);
-                if (!symbolRange.HasValue)
-                {
-                    continue;
-                }
-
-                var (startLine, endLine) = symbolRange.Value;
-                var changedRangeData = AgentSymbolRangeSupport.CreateChangedRangeData(filePath, startLine, endLine);
-                return new ChangedRange { File = changedRangeData.filePath, StartLine = changedRangeData.startLine, EndLine = changedRangeData.endLine };
-            }
-
-            foreach (var candidate in uniqueCandidates)
-            {
-                var lineIndex = AgentSymbolRangeSupport.FindMatchingLine(lines, candidate);
-                if (lineIndex >= 0)
-                {
-                    var enclosingRange = AgentSymbolRangeSupport.FindNearestEnclosingSymbolRange(lines, lineIndex);
-                    if (enclosingRange is not null)
-                    {
-                        var enclosingRangeData = AgentSymbolRangeSupport.CreateChangedRangeData(filePath, enclosingRange.Value.startLine, enclosingRange.Value.endLine);
-                        return new ChangedRange { File = enclosingRangeData.filePath, StartLine = enclosingRangeData.startLine, EndLine = enclosingRangeData.endLine };
-                    }
-
-                    var startLine = AgentSymbolRangeSupport.ToOneBasedLineNumber(lineIndex);
-                    var singleLineRangeData = AgentSymbolRangeSupport.CreateChangedRangeData(filePath, startLine, startLine);
-                    return new ChangedRange { File = singleLineRangeData.filePath, StartLine = singleLineRangeData.startLine, EndLine = singleLineRangeData.endLine };
-                }
-            }
-
-            return null;
-        }
-
-        private static (int startLine, int endLine)? FindBestSymbolRangeForFile(string[] lines, List<string> indexedSymbols, string candidate)
-        {
-            if (string.IsNullOrWhiteSpace(candidate) || lines.Length is 0)
-                return null;
-
-            var searchOrder = AgentSymbolRangeSupport.BuildSearchOrder(indexedSymbols, candidate);
-
-            foreach (var symbol in searchOrder)
-            {
-                var symbolLine = AgentSymbolRangeSupport.FindSymbolDeclarationLine(lines, symbol);
-                if (symbolLine is < 0) continue;
-
-                var methodStart = AgentSymbolRangeSupport.FindNearestDeclarationStart(lines, anchorLineIndex: symbolLine, declarationKind: "method");
-                if (methodStart is >= 0)
-                {
-                    return AgentSymbolRangeSupport.BuildBlockRangeFromDeclaration(lines, methodStart);
-                }
-
-                var classStart = AgentSymbolRangeSupport.FindNearestDeclarationStart(lines, anchorLineIndex: symbolLine, declarationKind: "class");
-                if (classStart is >= 0)
-                {
-                    return AgentSymbolRangeSupport.BuildBlockRangeFromDeclaration(lines, classStart);
-                }
-
-                var startLine = AgentSymbolRangeSupport.ToOneBasedLineNumber(symbolLine);
-                return (startLine, startLine);
-            }
-
-            return null;
         }
 
         private string BuildPromptWithContext(string task, int iteration, string previousResponse, string codeContext, string regressionAdvice, string promptShapingAdvice, string strategyBiasAdvice)
