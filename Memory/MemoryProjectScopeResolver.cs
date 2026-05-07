@@ -2,7 +2,7 @@ namespace LocalCursorAgent.Memory
 {
     internal static class MemoryProjectScopeResolver
     {
-        private const string DefaultScope = "default";
+        private const string DefaultScope = MemoryGovernanceDefaults.DefaultProjectScope;
 
         public static string Resolve(string query)
         {

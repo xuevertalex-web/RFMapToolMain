@@ -5,7 +5,7 @@ namespace LocalCursorAgent.Memory
     internal static class MemoryRecordProvenance
     {
         private const string DefaultSource = "local-agent";
-        private const string DefaultProjectScope = "default";
+        private const string DefaultProjectScope = MemoryGovernanceDefaults.DefaultProjectScope;
 
         public static void Ensure(FailureRecord record)
         {
