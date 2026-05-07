@@ -48,7 +48,7 @@ namespace LocalCursorAgent.Memory
             var projectScope = MemoryProjectScopeResolver.Resolve(query);
 
             var scored = _failureRecords
-                .Where(f => string.Equals(f.ProjectScope ?? "default", projectScope, StringComparison.Ordinal))
+                .Where(f => MemoryProjectScopeResolver.IsSameScope(f.ProjectScope, projectScope))
                 .Select(f => new { Record = f, Score = CalculateFailureRelevance(f, query) })
                 .Where(x => x.Score > 0.1)
                 .OrderByDescending(x => x.Score)
@@ -98,7 +98,7 @@ namespace LocalCursorAgent.Memory
             var projectScope = MemoryProjectScopeResolver.Resolve(query);
 
             var scored = _successRecords
-                .Where(s => string.Equals(s.ProjectScope ?? "default", projectScope, StringComparison.Ordinal))
+                .Where(s => MemoryProjectScopeResolver.IsSameScope(s.ProjectScope, projectScope))
                 .Select(s => new { Record = s, Score = CalculateSuccessRelevance(s, query) })
                 .Where(x => x.Score > 0.1)
                 .OrderByDescending(x => x.Score)
@@ -351,8 +351,8 @@ namespace LocalCursorAgent.Memory
         {
             var normalizedScope = MemoryProjectScopeResolver.NormalizeScope(projectScope);
 
-            var removedFailures = _failureRecords.RemoveAll(r => string.Equals(MemoryProjectScopeResolver.NormalizeScope(r.ProjectScope), normalizedScope, StringComparison.Ordinal));
-            var removedSuccesses = _successRecords.RemoveAll(r => string.Equals(MemoryProjectScopeResolver.NormalizeScope(r.ProjectScope), normalizedScope, StringComparison.Ordinal));
+            var removedFailures = _failureRecords.RemoveAll(r => MemoryProjectScopeResolver.IsSameScope(r.ProjectScope, normalizedScope));
+            var removedSuccesses = _successRecords.RemoveAll(r => MemoryProjectScopeResolver.IsSameScope(r.ProjectScope, normalizedScope));
             return removedFailures + removedSuccesses;
         }
 

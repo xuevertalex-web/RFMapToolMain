@@ -13,5 +13,10 @@ namespace LocalCursorAgent.Memory
         {
             return string.IsNullOrWhiteSpace(projectScope) ? DefaultScope : projectScope.Trim();
         }
+
+        public static bool IsSameScope(string? left, string? right)
+        {
+            return string.Equals(NormalizeScope(left), NormalizeScope(right), System.StringComparison.Ordinal);
+        }
     }
 }
