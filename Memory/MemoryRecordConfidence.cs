@@ -13,12 +13,16 @@ namespace LocalCursorAgent.Memory
                     FailureSeverity.Critical => 0.9,
                     _ => 0.4
                 };
+            else
+                record.ConfidenceScore = MemoryConfidenceNormalizer.Normalize(record.ConfidenceScore.Value);
         }
 
         public static void Ensure(SuccessRecord record)
         {
             if (record.ConfidenceScore is null)
                 record.ConfidenceScore = 0.7;
+            else
+                record.ConfidenceScore = MemoryConfidenceNormalizer.Normalize(record.ConfidenceScore.Value);
         }
     }
 }

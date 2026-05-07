@@ -7,9 +7,7 @@ namespace LocalCursorAgent.Memory
             if (!confidenceScore.HasValue)
                 return 1.0;
 
-            var value = confidenceScore.Value;
-            if (value < 0) value = 0;
-            if (value > 1) value = 1;
+            var value = MemoryConfidenceNormalizer.Normalize(confidenceScore.Value);
             return 0.5 + (value * 0.5);
         }
     }
