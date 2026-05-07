@@ -1,0 +1,16 @@
+.gitignore export-ignore
+.gitattributes export-ignore
+
+.agent-runtime/ export-ignore
+agent-runtime/ export-ignore
+.vs/ export-ignore
+bin/ export-ignore
+obj/ export-ignore
+TestResults/ export-ignore
+coverage/ export-ignore
+
+*.log export-ignore
+*.tmp export-ignore
+*.cache export-ignore
+*.trx export-ignore
+*.vsix export-ignore
