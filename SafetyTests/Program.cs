@@ -55,6 +55,7 @@ RunMemoryScopedRetrievalRegression();
 RunMemoryFactoryAndInvalidationHookRegression();
 RunMemorySourceScopedRetrievalRegression();
 RunMemorySourceInvalidationRegression();
+RunMemoryScopeSourceInvalidationRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1812,6 +1813,44 @@ static void RunMemorySourceInvalidationRegression()
     AssertTrue(remainingB.Count == 1, "Expected source-b record to remain after source-a invalidation.");
 
     Console.WriteLine("PASS MemorySourceInvalidation");
+}
+
+static void RunMemoryScopeSourceInvalidationRegression()
+{
+    var memory = new AgentMemorySystem();
+
+    memory.RecordFailure(MemoryRecordFactory.CreateFailure(
+        query: "scope alpha test",
+        failureType: FailureType.CompilationError,
+        severity: FailureSeverity.Medium,
+        projectScope: "alpha",
+        source: "s1",
+        confidenceScore: 0.6));
+
+    memory.RecordFailure(MemoryRecordFactory.CreateFailure(
+        query: "scope beta test",
+        failureType: FailureType.CompilationError,
+        severity: FailureSeverity.Medium,
+        projectScope: "beta",
+        source: "s1",
+        confidenceScore: 0.6));
+
+    memory.RecordSuccess(MemoryRecordFactory.CreateSuccess(
+        query: "scope alpha success",
+        projectScope: "alpha",
+        source: "s1",
+        confidenceScore: 0.6));
+
+    var recalibrated = memory.RecalibrateConfidenceBySource("s1", success: false);
+    AssertTrue(recalibrated == 3, "Expected source recalibration to update all source records.");
+
+    var removed = memory.InvalidateByScopeAndSource("alpha", "s1");
+    AssertTrue(removed == 2, "Expected scope+source invalidation to remove only alpha+s1 records.");
+
+    var betaRemaining = memory.GetRelevantFailures("scope beta test", "beta", "s1", 10).ToList();
+    AssertTrue(betaRemaining.Count == 1, "Expected beta+s1 record to remain.");
+
+    Console.WriteLine("PASS MemoryScopeSourceInvalidation");
 }
 
 

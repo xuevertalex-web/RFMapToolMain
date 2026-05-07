@@ -430,6 +430,25 @@ namespace LocalCursorAgent.Memory
             return removedFailures + removedSuccesses;
         }
 
+        public int InvalidateByScopeAndSource(string projectScope, string source)
+        {
+            if (string.IsNullOrWhiteSpace(source))
+                return 0;
+
+            var normalizedScope = MemoryProjectScopeResolver.NormalizeScope(projectScope);
+            var normalizedSource = source.Trim();
+
+            var removedFailures = _failureRecords.RemoveAll(r =>
+                MemoryProjectScopeResolver.IsSameScope(r.ProjectScope, normalizedScope) &&
+                string.Equals(r.Source, normalizedSource, StringComparison.Ordinal));
+
+            var removedSuccesses = _successRecords.RemoveAll(r =>
+                MemoryProjectScopeResolver.IsSameScope(r.ProjectScope, normalizedScope) &&
+                string.Equals(r.Source, normalizedSource, StringComparison.Ordinal));
+
+            return removedFailures + removedSuccesses;
+        }
+
         public int RecalibrateConfidenceByProjectScope(string projectScope, bool success)
         {
             var normalizedScope = MemoryProjectScopeResolver.NormalizeScope(projectScope);
@@ -442,6 +461,29 @@ namespace LocalCursorAgent.Memory
             }
 
             foreach (var successRecord in _successRecords.Where(r => MemoryProjectScopeResolver.IsSameScope(r.ProjectScope, normalizedScope)))
+            {
+                successRecord.ConfidenceScore = MemoryConfidenceRecalibrator.Recalibrate(successRecord.ConfidenceScore ?? 0, success);
+                updated++;
+            }
+
+            return updated;
+        }
+
+        public int RecalibrateConfidenceBySource(string source, bool success)
+        {
+            if (string.IsNullOrWhiteSpace(source))
+                return 0;
+
+            var normalized = source.Trim();
+            var updated = 0;
+
+            foreach (var failure in _failureRecords.Where(r => string.Equals(r.Source, normalized, StringComparison.Ordinal)))
+            {
+                failure.ConfidenceScore = MemoryConfidenceRecalibrator.Recalibrate(failure.ConfidenceScore ?? 0, success);
+                updated++;
+            }
+
+            foreach (var successRecord in _successRecords.Where(r => string.Equals(r.Source, normalized, StringComparison.Ordinal)))
             {
                 successRecord.ConfidenceScore = MemoryConfidenceRecalibrator.Recalibrate(successRecord.ConfidenceScore ?? 0, success);
                 updated++;
