@@ -347,6 +347,16 @@ namespace LocalCursorAgent.Memory
             _taskProfiles.Clear();
         }
 
+        public int InvalidateByProjectScope(string projectScope)
+        {
+            if (string.IsNullOrWhiteSpace(projectScope))
+                return 0;
+
+            var removedFailures = _failureRecords.RemoveAll(r => string.Equals(r.ProjectScope, projectScope, StringComparison.Ordinal));
+            var removedSuccesses = _successRecords.RemoveAll(r => string.Equals(r.ProjectScope, projectScope, StringComparison.Ordinal));
+            return removedFailures + removedSuccesses;
+        }
+
         public int FailureCount => _failureRecords.Count;
         public int SuccessCount => _successRecords.Count;
         public int ProfileCount => _taskProfiles.Count;
