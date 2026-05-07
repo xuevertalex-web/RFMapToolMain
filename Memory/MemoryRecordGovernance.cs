@@ -6,9 +6,6 @@ namespace LocalCursorAgent.Memory
 {
     internal static class MemoryRecordGovernance
     {
-        private const int MaxFailureRecords = 500;
-        private const int MaxSuccessRecords = 500;
-
         public static bool IsConsecutiveDuplicate(FailureRecord candidate, FailureRecord? last)
         {
             if (last == null)
@@ -38,12 +35,12 @@ namespace LocalCursorAgent.Memory
 
         public static void TrimFailureRecords(List<FailureRecord> records)
         {
-            TrimToLimit(records, MaxFailureRecords);
+            TrimToLimit(records, MemoryGovernanceDefaults.MaxFailureRecords);
         }
 
         public static void TrimSuccessRecords(List<SuccessRecord> records)
         {
-            TrimToLimit(records, MaxSuccessRecords);
+            TrimToLimit(records, MemoryGovernanceDefaults.MaxSuccessRecords);
         }
 
         private static bool SameFiles(IReadOnlyList<string> a, IReadOnlyList<string> b)
