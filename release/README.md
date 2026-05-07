@@ -25,3 +25,9 @@ One-step create + verify:
 ```powershell
 .\scripts\Create-AndVerify-SourceSnapshot.ps1
 ```
+
+One-step create + report + verify:
+
+```powershell
+.\scripts\Create-Report-Verify-SourceSnapshot.ps1
+```
