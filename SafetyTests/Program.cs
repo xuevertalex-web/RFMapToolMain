@@ -52,6 +52,7 @@ RunExtractRequestedNewFilePath_RussianIntentRegression();
 RunMemoryProjectScopeResolverRegression();
 RunMemoryGovernanceRecalibrationRegression();
 RunMemoryScopedRetrievalRegression();
+RunMemoryFactoryAndInvalidationHookRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1720,6 +1721,34 @@ static void RunMemoryScopedRetrievalRegression()
     AssertTrue(removed == 0, "Expected default quality-floor invalidation to keep high-confidence records.");
 
     Console.WriteLine("PASS MemoryScopedRetrieval");
+}
+
+static void RunMemoryFactoryAndInvalidationHookRegression()
+{
+    var memory = new AgentMemorySystem();
+
+    memory.RecordFailure(MemoryRecordFactory.CreateFailure(
+        query: "scope:agent-core fail build",
+        failureType: FailureType.CompilationError,
+        severity: FailureSeverity.Medium,
+        reason: "BuildVerificationFailed",
+        projectScope: "agent-core",
+        source: "unit-test",
+        confidenceScore: 0.49));
+
+    memory.RecordSuccess(MemoryRecordFactory.CreateSuccess(
+        query: "scope:agent-core success patch",
+        projectScope: "agent-core",
+        source: "unit-test",
+        confidenceScore: 0.51));
+
+    var pruned = MemoryInvalidationHook.RecalibrateAndPruneOnFailure(memory, "agent-core");
+    AssertTrue(pruned >= 1, "Expected recalibrate+prune hook to remove low-confidence records.");
+
+    var remaining = memory.GetRelevantFailures("scope:agent-core fail build", "agent-core", 10).ToList();
+    AssertTrue(remaining.Count == 0, "Expected low-confidence failure record to be pruned.");
+
+    Console.WriteLine("PASS MemoryFactoryAndInvalidationHook");
 }
 
 
