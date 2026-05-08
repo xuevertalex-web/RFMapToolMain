@@ -11,6 +11,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="Program.ArgumentParsing.cs" />
     <Compile Include="Program.Models.cs" />
     <Compile Include="Program.PathParsingHelpers.cs" />
     <Compile Include="Program.WorkspaceHelpers.cs" />
