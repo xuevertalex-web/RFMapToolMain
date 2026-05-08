@@ -37,39 +37,21 @@ namespace LocalCursorAgent.Core
             var continuation = ContinuationPayloadBuilder.Build(effectiveReasonCode, failure);
             var runtimeTuning = RuntimeTuningPayloadBuilder.Build(provider, model);
             var actionCounters = ActionOutcomeCountersBuilder.Build(approvalRequiredActions, tracerDeniedActions, actionLifecycleEntries);
-            var normalizedChangedArtifacts = ChangedArtifactPayloadBuilder.Normalize(changedFiles, changedHints, changedRanges, changedKinds);
-            var normalizedChangedHints = normalizedChangedArtifacts.Hints
-                .Select(h => new ChangedHintPayload
-                {
-                    File = h.File,
-                    Hint = h.Hint
-                })
-                .ToArray();
-            var normalizedChangedRanges = normalizedChangedArtifacts.Ranges
-                .Select(r => new ChangedRangePayload
-                {
-                    File = r.File,
-                    StartLine = r.StartLine,
-                    EndLine = r.EndLine > 0 ? r.EndLine : r.StartLine
-                })
-                .ToArray();
-            var normalizedChangedKinds = normalizedChangedArtifacts.Kinds
-                .Select(k => new ChangedKindPayload
-                {
-                    File = k.File,
-                    Kind = k.Kind
-                })
-                .ToArray();
+            var normalizedChangedPayload = NormalizeChangedPayload(
+                changedFiles,
+                changedHints,
+                changedRanges,
+                changedKinds);
 
             var payload = new AgentRunResultPayload
             {
                 Ok = ok,
                 Message = message,
                 Summary = summary,
-                ChangedFiles = normalizedChangedArtifacts.Files,
-                ChangedHints = normalizedChangedHints,
-                ChangedRanges = normalizedChangedRanges,
-                ChangedKinds = normalizedChangedKinds,
+                ChangedFiles = normalizedChangedPayload.Files,
+                ChangedHints = normalizedChangedPayload.Hints,
+                ChangedRanges = normalizedChangedPayload.Ranges,
+                ChangedKinds = normalizedChangedPayload.Kinds,
                 Workspace = workspace ?? string.Empty,
                 DurationMs = runStartedUtc.HasValue ? Math.Max(0, (long)(DateTime.UtcNow - runStartedUtc.Value).TotalMilliseconds) : null,
                 RuntimeElapsedMs = runStartedUtc.HasValue ? Math.Max(0, (long)(DateTime.UtcNow - runStartedUtc.Value).TotalMilliseconds) : null,
