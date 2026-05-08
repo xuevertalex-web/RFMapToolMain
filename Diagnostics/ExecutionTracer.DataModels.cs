@@ -270,15 +270,6 @@ namespace LocalCursorAgent.Diagnostics
             public List<string> Recommendations { get; set; } = new();
         }
 
-        public enum ActionLogLevel
-        {
-            Trace,
-            Debug,
-            Info,
-            Warning,
-            Error
-        }
-
         #endregion
     }
 }
