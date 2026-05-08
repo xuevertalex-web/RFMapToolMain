@@ -217,15 +217,6 @@ namespace LocalCursorAgent.Core
             public int NotApplicable { get; init; }
         }
 
-        private sealed class SessionContinuationPayload
-        {
-            [JsonPropertyName("lastSuccessfulStep")]
-            public string LastSuccessfulStep { get; init; } = string.Empty;
-
-            [JsonPropertyName("lastKnownAction")]
-            public string LastKnownAction { get; init; } = string.Empty;
-        }
-
         internal sealed class ApprovalRequiredActionPayload
         {
             [JsonPropertyName("actionType")]
@@ -304,52 +295,6 @@ namespace LocalCursorAgent.Core
             public bool IsInsideSandbox { get; init; }
         }
 
-        internal sealed class FailurePayload
-        {
-            public string RootCauseCode { get; init; } = string.Empty;
-            public string FailedStage { get; init; } = string.Empty;
-            public string LastSuccessfulStep { get; init; } = string.Empty;
-            public string FailedStep { get; init; } = string.Empty;
-            public string ReasonCode { get; init; } = string.Empty;
-            public string Explanation { get; init; } = string.Empty;
-            public string PipelineStoppedReason { get; init; } = string.Empty;
-            public string DownstreamNotStarted { get; init; } = string.Empty;
-            public string LoopStage { get; init; } = string.Empty;
-            public int MaxIterations { get; init; }
-            public int IterationsUsed { get; init; }
-            public string LastKnownAction { get; init; } = string.Empty;
-            public bool ModelCallStarted { get; init; }
-            public bool PatchStarted { get; init; }
-            public bool BuildStarted { get; init; }
-            public string BuildFailureCode { get; init; } = string.Empty;
-            public int? BuildExitCode { get; init; }
-            public bool? BuildTimedOut { get; init; }
-            public bool? BuildErrorMessageTruncated { get; init; }
-            public int? BuildErrorMessageLength { get; init; }
-            public TimelinePayload[] Timeline { get; init; } = Array.Empty<TimelinePayload>();
-        }
-
-        internal sealed class TimelinePayload
-        {
-            [JsonPropertyName("stage")]
-            public string Stage { get; init; } = string.Empty;
-
-            [JsonPropertyName("status")]
-            public string Status { get; init; } = string.Empty;
-
-            [JsonPropertyName("message")]
-            public string Message { get; init; } = string.Empty;
-        }
-
-        private sealed class ChangedHintPayload
-        {
-            [JsonPropertyName("file")]
-            public string File { get; init; } = string.Empty;
-
-            [JsonPropertyName("hint")]
-            public string Hint { get; init; } = string.Empty;
-        }
-
         internal sealed class ChangedHint
         {
             public string File { get; init; } = string.Empty;
@@ -363,30 +308,9 @@ namespace LocalCursorAgent.Core
             public int EndLine { get; init; }
         }
 
-        private sealed class ChangedRangePayload
-        {
-            [JsonPropertyName("file")]
-            public string File { get; init; } = string.Empty;
-
-            [JsonPropertyName("startLine")]
-            public int StartLine { get; init; }
-
-            [JsonPropertyName("endLine")]
-            public int EndLine { get; init; }
-        }
-
         internal sealed class ChangedKind
         {
             public string File { get; init; } = string.Empty;
-            public string Kind { get; init; } = string.Empty;
-        }
-
-        private sealed class ChangedKindPayload
-        {
-            [JsonPropertyName("file")]
-            public string File { get; init; } = string.Empty;
-
-            [JsonPropertyName("kind")]
             public string Kind { get; init; } = string.Empty;
         }
 
