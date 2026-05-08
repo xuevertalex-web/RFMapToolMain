@@ -119,11 +119,11 @@ namespace LocalCursorAgent.Core
                 var targetResolutionGate = new TargetResolutionGate(_projectIndexer, _contextBuilder.Tracer);
                 var targetResolution = await targetResolutionGate.ResolveAsync(task);
                 
-                // Если целевое разрешение не удалось - просто продолжаем без ограничений, агент сам решит куда писать
+                // If target resolution fails, continue without target constraints.
                 if (targetResolution.IsFailed)
                 {
                     _memory.Add("target_resolution_gate", $"SKIPPED:{targetResolution.ReasonCode}:{targetResolution.Reason}");
-                    // Оставляем targetResolution пустым, это нормально
+                    // Empty target resolution is acceptable for broad tasks.
                 }
 
                 var gatedTargetFiles = requestedNewFile is not null
@@ -188,48 +188,18 @@ namespace LocalCursorAgent.Core
                         { "max_iterations", MAX_ITERATIONS }
                     });
 
-                    var semanticTopK = analysisOnlyTask ? 8 : 25 + CONTEXT_EXPANSION_BUFFER;
-                    var candidateFiles = gatedTargetFiles ?? await _projectIndexer.FindRelevantFiles(task, semanticTopK);
-                    lastSuccessfulStep = "RelevantFilesResolved";
-                    lastKnownAction = $"Resolved {candidateFiles.Count} candidate files";
-
-                    if (candidateFiles.Count > 0 && gatedTargetFiles == null)
+                    var preparedContextResult = await TryPrepareIterationContextAsync(task, analysisOnlyTask, gatedTargetFiles);
+                    if (!preparedContextResult.Success)
                     {
-                        _memory.Add("semantic_matches", string.Join(", ", candidateFiles));
+                        return preparedContextResult.FailureResult!;
                     }
 
-                    var planningSignals = _contextBuilder.ComputeBudgetPlan(task, candidateFiles, new List<string>());
-                    if (analysisOnlyTask)
-                    {
-                        planningSignals.Budget = Math.Min(planningSignals.Budget, 4);
-                        planningSignals.MaxFiles = Math.Min(planningSignals.MaxFiles, 4);
-                    }
-                    _memory.Add("context_plan", $"{planningSignals.Complexity}:{planningSignals.Budget}:{planningSignals.Reason}");
-
-                    List<string> resolvedFiles;
-                    if (gatedTargetFiles != null)
-                    {
-                        resolvedFiles = gatedTargetFiles;
-                    }
-                    else
-                    {
-                        // Build context with adaptive budget and enforce target resolution before patching.
-                        if (!_contextBuilder.TryResolveTarget(task, candidateFiles, new List<string>(), out resolvedFiles, out var failureMessage))
-                        {
-                            var safeFailure = failureMessage ?? "Target symbol not found in workspace";
-                            _memory.Add("context_failure", safeFailure, "TargetResolutionSafeFailure");
-                            _memory.Add("context_failure_reason", "Target resolution returned safe failure before patch generation", safeFailure);
-                            tracer.MarkStopPoint("TargetResolutionGate", "TARGET_RESOLUTION_FAILED", safeFailure, new[] { "ModelRequest", "PatchApply", "BuildVerification" });
-                            return FinalizeRunResult(false, safeFailure, "Target resolution failed before patch generation", "TARGET_RESOLUTION_FAILED", Array.Empty<string>(), Array.Empty<ChangedHint>(), Array.Empty<ChangedRange>(), Array.Empty<ChangedKind>(), false);
-                        }
-                    }
-
-                    var contextInfo = _contextBuilder.BuildContext(task, resolvedFiles, new List<string>(), planningSignals.Budget);
+                    var preparedContext = preparedContextResult.PreparedContext!;
+                    var resolvedFiles = preparedContext.ResolvedFiles;
+                    var contextInfo = preparedContext.ContextInfo;
+                    var contextString = preparedContext.ContextString;
                     lastSuccessfulStep = "ContextBuilt";
                     lastKnownAction = $"Built context with {resolvedFiles.Count} resolved files";
-                    var contextString = analysisOnlyTask
-                        ? AnalysisContextFormatter.BuildCompactAnalysisContext(contextInfo)
-                        : _contextBuilder.FormatContext(contextInfo);
 
                     var (promptKind, prompt) = BuildIterationPrompt(task, analysisOnlyTask, iteration, currentResponse, contextString, tracer);
                     modelCallStarted = true;
@@ -297,40 +267,25 @@ namespace LocalCursorAgent.Core
                         var toolResults = await _toolCaller.ExecuteToolCalls(toolCalls);
                         lastSuccessfulStep = "ToolCallsExecuted";
                         lastKnownAction = $"Executed {toolCalls.Count} tool calls";
-                        var unknownToolError = toolResults.FirstOrDefault(result =>
-                            result.StartsWith("Error: Tool '", StringComparison.OrdinalIgnoreCase));
-                        foreach (var result in toolResults)
+                        var toolResultsProcessed = await ProcessToolResultsAsync(
+                            task,
+                            toolCalls,
+                            resolvedFiles,
+                            toolResults,
+                            mutationCall,
+                            lastDeniedToolResult,
+                            changedFiles,
+                            changedHints,
+                            changedRanges,
+                            changedKinds,
+                            tracer);
+                        if (toolResultsProcessed.FinalResult != null)
                         {
-                            _memory.Add("tool_result", result.Length > 100 ? result.Substring(0, 100) + "..." : result);
-
-                            if (result.StartsWith("DENIED [", StringComparison.OrdinalIgnoreCase))
-                            {
-                                tracer.LogActionEvent("ToolResult", "Agent", ExecutionTracer.ActionLogLevel.Warning, "denied", metadata: new Dictionary<string, object?>
-                                {
-                                    { "tool_result", result }
-                                });
-                                if (string.Equals(lastDeniedToolResult, result, StringComparison.Ordinal))
-                                {
-                                    return FinalizeStructuredDiagnosticResult(
-                                        "SAFE_REJECTION",
-                                        new StructuredDiagnostic
-                                        {
-                                            RootCause = "Repeated safety-gate denial after a fix attempt.",
-                                            AttemptedFix = mutationCall?.Input ?? "tool call denied",
-                                            WhyDenied = result,
-                                            NextSafeAction = "Regenerate a safer single-file write for the same target without changing unrelated files."
-                                        },
-                                        changedFiles,
-                                        changedHints.Values,
-                                        changedRanges.Values,
-                                        changedKinds.Values);
-                                }
-
-                                lastDeniedToolResult = result;
-                            }
-
-                            await RecordWriteToolEffectsAsync(task, toolCalls, resolvedFiles, changedFiles, changedHints, changedRanges, changedKinds, tracer);
+                            return toolResultsProcessed.FinalResult;
                         }
+
+                        lastDeniedToolResult = toolResultsProcessed.LastDeniedToolResult;
+                        var unknownToolError = toolResultsProcessed.UnknownToolError;
 
                         if (!string.IsNullOrWhiteSpace(unknownToolError))
                         {
@@ -342,93 +297,38 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
 
                         if (mutationCall != null)
                         {
-                            // Tools currently mutate the active workspace directly, so verify the same workspace.
-                            var buildPath = _sessionContext?.ActiveWorkspaceRoot;
-                            if (!string.IsNullOrWhiteSpace(buildPath) && Directory.Exists(buildPath))
+                            var buildVerification = await HandleMutationBuildVerificationAsync(
+                                mutationCall,
+                                changedFiles,
+                                changedHints,
+                                changedRanges,
+                                changedKinds,
+                                lastBuildErrorSignature,
+                                lastBuildFailureCode);
+                            if (buildVerification.BuildStarted)
                             {
                                 buildStarted = true;
-                                var buildResult = await _buildVerifier.VerifyBuild(buildPath);
-                                _contextBuilder.Tracer.LogBuildVerificationResult(buildResult);
-                                lastSuccessfulStep = "BuildVerificationCompleted";
-                                lastKnownAction = buildResult.Success ? "Build verification succeeded" : "Build verification failed";
+                                lastSuccessfulStep = buildVerification.LastSuccessfulStep;
+                                lastKnownAction = buildVerification.LastKnownAction;
+                            }
 
-                                if (buildResult.Success)
-                                {
-                                    _memory.Add("build_status", "success");
+                            if (buildVerification.FinalResult != null)
+                            {
+                                return buildVerification.FinalResult;
+                            }
 
-                                    if (changedFiles.Count == 0)
-                                    {
-                                        _memory.Add("task_status", "no_op_after_build");
-                                        _sandboxManager.CleanupSandbox();
-                                        return FinalizeRunResult(
-                                            true,
-                                            "Build succeeded but no file changes were made.",
-                                            "Agent completed with no-op after successful build",
-                                            "NO_OP_SUCCESS",
-                                            Array.Empty<string>(),
-                                            Array.Empty<ChangedHint>(),
-                                            Array.Empty<ChangedRange>(),
-                                            Array.Empty<ChangedKind>(),
-                                            true);
-                                    }
-
-                                    if (VERBOSE_OUTPUT)
-                                        Console.WriteLine("✓ Changes are already written in the active workspace");
-                                    _memory.Add("task_status", "completed");
-                                    _sandboxManager.CleanupSandbox();
-                                    return FinalizeRunResult(
-                                        true,
-                                        "Task completed successfully",
-                                        "Agent completed task in the active workspace",
-                                        "SUCCESS",
-                                        changedFiles,
-                                        changedHints.Values,
-                                        changedRanges.Values,
-                                        changedKinds.Values,
-                                        true);
-                                }
-                                else
-                                {
-                                    var buildFailureCode = BuildFailureClassifier.Classify(buildResult);
-                                    var failureMessage = BuildFailureMessageResolver.Resolve(buildResult, buildFailureCode);
-                                    var errorMessage = failureMessage.Message;
-                                    BuildFailureMemoryRecorder.Record(_memory, buildResult, buildFailureCode, failureMessage, errorMessage);
-                                    var failureState = BuildFailureStateUpdater.From(buildResult, failureMessage, errorMessage);
-                                    (lastBuildExitCode, lastBuildTimedOut, lastBuildErrorMessageTruncated, lastBuildErrorMessageLength) =
-                                        BuildFailureStateAssignment.ToTuple(failureState);
-
-                                    if (TryRepairCs8802(buildResult, changedFiles, out var repairPrompt))
-                                    {
-                                        currentResponse = repairPrompt ?? "Repaired CS8802-related issue. Re-run build and continue.";
-                                        continue;
-                                    }
-
-                                    if (RepeatedBuildFailureDiagnosticFactory.TryCreate(
-                                        lastBuildErrorSignature,
-                                        lastBuildFailureCode,
-                                        errorMessage,
-                                        out var structuredBuildFailureCode,
-                                        out var repeatedBuildFailure))
-                                    {
-                                        BuildFailureMemoryRecorder.RecordRepeatedFailureReasonCode(_memory, structuredBuildFailureCode);
-                                        return FinalizeStructuredDiagnosticResult(
-                                            structuredBuildFailureCode,
-                                            RepeatedBuildFailureDiagnosticPayloadBuilder.Build(mutationCall.Input, repeatedBuildFailure),
-                                            changedFiles,
-                                            changedHints.Values,
-                                            changedRanges.Values,
-                                            changedKinds.Values);
-                                    }
-
-                                    lastBuildErrorSignature = errorMessage;
-                                    lastBuildFailureCode = buildFailureCode;
-
-                                    // Provide error context to LLM for next iteration
-                                    currentResponse = BuildFailureRepairPromptBuilder.Build(buildFailureCode, errorMessage);
-                                }
+                            lastBuildErrorSignature = buildVerification.LastBuildErrorSignature;
+                            lastBuildFailureCode = buildVerification.LastBuildFailureCode;
+                            lastBuildExitCode = buildVerification.LastBuildExitCode;
+                            lastBuildTimedOut = buildVerification.LastBuildTimedOut;
+                            lastBuildErrorMessageTruncated = buildVerification.LastBuildErrorMessageTruncated;
+                            lastBuildErrorMessageLength = buildVerification.LastBuildErrorMessageLength;
+                            if (buildVerification.NextResponse != null)
+                            {
+                                currentResponse = buildVerification.NextResponse;
+                                continue;
                             }
                         }
-
                         currentResponse = BuildPostToolContinuationResponse(
                             analysisOnlyTask,
                             mutationIntentTask,
