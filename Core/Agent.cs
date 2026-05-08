@@ -38,7 +38,6 @@ namespace LocalCursorAgent.Core
         private const int MAX_ITERATIONS = 3;
         private const int CONTEXT_WINDOW = 15;
         private const int CONTEXT_EXPANSION_BUFFER = 5;
-        private const bool VERBOSE_OUTPUT = false;
 
         public Agent(
             ILLMClient llmClient,

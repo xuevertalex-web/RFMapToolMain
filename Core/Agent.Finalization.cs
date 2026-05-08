@@ -70,7 +70,7 @@ namespace LocalCursorAgent.Core
         {
             _contextBuilder.Tracer.MarkStopPoint("Agent", reasonCode, diagnostic.WhyDenied, Array.Empty<string>());
             _contextBuilder.Tracer.CompleteRun("failed", "Agent stopped with structured diagnostic", reasonCode, false);
-            var message = StructuredDiagnosticMessageBuilder.Build(diagnostic);
+            var message = BuildStructuredDiagnosticMessage(diagnostic);
 
             return EmitAgentRunResult(
                 false,
@@ -96,6 +96,15 @@ namespace LocalCursorAgent.Core
                 approvalRequiredActions: Array.Empty<ActionApprovalProposal>(),
                 tracerDeniedActions: 0,
                 actionLifecycleEntries: Array.Empty<ActionLifecycleEntry>());
+        }
+
+        private static string BuildStructuredDiagnosticMessage(StructuredDiagnostic diagnostic)
+        {
+            return $@"Structured diagnostic:
+root_cause: {diagnostic.RootCause}
+attempted_fix: {diagnostic.AttemptedFix}
+why_denied: {diagnostic.WhyDenied}
+next_safe_action: {diagnostic.NextSafeAction}";
         }
     }
 }
