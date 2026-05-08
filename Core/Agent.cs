@@ -176,36 +176,13 @@ namespace LocalCursorAgent.Core
                         changedRanges,
                         changedKinds,
                         tracer);
-                    runState.CurrentResponse = toolHandling.NextResponse;
-                    runState.LastDeniedToolResult = toolHandling.LastDeniedToolResult;
-                    runState.PatchStarted = runState.PatchStarted || toolHandling.PatchStarted;
-                    if (toolHandling.BuildStarted)
+                    var toolingApply = ApplyToolHandlingToRunState(runState, toolHandling);
+                    if (toolingApply.ShouldReturn)
                     {
-                        runState.BuildStarted = true;
+                        return toolingApply.FinalResult!;
                     }
 
-                    if (!string.IsNullOrWhiteSpace(toolHandling.LastSuccessfulStep))
-                    {
-                        runState.LastSuccessfulStep = toolHandling.LastSuccessfulStep!;
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(toolHandling.LastKnownAction))
-                    {
-                        runState.LastKnownAction = toolHandling.LastKnownAction!;
-                    }
-
-                    runState.LastBuildErrorSignature = toolHandling.LastBuildErrorSignature;
-                    runState.LastBuildFailureCode = toolHandling.LastBuildFailureCode;
-                    runState.LastBuildExitCode = toolHandling.LastBuildExitCode;
-                    runState.LastBuildTimedOut = toolHandling.LastBuildTimedOut;
-                    runState.LastBuildErrorMessageTruncated = toolHandling.LastBuildErrorMessageTruncated;
-                    runState.LastBuildErrorMessageLength = toolHandling.LastBuildErrorMessageLength;
-                    if (toolHandling.FinalResult != null)
-                    {
-                        return toolHandling.FinalResult;
-                    }
-
-                    if (toolHandling.ShouldContinue)
+                    if (toolingApply.ShouldContinue)
                     {
                         continue;
                     }
