@@ -70,11 +70,6 @@ namespace LocalCursorAgent.Core
                     };
                 }
 
-                if (VERBOSE_OUTPUT)
-                {
-                    Console.WriteLine("Changes are already written in the active workspace");
-                }
-
                 _memory.Add("task_status", "completed");
                 _sandboxManager.CleanupSandbox();
                 return new MutationBuildVerificationResult
