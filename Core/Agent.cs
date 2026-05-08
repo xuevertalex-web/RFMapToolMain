@@ -104,36 +104,23 @@ namespace LocalCursorAgent.Core
                 var targetResolution = startupPreparation.TargetResolution!;
                 var gatedTargetFiles = startupPreparation.GatedTargetFiles;
 
-                string currentResponse = string.Empty;
+                var runState = new AgentRunState();
                 var changedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var changedHints = new Dictionary<string, ChangedHint>(StringComparer.OrdinalIgnoreCase);
                 var changedRanges = new Dictionary<string, ChangedRange>(StringComparer.OrdinalIgnoreCase);
                 var changedKinds = new Dictionary<string, ChangedKind>(StringComparer.OrdinalIgnoreCase);
-                string? lastBuildErrorSignature = null;
-                string? lastBuildFailureCode = null;
-                int? lastBuildExitCode = null;
-                bool? lastBuildTimedOut = null;
-                bool? lastBuildErrorMessageTruncated = null;
-                int? lastBuildErrorMessageLength = null;
-                string? lastDeniedToolResult = null;
                 var analysisOnlyTask = TaskPrecheckHeuristics.IsAnalysisOnlyTask(task);
                 var runtimeClient = _llmClient as ILlmRuntimeClient;
                 var runtimeMetadata = runtimeClient?.Metadata;
                 var unrestrictedSandboxMode = AgentExecutionProfile.IsUnrestrictedInsideSandbox(_sessionContext);
-                var actualIterationsUsed = 0;
-                var lastSuccessfulStep = "Indexing";
-                var lastKnownAction = "Indexing completed";
-                var modelCallStarted = false;
-                var patchStarted = false;
-                var buildStarted = false;
 
                 LogExecutionProfileIfNeeded(unrestrictedSandboxMode, tracer);
                 LogIterationLoopStarted(tracer);
 
                 for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++)
                 {
-                    actualIterationsUsed = iteration + 1;
-                    LogIterationStarted(tracer, actualIterationsUsed);
+                    runState.ActualIterationsUsed = iteration + 1;
+                    LogIterationStarted(tracer, runState.ActualIterationsUsed);
 
                     var preparedContextResult = await TryPrepareIterationContextAsync(task, analysisOnlyTask, gatedTargetFiles);
                     if (!preparedContextResult.Success)
@@ -145,25 +132,25 @@ namespace LocalCursorAgent.Core
                     var resolvedFiles = preparedContext.ResolvedFiles;
                     var contextInfo = preparedContext.ContextInfo;
                     var contextString = preparedContext.ContextString;
-                    lastSuccessfulStep = "ContextBuilt";
-                    lastKnownAction = $"Built context with {resolvedFiles.Count} resolved files";
+                    runState.LastSuccessfulStep = "ContextBuilt";
+                    runState.LastKnownAction = $"Built context with {resolvedFiles.Count} resolved files";
 
-                    var (promptKind, prompt) = BuildIterationPrompt(task, analysisOnlyTask, iteration, currentResponse, contextString, tracer);
-                    modelCallStarted = true;
+                    var (promptKind, prompt) = BuildIterationPrompt(task, analysisOnlyTask, iteration, runState.CurrentResponse, contextString, tracer);
+                    runState.ModelCallStarted = true;
                     var modelRequest = await ExecuteModelRequestAsync(prompt, promptKind, iteration, runtimeClient, tracer);
                     var runtimeResult = modelRequest.RuntimeResult;
-                    currentResponse = modelRequest.Response;
-                    lastSuccessfulStep = "ModelRequestCompleted";
-                    lastKnownAction = "Model response received";
+                    runState.CurrentResponse = modelRequest.Response;
+                    runState.LastSuccessfulStep = "ModelRequestCompleted";
+                    runState.LastKnownAction = "Model response received";
 
-                    var isHardFailure = runtimeResult?.IsFailure ?? LlmFailureDetector.IsHardLlmFailureResponse(currentResponse);
+                    var isHardFailure = runtimeResult?.IsFailure ?? LlmFailureDetector.IsHardLlmFailureResponse(runState.CurrentResponse);
                     if (isHardFailure &&
                         TryHandleHardModelFailure(
                             analysisOnlyTask,
                             runtimeResult,
                             contextInfo,
                             iteration,
-                            currentResponse,
+                            runState.CurrentResponse,
                             changedFiles,
                             changedHints,
                             changedRanges,
@@ -175,7 +162,7 @@ namespace LocalCursorAgent.Core
                         return hardFailureResult;
                     }
 
-                    if (TryHandleAnalysisDirectResponse(task, analysisOnlyTask, currentResponse, contextInfo, runStartedUtc, runtimeMetadata, out var analysisResult))
+                    if (TryHandleAnalysisDirectResponse(task, analysisOnlyTask, runState.CurrentResponse, contextInfo, runStartedUtc, runtimeMetadata, out var analysisResult))
                     {
                         return analysisResult;
                     }
@@ -184,41 +171,41 @@ namespace LocalCursorAgent.Core
                         task,
                         analysisOnlyTask,
                         requestedNewFile,
-                        currentResponse,
+                        runState.CurrentResponse,
                         resolvedFiles,
                         targetResolution,
-                        lastDeniedToolResult,
-                        lastBuildErrorSignature,
-                        lastBuildFailureCode,
+                        runState.LastDeniedToolResult,
+                        runState.LastBuildErrorSignature,
+                        runState.LastBuildFailureCode,
                         changedFiles,
                         changedHints,
                         changedRanges,
                         changedKinds,
                         tracer);
-                    currentResponse = toolHandling.NextResponse;
-                    lastDeniedToolResult = toolHandling.LastDeniedToolResult;
-                    patchStarted = patchStarted || toolHandling.PatchStarted;
+                    runState.CurrentResponse = toolHandling.NextResponse;
+                    runState.LastDeniedToolResult = toolHandling.LastDeniedToolResult;
+                    runState.PatchStarted = runState.PatchStarted || toolHandling.PatchStarted;
                     if (toolHandling.BuildStarted)
                     {
-                        buildStarted = true;
+                        runState.BuildStarted = true;
                     }
 
                     if (!string.IsNullOrWhiteSpace(toolHandling.LastSuccessfulStep))
                     {
-                        lastSuccessfulStep = toolHandling.LastSuccessfulStep!;
+                        runState.LastSuccessfulStep = toolHandling.LastSuccessfulStep!;
                     }
 
                     if (!string.IsNullOrWhiteSpace(toolHandling.LastKnownAction))
                     {
-                        lastKnownAction = toolHandling.LastKnownAction!;
+                        runState.LastKnownAction = toolHandling.LastKnownAction!;
                     }
 
-                    lastBuildErrorSignature = toolHandling.LastBuildErrorSignature;
-                    lastBuildFailureCode = toolHandling.LastBuildFailureCode;
-                    lastBuildExitCode = toolHandling.LastBuildExitCode;
-                    lastBuildTimedOut = toolHandling.LastBuildTimedOut;
-                    lastBuildErrorMessageTruncated = toolHandling.LastBuildErrorMessageTruncated;
-                    lastBuildErrorMessageLength = toolHandling.LastBuildErrorMessageLength;
+                    runState.LastBuildErrorSignature = toolHandling.LastBuildErrorSignature;
+                    runState.LastBuildFailureCode = toolHandling.LastBuildFailureCode;
+                    runState.LastBuildExitCode = toolHandling.LastBuildExitCode;
+                    runState.LastBuildTimedOut = toolHandling.LastBuildTimedOut;
+                    runState.LastBuildErrorMessageTruncated = toolHandling.LastBuildErrorMessageTruncated;
+                    runState.LastBuildErrorMessageLength = toolHandling.LastBuildErrorMessageLength;
                     if (toolHandling.FinalResult != null)
                     {
                         return toolHandling.FinalResult;
@@ -229,22 +216,22 @@ namespace LocalCursorAgent.Core
                         continue;
                     }
 
-                    LogIterationCompleted(tracer, actualIterationsUsed, lastSuccessfulStep, lastKnownAction);
+                    LogIterationCompleted(tracer, runState.ActualIterationsUsed, runState.LastSuccessfulStep, runState.LastKnownAction);
                 }
 
                 return FinalizeMaxIterationsFailure(
                     tracer,
-                    actualIterationsUsed,
-                    lastSuccessfulStep,
-                    lastKnownAction,
-                    modelCallStarted,
-                    patchStarted,
-                    buildStarted,
-                    lastBuildFailureCode,
-                    lastBuildExitCode,
-                    lastBuildTimedOut,
-                    lastBuildErrorMessageTruncated,
-                    lastBuildErrorMessageLength);
+                    runState.ActualIterationsUsed,
+                    runState.LastSuccessfulStep,
+                    runState.LastKnownAction,
+                    runState.ModelCallStarted,
+                    runState.PatchStarted,
+                    runState.BuildStarted,
+                    runState.LastBuildFailureCode,
+                    runState.LastBuildExitCode,
+                    runState.LastBuildTimedOut,
+                    runState.LastBuildErrorMessageTruncated,
+                    runState.LastBuildErrorMessageLength);
             }
             catch (Exception ex)
             {
