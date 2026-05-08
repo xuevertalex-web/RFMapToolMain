@@ -1161,7 +1161,7 @@ public partial class ExecutionTracer
                     RuntimeRoot = snapshot.SessionHeader?.RuntimeRoot ?? string.Empty,
                     WorkspaceRoot = snapshot.SessionHeader?.WorkspaceRoot ?? string.Empty,
                     AccessMode = snapshot.SessionHeader?.AccessMode ?? string.Empty,
-                    AccessModeDescription = ExecutionTracerAccessModeFormatter.DescribeAccessMode(snapshot.SessionHeader?.AccessMode ?? string.Empty),
+                    AccessModeDescription = AccessModeDescriptionResolver.Describe(snapshot.SessionHeader?.AccessMode),
                     ProtectedRootsCount = snapshot.SessionHeader?.ProtectedRoots?.Length ?? 0,
                     Query = snapshot.Query,
                     Outcome = snapshot.Outcome,
