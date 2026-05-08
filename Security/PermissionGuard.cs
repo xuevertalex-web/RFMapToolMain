@@ -9,40 +9,40 @@ public sealed class PermissionGuard
         if (string.IsNullOrWhiteSpace(session.RuntimeRoot) || string.IsNullOrWhiteSpace(session.ActiveWorkspaceRoot))
             return PermissionDecision.Deny(PermissionReasonCode.WorkspaceNotResolved, "Workspace root not resolved");
 
-        if (HasExtendedLengthPrefix(action.TargetPath))
+        if (PathSafetyPolicy.HasExtendedLengthPrefix(action.TargetPath))
             return PermissionDecision.Deny(PermissionReasonCode.ExtendedLengthPathDenied, "Target uses extended-length path prefix", action.TargetPath, session.ActiveWorkspaceRoot);
 
-        if (HasExtendedLengthPrefix(action.SourcePath))
+        if (PathSafetyPolicy.HasExtendedLengthPrefix(action.SourcePath))
             return PermissionDecision.Deny(PermissionReasonCode.ExtendedLengthPathDenied, "Source uses extended-length path prefix", action.SourcePath, session.ActiveWorkspaceRoot);
 
-        if (HasExtendedLengthPrefix(action.DestinationPath))
+        if (PathSafetyPolicy.HasExtendedLengthPrefix(action.DestinationPath))
             return PermissionDecision.Deny(PermissionReasonCode.ExtendedLengthPathDenied, "Destination uses extended-length path prefix", action.DestinationPath, session.ActiveWorkspaceRoot);
 
-        if (HasExtendedLengthPrefix(action.WorkingDirectory))
+        if (PathSafetyPolicy.HasExtendedLengthPrefix(action.WorkingDirectory))
             return PermissionDecision.Deny(PermissionReasonCode.ExtendedLengthPathDenied, "Working directory uses extended-length path prefix", action.WorkingDirectory, session.ActiveWorkspaceRoot);
 
-        if (HasRelativeDriveSyntax(action.TargetPath))
+        if (PathSafetyPolicy.HasRelativeDriveSyntax(action.TargetPath))
             return PermissionDecision.Deny(PermissionReasonCode.InvalidPathSyntaxDenied, "Target uses drive-relative syntax", action.TargetPath, session.ActiveWorkspaceRoot);
 
-        if (HasRelativeDriveSyntax(action.SourcePath))
+        if (PathSafetyPolicy.HasRelativeDriveSyntax(action.SourcePath))
             return PermissionDecision.Deny(PermissionReasonCode.InvalidPathSyntaxDenied, "Source uses drive-relative syntax", action.SourcePath, session.ActiveWorkspaceRoot);
 
-        if (HasRelativeDriveSyntax(action.DestinationPath))
+        if (PathSafetyPolicy.HasRelativeDriveSyntax(action.DestinationPath))
             return PermissionDecision.Deny(PermissionReasonCode.InvalidPathSyntaxDenied, "Destination uses drive-relative syntax", action.DestinationPath, session.ActiveWorkspaceRoot);
 
-        if (HasRelativeDriveSyntax(action.WorkingDirectory))
+        if (PathSafetyPolicy.HasRelativeDriveSyntax(action.WorkingDirectory))
             return PermissionDecision.Deny(PermissionReasonCode.InvalidPathSyntaxDenied, "Working directory uses drive-relative syntax", action.WorkingDirectory, session.ActiveWorkspaceRoot);
 
-        if (HasAlternateDataStreamSyntax(action.TargetPath))
+        if (PathSafetyPolicy.HasAlternateDataStreamSyntax(action.TargetPath))
             return PermissionDecision.Deny(PermissionReasonCode.AlternateDataStreamDenied, "Target uses alternate data stream syntax", action.TargetPath, session.ActiveWorkspaceRoot);
 
-        if (HasAlternateDataStreamSyntax(action.SourcePath))
+        if (PathSafetyPolicy.HasAlternateDataStreamSyntax(action.SourcePath))
             return PermissionDecision.Deny(PermissionReasonCode.AlternateDataStreamDenied, "Source uses alternate data stream syntax", action.SourcePath, session.ActiveWorkspaceRoot);
 
-        if (HasAlternateDataStreamSyntax(action.DestinationPath))
+        if (PathSafetyPolicy.HasAlternateDataStreamSyntax(action.DestinationPath))
             return PermissionDecision.Deny(PermissionReasonCode.AlternateDataStreamDenied, "Destination uses alternate data stream syntax", action.DestinationPath, session.ActiveWorkspaceRoot);
 
-        if (HasAlternateDataStreamSyntax(action.WorkingDirectory))
+        if (PathSafetyPolicy.HasAlternateDataStreamSyntax(action.WorkingDirectory))
             return PermissionDecision.Deny(PermissionReasonCode.AlternateDataStreamDenied, "Working directory uses alternate data stream syntax", action.WorkingDirectory, session.ActiveWorkspaceRoot);
 
         string normalizedWorkspace;
@@ -68,13 +68,13 @@ public sealed class PermissionGuard
             return PermissionDecision.Deny(PermissionReasonCode.PathNormalizationFailed, "Path normalization failed");
         }
 
-        if (normalizedTarget is not null && IsUncPath(normalizedTarget))
+        if (normalizedTarget is not null && PathSafetyPolicy.IsUncPath(normalizedTarget))
             return PermissionDecision.Deny(PermissionReasonCode.NetworkPathDenied, "Target is a network path", normalizedTarget, normalizedWorkspace);
 
-        if (normalizedSource is not null && IsUncPath(normalizedSource))
+        if (normalizedSource is not null && PathSafetyPolicy.IsUncPath(normalizedSource))
             return PermissionDecision.Deny(PermissionReasonCode.NetworkPathDenied, "Source is a network path", normalizedSource, normalizedWorkspace);
 
-        if (normalizedDestination is not null && IsUncPath(normalizedDestination))
+        if (normalizedDestination is not null && PathSafetyPolicy.IsUncPath(normalizedDestination))
             return PermissionDecision.Deny(PermissionReasonCode.NetworkPathDenied, "Destination is a network path", normalizedDestination, normalizedWorkspace);
 
         if (normalizedTarget is not null && !IsWithinWorkspace(normalizedTarget, normalizedWorkspace))
@@ -104,13 +104,13 @@ public sealed class PermissionGuard
         if (normalizedDestination is not null && session.ProtectedPathPolicy.IsProtected(normalizedDestination))
             return PermissionDecision.Deny(PermissionReasonCode.ProtectedPathDenied, "Destination is protected", normalizedDestination, normalizedWorkspace);
 
-        if (normalizedTarget is not null && ContainsReparsePoint(normalizedTarget))
+        if (normalizedTarget is not null && PathSafetyPolicy.ContainsReparsePoint(normalizedTarget))
             return PermissionDecision.Deny(PermissionReasonCode.ReparsePointDenied, "Target path contains a reparse point", normalizedTarget, normalizedWorkspace);
 
-        if (normalizedSource is not null && ContainsReparsePoint(normalizedSource))
+        if (normalizedSource is not null && PathSafetyPolicy.ContainsReparsePoint(normalizedSource))
             return PermissionDecision.Deny(PermissionReasonCode.ReparsePointDenied, "Source path contains a reparse point", normalizedSource, normalizedWorkspace);
 
-        if (normalizedDestination is not null && ContainsReparsePoint(normalizedDestination))
+        if (normalizedDestination is not null && PathSafetyPolicy.ContainsReparsePoint(normalizedDestination))
             return PermissionDecision.Deny(PermissionReasonCode.ReparsePointDenied, "Destination path contains a reparse point", normalizedDestination, normalizedWorkspace);
 
         if (session.AccessMode == AgentAccessMode.ReadOnly)
@@ -167,70 +167,6 @@ public sealed class PermissionGuard
     private static bool IsDeleteLike(ToolActionKind kind) => kind == ToolActionKind.DeleteFile;
     private static bool IsRenameLike(ToolActionKind kind) => kind == ToolActionKind.RenameFile;
     private static bool IsMoveLike(ToolActionKind kind) => kind == ToolActionKind.MoveFile;
-
-    private static bool IsUncPath(string path) =>
-        path.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase) ||
-        path.StartsWith("//", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsPathSeparator(char ch) => ch == '\\' || ch == '/';
-
-    private static bool HasExtendedLengthPrefix(string? path) =>
-        !string.IsNullOrWhiteSpace(path) &&
-        (path.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase) ||
-         path.StartsWith(@"\\.\", StringComparison.OrdinalIgnoreCase));
-
-    private static bool HasAlternateDataStreamSyntax(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-            return false;
-
-        if (HasExtendedLengthPrefix(path) || IsUncPath(path))
-            return false;
-
-        var firstColon = path.IndexOf(':');
-        if (firstColon < 0)
-            return false;
-
-        if (firstColon == 1 && path.Length >= 3 && IsPathSeparator(path[2]))
-            return path.IndexOf(':', 3) >= 0;
-
-        return true;
-    }
-
-    private static bool HasRelativeDriveSyntax(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-            return false;
-
-        return path.Length >= 2 &&
-               char.IsLetter(path[0]) &&
-               path[1] == ':' &&
-               (path.Length == 2 || !IsPathSeparator(path[2]));
-    }
-
-    private static bool ContainsReparsePoint(string path)
-    {
-        var current = new DirectoryInfo(path);
-
-        if (File.Exists(path))
-            current = new DirectoryInfo(Path.GetDirectoryName(path) ?? path);
-
-        while (current != null)
-        {
-            if (!current.Exists)
-            {
-                current = current.Parent;
-                continue;
-            }
-
-            if ((current.Attributes & FileAttributes.ReparsePoint) != 0)
-                return true;
-
-            current = current.Parent;
-        }
-
-        return false;
-    }
 
     private static PermissionDecision CreateApprovalRequired(ToolAction action, PermissionReasonCode code, string message, string normalizedTarget, string normalizedWorkspace, string riskLevel = "high")
     {
