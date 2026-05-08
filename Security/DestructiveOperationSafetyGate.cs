@@ -29,27 +29,27 @@ public sealed class DestructiveOperationSafetyGate
     {
         var resolvedTarget = DestructivePathHelpers.ResolvePath(_session.ActiveWorkspaceRoot, targetPath);
         if (string.IsNullOrWhiteSpace(resolvedTarget))
-            return Denied(PermissionReasonCodes.PathNormalizationFailed, "Failed to normalize target path.", targetPath);
+            return DestructiveOperationResultFactory.Denied(_tracer, PermissionReasonCodes.PathNormalizationFailed, "Failed to normalize target path.", targetPath);
 
         if (!File.Exists(resolvedTarget) && !Directory.Exists(resolvedTarget))
-            return Denied(PermissionReasonCodes.TargetFileNotFound, "Target path not found.", resolvedTarget);
+            return DestructiveOperationResultFactory.Denied(_tracer, PermissionReasonCodes.TargetFileNotFound, "Target path not found.", resolvedTarget);
 
         var action = new ToolAction { Kind = ToolActionKind.DeleteFile, TargetPath = resolvedTarget };
         var decision = _permissionGuard.Evaluate(_session, action);
         if (!decision.Allowed)
-            return Denied(decision.ReasonCodeString, decision.Message, resolvedTarget);
+            return DestructiveOperationResultFactory.Denied(_tracer, decision.ReasonCodeString, decision.Message, resolvedTarget);
 
         Trace("Delete", "SnapshotCreateStarted", resolvedTarget, null, null, false, false, false, false, false, false, null, 1);
         if (ShouldForceFailure("Delete", "SnapshotCreateStarted", resolvedTarget, null))
         {
             Trace("Delete", "SnapshotCreateFailed", resolvedTarget, null, null, false, false, false, false, false, false, PermissionReasonCodes.DeleteSnapshotCreateFailed, 2);
-            return Denied(PermissionReasonCodes.DeleteSnapshotCreateFailed, "Forced snapshot create failure.", resolvedTarget);
+            return DestructiveOperationResultFactory.Denied(_tracer, PermissionReasonCodes.DeleteSnapshotCreateFailed, "Forced snapshot create failure.", resolvedTarget);
         }
         var snapshot = await CreateSnapshotAsync(resolvedTarget);
         if (!snapshot.Created)
         {
             Trace("Delete", "SnapshotCreateFailed", resolvedTarget, null, null, false, false, false, false, false, false, PermissionReasonCodes.DeleteSnapshotCreateFailed, 2);
-            return Denied(PermissionReasonCodes.DeleteSnapshotCreateFailed, snapshot.Message, resolvedTarget, snapshot.SnapshotPath);
+            return DestructiveOperationResultFactory.Denied(_tracer, PermissionReasonCodes.DeleteSnapshotCreateFailed, snapshot.Message, resolvedTarget, snapshot.SnapshotPath);
         }
 
         Trace("Delete", "SnapshotCreated", resolvedTarget, null, snapshot.SnapshotPath, true, false, false, false, false, false, null, 2);
@@ -116,13 +116,13 @@ public sealed class DestructiveOperationSafetyGate
         var resolvedSource = DestructivePathHelpers.ResolvePath(_session.ActiveWorkspaceRoot, sourcePath);
         var resolvedDestination = DestructivePathHelpers.ResolvePath(_session.ActiveWorkspaceRoot, destinationPath);
         if (string.IsNullOrWhiteSpace(resolvedSource) || string.IsNullOrWhiteSpace(resolvedDestination))
-            return Denied(PermissionReasonCodes.PathNormalizationFailed, "Failed to normalize source or destination path.", sourcePath, resolvedDestination);
+            return DestructiveOperationResultFactory.Denied(_tracer, PermissionReasonCodes.PathNormalizationFailed, "Failed to normalize source or destination path.", sourcePath, resolvedDestination);
 
         if (!DestructivePathHelpers.Exists(resolvedSource))
-            return Denied(PermissionReasonCodes.TargetFileNotFound, "Source path not found.", resolvedSource, resolvedDestination);
+            return DestructiveOperationResultFactory.Denied(_tracer, PermissionReasonCodes.TargetFileNotFound, "Source path not found.", resolvedSource, resolvedDestination);
 
         if (DestructivePathHelpers.Exists(resolvedDestination))
-            return Denied(PermissionReasonCodes.TargetPathConflict, "Destination path already exists.", resolvedSource, resolvedDestination);
+            return DestructiveOperationResultFactory.Denied(_tracer, PermissionReasonCodes.TargetPathConflict, "Destination path already exists.", resolvedSource, resolvedDestination);
 
         var action = new ToolAction
         {
@@ -133,19 +133,19 @@ public sealed class DestructiveOperationSafetyGate
 
         var decision = _permissionGuard.Evaluate(_session, action);
         if (!decision.Allowed)
-            return Denied(decision.ReasonCodeString, decision.Message, resolvedSource, resolvedDestination);
+            return DestructiveOperationResultFactory.Denied(_tracer, decision.ReasonCodeString, decision.Message, resolvedSource, resolvedDestination);
 
         Trace(isMove ? "Move" : "Rename", "SnapshotCreateStarted", resolvedSource, resolvedDestination, null, false, false, false, false, false, false, null, 1);
         if (ShouldForceFailure(isMove ? "Move" : "Rename", "SnapshotCreateStarted", resolvedSource, resolvedDestination))
         {
             Trace(isMove ? "Move" : "Rename", "SnapshotCreateFailed", resolvedSource, resolvedDestination, null, false, false, false, false, false, false, PermissionReasonCodes.DeleteSnapshotCreateFailed, 2);
-            return Denied(PermissionReasonCodes.DeleteSnapshotCreateFailed, "Forced snapshot create failure.", resolvedSource, resolvedDestination);
+            return DestructiveOperationResultFactory.Denied(_tracer, PermissionReasonCodes.DeleteSnapshotCreateFailed, "Forced snapshot create failure.", resolvedSource, resolvedDestination);
         }
         var snapshot = await CreateSnapshotAsync(resolvedSource);
         if (!snapshot.Created)
         {
             Trace(isMove ? "Move" : "Rename", "SnapshotCreateFailed", resolvedSource, resolvedDestination, null, false, false, false, false, false, false, PermissionReasonCodes.DeleteSnapshotCreateFailed, 2);
-            return Denied(PermissionReasonCodes.DeleteSnapshotCreateFailed, snapshot.Message, resolvedSource, snapshot.SnapshotPath);
+            return DestructiveOperationResultFactory.Denied(_tracer, PermissionReasonCodes.DeleteSnapshotCreateFailed, snapshot.Message, resolvedSource, snapshot.SnapshotPath);
         }
 
         Trace(isMove ? "Move" : "Rename", "SnapshotCreated", resolvedSource, resolvedDestination, snapshot.SnapshotPath, true, false, false, false, false, false, null, 2);
@@ -336,27 +336,6 @@ public sealed class DestructiveOperationSafetyGate
         {
             await Task.CompletedTask;
         }
-    }
-
-    private DestructiveOperationResult Denied(string reasonCode, string message, string originalPath, string? targetPath = null)
-    {
-        Trace("Delete", "DestructivePreviewRejected", originalPath, targetPath, null, false, false, false, false, false, false, reasonCode, 1);
-        _tracer?.LogEvent("DestructiveOperation", "Destructive operation denied", new Dictionary<string, object>
-        {
-            { "OriginalPath", originalPath },
-            { "TargetPath", targetPath ?? string.Empty },
-            { "ReasonCode", reasonCode },
-            { "Reason", message }
-        });
-
-        return new DestructiveOperationResult
-        {
-            DestructivePreviewRejected = true,
-            ReasonCode = reasonCode,
-            Message = message,
-            OriginalPath = originalPath,
-            TargetPath = targetPath ?? string.Empty
-        };
     }
 
     private void Trace(
