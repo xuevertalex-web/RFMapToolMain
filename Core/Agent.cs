@@ -4,13 +4,9 @@ using LocalCursorAgent.Execution;
 using LocalCursorAgent.Tools;
 using LocalCursorAgent.Indexing;
 using LocalCursorAgent.Context;
-using LocalCursorAgent.Embeddings;
 using LocalCursorAgent.Diagnostics;
 using LocalCursorAgent.Security;
 using LocalCursorAgent.LLM.Runtime;
-using System.Linq;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace LocalCursorAgent.Core
 {
