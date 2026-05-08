@@ -1,6 +1,4 @@
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Diagnostics;
 using LocalCursorAgent.Configuration;
 using LocalCursorAgent.Context;
@@ -22,7 +20,7 @@ var parsed = ProgramArgumentParser.ParseArgs(args);
 var appRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", ".."));
 var defaultPolicyPath = ProgramWorkspaceHelpers.FindDefaultWorkspacePolicyPath(appRoot);
 var policySourcePath = parsed.WorkspacePolicyPath ?? defaultPolicyPath;
-var policyConfig = LoadWorkspacePolicy(policySourcePath);
+var policyConfig = ProgramWorkspacePolicyLoader.LoadWorkspacePolicy(policySourcePath);
 if (!policyConfig.Success)
 {
     Console.WriteLine($"Workspace policy load failed [{policyConfig.ReasonCodeName} / {policyConfig.ReasonCode}]: {policyConfig.Message}");
@@ -382,42 +380,4 @@ static ILLMClient CreateLlmClient(string? providerOverride, string? ollamaModelO
     return LocalCursorAgent.LLM.Runtime.LlmRuntimeFactory.Create(providerOverride, ollamaModelOverride, appRoot);
 }
 
-
-static WorkspacePolicyLoadResult LoadWorkspacePolicy(string? policyPath)
-{
-    if (string.IsNullOrWhiteSpace(policyPath))
-        return WorkspacePolicyLoadResult.CreateSuccess(null);
-
-    string fullPath;
-    try
-    {
-        fullPath = Path.GetFullPath(policyPath);
-    }
-    catch
-    {
-        return WorkspacePolicyLoadResult.Fail(PermissionReasonCodes.WorkspacePolicyInvalid, "Workspace policy path could not be normalized.");
-    }
-
-    if (!File.Exists(fullPath))
-        return WorkspacePolicyLoadResult.Fail(PermissionReasonCodes.WorkspacePolicyNotFound, $"Workspace policy file not found: {fullPath}");
-
-    try
-    {
-        var json = File.ReadAllText(fullPath);
-        var policy = JsonSerializer.Deserialize<WorkspacePolicyFile>(json, new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true,
-            Converters =
-            {
-                new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: true)
-            }
-        });
-
-        return WorkspacePolicyLoadResult.CreateSuccess(policy);
-    }
-    catch (Exception ex)
-    {
-        return WorkspacePolicyLoadResult.Fail(PermissionReasonCodes.WorkspacePolicyInvalid, $"Workspace policy could not be parsed: {ex.Message}");
-    }
-}
 
