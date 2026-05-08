@@ -108,11 +108,11 @@ var session = new AgentSessionContext
 Console.WriteLine($"RuntimeRoot: {runtimeRoot}");
 Console.WriteLine($"WorkspaceRoot: {workspaceRoot}");
 Console.WriteLine($"AccessMode: {parsed.AccessMode}");
-Console.WriteLine($"AccessModeDescription: {DescribeAccessMode(parsed.AccessMode)}");
+Console.WriteLine($"AccessModeDescription: {ProgramRuntimeHelpers.DescribeAccessMode(parsed.AccessMode)}");
 Console.WriteLine($"ProtectedRootsCount: {protectedRoots.Count}");
 Console.WriteLine($"WorkspacePolicy: {(string.IsNullOrWhiteSpace(policySourcePath) ? "none" : policySourcePath)}");
 
-var llmClient = CreateLlmClient(parsed.LlmProvider, parsed.OllamaModel, appRoot);
+var llmClient = ProgramRuntimeHelpers.CreateLlmClient(parsed.LlmProvider, parsed.OllamaModel, appRoot);
 var permissionGuard = new PermissionGuard();
 var toolRegistry = new ToolRegistry();
 var safeProcessRunner = new SafeProcessRunner(session, permissionGuard);
@@ -366,18 +366,4 @@ static void StartParentProcessWatchdog(int? parentPid, ExecutionTracer tracer)
         }
     });
 }
-
-static string DescribeAccessMode(AgentAccessMode accessMode) => accessMode switch
-{
-    AgentAccessMode.ReadOnly => "Analysis only; no writes or destructive actions.",
-    AgentAccessMode.WorkspaceWrite => "Write/patch allowed inside workspace; destructive actions denied.",
-    AgentAccessMode.WorkspaceFullAccess => "Full engineering access inside workspace; runtime and protected paths remain denied.",
-    _ => "Unknown access mode."
-};
-
-static ILLMClient CreateLlmClient(string? providerOverride, string? ollamaModelOverride, string appRoot)
-{
-    return LocalCursorAgent.LLM.Runtime.LlmRuntimeFactory.Create(providerOverride, ollamaModelOverride, appRoot);
-}
-
 
