@@ -438,5 +438,4 @@ public sealed class DestructiveOperationSafetyGate
         });
     }
 
-    private sealed record SnapshotInfo(bool Created, string SnapshotPath, bool IsDirectory, string OriginalPath, string Message);
 }
