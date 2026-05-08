@@ -127,30 +127,13 @@ namespace LocalCursorAgent.Core
                 var patchStarted = false;
                 var buildStarted = false;
 
-                if (unrestrictedSandboxMode)
-                {
-                    _memory.Add("execution_profile", "UNRESTRICTED_INSIDE_SANDBOX");
-                    tracer.LogActionEvent("ExecutionProfile", "Agent", ExecutionTracer.ActionLogLevel.Warning, "unrestricted_inside_sandbox", metadata: new Dictionary<string, object?>
-                    {
-                        { "access_mode", _sessionContext?.AccessMode.ToString() ?? string.Empty },
-                        { "env_flag", "LOCALCURSOR_UNRESTRICTED_SANDBOX" }
-                    });
-                }
-
-                tracer.LogActionEvent("IterationLoopStarted", "AgentIterationLoop", ExecutionTracer.ActionLogLevel.Info, "started", metadata: new Dictionary<string, object?>
-                {
-                    { "max_iterations", MAX_ITERATIONS },
-                    { "loop_stage", "AgentIterationLoop" }
-                });
+                LogExecutionProfileIfNeeded(unrestrictedSandboxMode, tracer);
+                LogIterationLoopStarted(tracer);
 
                 for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++)
                 {
                     actualIterationsUsed = iteration + 1;
-                    tracer.LogActionEvent("IterationStarted", "AgentIterationLoop", ExecutionTracer.ActionLogLevel.Info, "started", metadata: new Dictionary<string, object?>
-                    {
-                        { "iteration", actualIterationsUsed },
-                        { "max_iterations", MAX_ITERATIONS }
-                    });
+                    LogIterationStarted(tracer, actualIterationsUsed);
 
                     var preparedContextResult = await TryPrepareIterationContextAsync(task, analysisOnlyTask, gatedTargetFiles);
                     if (!preparedContextResult.Success)
@@ -316,13 +299,7 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                         }
                     }
 
-                    tracer.LogActionEvent("IterationCompleted", "AgentIterationLoop", ExecutionTracer.ActionLogLevel.Info, "completed", metadata: new Dictionary<string, object?>
-                    {
-                        { "iteration", actualIterationsUsed },
-                        { "max_iterations", MAX_ITERATIONS },
-                        { "last_successful_step", lastSuccessfulStep },
-                        { "last_known_action", lastKnownAction }
-                    });
+                    LogIterationCompleted(tracer, actualIterationsUsed, lastSuccessfulStep, lastKnownAction);
                 }
 
                 return FinalizeMaxIterationsFailure(
