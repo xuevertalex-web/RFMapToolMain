@@ -95,50 +95,14 @@ namespace LocalCursorAgent.Core
 
             try
             {
-                // Index project for semantic search
-                tracer.LogActionEvent("IndexingStarted", "Agent", ExecutionTracer.ActionLogLevel.Info, "started");
-                tracer.LogActionEvent("Indexing", "Agent", ExecutionTracer.ActionLogLevel.Info, "started");
-                var indexResult = await _projectIndexer.IndexProject();
-                tracer.UpdateRunIndexingStatus(indexResult.Success ? "completed" : "failed");
-                tracer.LogActionEvent("IndexingCompleted", "Agent", indexResult.Success ? ExecutionTracer.ActionLogLevel.Info : ExecutionTracer.ActionLogLevel.Warning, indexResult.Success ? "completed" : "failed", indexResult.Success ? null : "INDEXING_FAILED", new Dictionary<string, object?>
+                var startupPreparation = await PrepareStartupAsync(task, requestedNewFile);
+                if (!startupPreparation.Success)
                 {
-                    { "files_processed", indexResult.FilesProcessed },
-                    { "error", indexResult.Error ?? string.Empty }
-                });
-                tracer.LogActionEvent("Indexing", "Agent", indexResult.Success ? ExecutionTracer.ActionLogLevel.Info : ExecutionTracer.ActionLogLevel.Warning, indexResult.Success ? "completed" : "failed", indexResult.Success ? null : "INDEXING_FAILED", new Dictionary<string, object?>
-                {
-                    { "files_processed", indexResult.FilesProcessed },
-                    { "error", indexResult.Error ?? string.Empty }
-                });
-                
-                if (indexResult.Success)
-                {
-                    _memory.Add("indexing_complete", $"Indexed {indexResult.FilesProcessed} files");
+                    return startupPreparation.FailureResult!;
                 }
 
-                var targetResolutionGate = new TargetResolutionGate(_projectIndexer, _contextBuilder.Tracer);
-                var targetResolution = await targetResolutionGate.ResolveAsync(task);
-                
-                // If target resolution fails, continue without target constraints.
-                if (targetResolution.IsFailed)
-                {
-                    _memory.Add("target_resolution_gate", $"SKIPPED:{targetResolution.ReasonCode}:{targetResolution.Reason}");
-                    // Empty target resolution is acceptable for broad tasks.
-                }
-
-                var gatedTargetFiles = requestedNewFile is not null
-                    ? new List<string>()
-                    : targetResolution.IsResolved
-                        ? targetResolution.SelectedFiles.ToList()
-                        : null;
-
-                // Create sandbox
-                if (!await _sandboxManager.CreateSandbox())
-                {
-                    var error = "Failed to create sandbox";
-                    _memory.Add("error", error, "SandboxCreationFailed");
-                    return FinalizeRunResult(false, error, "Sandbox creation failed", "SANDBOX_CREATION_FAILED", Array.Empty<string>(), Array.Empty<ChangedHint>(), Array.Empty<ChangedRange>(), Array.Empty<ChangedKind>(), false);
-                }
+                var targetResolution = startupPreparation.TargetResolution!;
+                var gatedTargetFiles = startupPreparation.GatedTargetFiles;
 
                 string currentResponse = string.Empty;
                 var changedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
