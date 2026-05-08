@@ -20,7 +20,7 @@ Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
 var parsed = ParseArgs(args);
 var appRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", ".."));
-var defaultPolicyPath = FindDefaultWorkspacePolicyPath(appRoot);
+var defaultPolicyPath = ProgramWorkspaceHelpers.FindDefaultWorkspacePolicyPath(appRoot);
 var policySourcePath = parsed.WorkspacePolicyPath ?? defaultPolicyPath;
 var policyConfig = LoadWorkspacePolicy(policySourcePath);
 if (!policyConfig.Success)
@@ -46,9 +46,9 @@ tracer.LogActionEvent("AppEntry", "Program", ExecutionTracer.ActionLogLevel.Info
 StartParentProcessWatchdog(parsed.ParentPid, tracer);
 
 var workspaceResolver = new WorkspaceContextService();
-var workspaceAllowRoots = MergeDistinct(parsed.WorkspaceAllowRoots, policyConfig.Policy?.WorkspaceAllowRoots);
-var workspaceDenyRoots = MergeDistinct(parsed.WorkspaceDenyRoots, policyConfig.Policy?.WorkspaceDenyRoots);
-var taskWorkspaceHint = parsed.WorkspacePath is null ? ExtractWorkspacePathFromTask(parsed.Task) : null;
+var workspaceAllowRoots = ProgramWorkspaceHelpers.MergeDistinct(parsed.WorkspaceAllowRoots, policyConfig.Policy?.WorkspaceAllowRoots);
+var workspaceDenyRoots = ProgramWorkspaceHelpers.MergeDistinct(parsed.WorkspaceDenyRoots, policyConfig.Policy?.WorkspaceDenyRoots);
+var taskWorkspaceHint = parsed.WorkspacePath is null ? ProgramWorkspaceHelpers.ExtractWorkspacePathFromTask(parsed.Task) : null;
 var workspaceResolution = workspaceResolver.Resolve(parsed.WorkspacePath, appRoot, runtimeRoot, workspaceAllowRoots, workspaceDenyRoots);
 tracer.LogActionEvent("WorkspaceResolution", "Program", ExecutionTracer.ActionLogLevel.Info, workspaceResolution.Success ? "resolved" : "failed", workspaceResolution.ReasonCode, new Dictionary<string, object?>
 {
@@ -445,45 +445,6 @@ static ILLMClient CreateLlmClient(string? providerOverride, string? ollamaModelO
     return LocalCursorAgent.LLM.Runtime.LlmRuntimeFactory.Create(providerOverride, ollamaModelOverride, appRoot);
 }
 
-static string? FindDefaultWorkspacePolicyPath(string appRoot)
-{
-    var candidate = Path.Combine(appRoot, "agent-policy.json");
-    return File.Exists(candidate) ? candidate : null;
-}
-
-static string? ExtractWorkspacePathFromTask(string? task)
-{
-    if (string.IsNullOrWhiteSpace(task))
-        return null;
-
-    var matches = System.Text.RegularExpressions.Regex.Matches(
-        task,
-        @"[A-Za-z]:\\[^\r\n\t""<>|]*");
-
-    foreach (System.Text.RegularExpressions.Match match in matches.Cast<System.Text.RegularExpressions.Match>().OrderByDescending(m => m.Value.Length))
-    {
-        var candidate = match.Value.Trim().TrimEnd('.', ',', ';', ':');
-        if (string.IsNullOrWhiteSpace(candidate))
-            continue;
-
-        try
-        {
-            var fullPath = Path.GetFullPath(candidate);
-            if (Directory.Exists(fullPath))
-                return fullPath;
-
-            var parent = Path.GetDirectoryName(fullPath);
-            if (!string.IsNullOrWhiteSpace(parent) && Directory.Exists(parent))
-                return parent;
-        }
-        catch
-        {
-            continue;
-        }
-    }
-
-    return null;
-}
 
 static WorkspacePolicyLoadResult LoadWorkspacePolicy(string? policyPath)
 {
@@ -521,14 +482,5 @@ static WorkspacePolicyLoadResult LoadWorkspacePolicy(string? policyPath)
     {
         return WorkspacePolicyLoadResult.Fail(PermissionReasonCodes.WorkspacePolicyInvalid, $"Workspace policy could not be parsed: {ex.Message}");
     }
-}
-
-static List<string> MergeDistinct(IEnumerable<string>? first, IEnumerable<string>? second)
-{
-    return (first ?? Enumerable.Empty<string>())
-        .Concat(second ?? Enumerable.Empty<string>())
-        .Where(p => !string.IsNullOrWhiteSpace(p))
-        .Distinct(StringComparer.OrdinalIgnoreCase)
-        .ToList();
 }
 
