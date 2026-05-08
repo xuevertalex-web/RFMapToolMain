@@ -180,123 +180,53 @@ namespace LocalCursorAgent.Core
                         return analysisResult;
                     }
 
-                    // Check for tool calls
-                    if (_toolCaller.ContainsToolCalls(currentResponse))
+                    var toolHandling = await HandleIterationToolingAsync(
+                        task,
+                        analysisOnlyTask,
+                        requestedNewFile,
+                        currentResponse,
+                        resolvedFiles,
+                        targetResolution,
+                        lastDeniedToolResult,
+                        lastBuildErrorSignature,
+                        lastBuildFailureCode,
+                        changedFiles,
+                        changedHints,
+                        changedRanges,
+                        changedKinds,
+                        tracer);
+                    currentResponse = toolHandling.NextResponse;
+                    lastDeniedToolResult = toolHandling.LastDeniedToolResult;
+                    patchStarted = patchStarted || toolHandling.PatchStarted;
+                    if (toolHandling.BuildStarted)
                     {
-                        var toolCalls = _toolCaller.ParseToolCalls(currentResponse);
-                        lastSuccessfulStep = "ToolCallsParsed";
-                        lastKnownAction = $"Parsed {toolCalls.Count} tool calls";
-                        if (toolCalls.Count == 0)
-                        {
-                            var emptyToolDecision = HandleEmptyParsedToolCalls(task, analysisOnlyTask, currentResponse);
-                            if (emptyToolDecision.IsHandled)
-                            {
-                                if (emptyToolDecision.ShouldContinue)
-                                {
-                                    currentResponse = emptyToolDecision.Payload;
-                                    continue;
-                                }
-
-                                return emptyToolDecision.Payload;
-                            }
-                        }
-
-                        var mutationIntentTask = MutationIntentDetector.IsMutationIntentTask(task) || requestedNewFile != null;
-
-                        var mutationCall = toolCalls.FirstOrDefault(ToolCallMutationHeuristics.IsMutationLikeToolCall);
-                        if (mutationCall != null &&
-                            TryValidateMutationToolCalls(task, toolCalls, mutationCall, targetResolution, tracer, out var gateFailureResult))
-                        {
-                            return gateFailureResult;
-                        }
-
-                        patchStarted = patchStarted || toolCalls.Any(ToolCallMutationHeuristics.IsMutationLikeToolCall);
-                        var toolResults = await _toolCaller.ExecuteToolCalls(toolCalls);
-                        lastSuccessfulStep = "ToolCallsExecuted";
-                        lastKnownAction = $"Executed {toolCalls.Count} tool calls";
-                        var toolResultsProcessed = await ProcessToolResultsAsync(
-                            task,
-                            toolCalls,
-                            resolvedFiles,
-                            toolResults,
-                            mutationCall,
-                            lastDeniedToolResult,
-                            changedFiles,
-                            changedHints,
-                            changedRanges,
-                            changedKinds,
-                            tracer);
-                        if (toolResultsProcessed.FinalResult != null)
-                        {
-                            return toolResultsProcessed.FinalResult;
-                        }
-
-                        lastDeniedToolResult = toolResultsProcessed.LastDeniedToolResult;
-                        var unknownToolError = toolResultsProcessed.UnknownToolError;
-
-                        if (!string.IsNullOrWhiteSpace(unknownToolError))
-                        {
-                            currentResponse = $@"Tool call rejected: {unknownToolError}
-
-Use only the registered tools exactly as listed in the prompt. The only valid tool names are 'file' and 'build'. If the task is analysis-only, respond directly without any tool call.";
-                            continue;
-                        }
-
-                        if (mutationCall != null)
-                        {
-                            var buildVerification = await HandleMutationBuildVerificationAsync(
-                                mutationCall,
-                                changedFiles,
-                                changedHints,
-                                changedRanges,
-                                changedKinds,
-                                lastBuildErrorSignature,
-                                lastBuildFailureCode);
-                            if (buildVerification.BuildStarted)
-                            {
-                                buildStarted = true;
-                                lastSuccessfulStep = buildVerification.LastSuccessfulStep;
-                                lastKnownAction = buildVerification.LastKnownAction;
-                            }
-
-                            if (buildVerification.FinalResult != null)
-                            {
-                                return buildVerification.FinalResult;
-                            }
-
-                            lastBuildErrorSignature = buildVerification.LastBuildErrorSignature;
-                            lastBuildFailureCode = buildVerification.LastBuildFailureCode;
-                            lastBuildExitCode = buildVerification.LastBuildExitCode;
-                            lastBuildTimedOut = buildVerification.LastBuildTimedOut;
-                            lastBuildErrorMessageTruncated = buildVerification.LastBuildErrorMessageTruncated;
-                            lastBuildErrorMessageLength = buildVerification.LastBuildErrorMessageLength;
-                            if (buildVerification.NextResponse != null)
-                            {
-                                currentResponse = buildVerification.NextResponse;
-                                continue;
-                            }
-                        }
-                        currentResponse = BuildPostToolContinuationResponse(
-                            analysisOnlyTask,
-                            mutationIntentTask,
-                            mutationCall,
-                            changedFiles.Count,
-                            requestedNewFile,
-                            currentResponse);
+                        buildStarted = true;
                     }
-                    else
-                    {
-                        var noToolDecision = HandleNoToolCallResponse(task, currentResponse, requestedNewFile);
-                        if (noToolDecision.IsHandled)
-                        {
-                            if (noToolDecision.ShouldContinue)
-                            {
-                                currentResponse = noToolDecision.Payload;
-                                continue;
-                            }
 
-                            return noToolDecision.Payload;
-                        }
+                    if (!string.IsNullOrWhiteSpace(toolHandling.LastSuccessfulStep))
+                    {
+                        lastSuccessfulStep = toolHandling.LastSuccessfulStep!;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(toolHandling.LastKnownAction))
+                    {
+                        lastKnownAction = toolHandling.LastKnownAction!;
+                    }
+
+                    lastBuildErrorSignature = toolHandling.LastBuildErrorSignature;
+                    lastBuildFailureCode = toolHandling.LastBuildFailureCode;
+                    lastBuildExitCode = toolHandling.LastBuildExitCode;
+                    lastBuildTimedOut = toolHandling.LastBuildTimedOut;
+                    lastBuildErrorMessageTruncated = toolHandling.LastBuildErrorMessageTruncated;
+                    lastBuildErrorMessageLength = toolHandling.LastBuildErrorMessageLength;
+                    if (toolHandling.FinalResult != null)
+                    {
+                        return toolHandling.FinalResult;
+                    }
+
+                    if (toolHandling.ShouldContinue)
+                    {
+                        continue;
                     }
 
                     LogIterationCompleted(tracer, actualIterationsUsed, lastSuccessfulStep, lastKnownAction);
