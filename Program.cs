@@ -238,21 +238,21 @@ static Func<string, ToolAction> CreateFileActionFactory(string workspaceRoot) =>
         return new ToolAction
         {
             Kind = ToolActionKind.ReadFile,
-            TargetPath = ResolveTargetPath(workspaceRoot, path)
+            TargetPath = ProgramPathParsingHelpers.ResolveTargetPath(workspaceRoot, path)
         };
     }
 
     if (input.StartsWith("write:", StringComparison.OrdinalIgnoreCase))
     {
         var payload = input[6..];
-        var separator = FindWriteSeparator(payload);
+        var separator = ProgramPathParsingHelpers.FindWriteSeparator(payload);
         var path = separator >= 0 ? payload[..separator].Trim() : payload.Trim();
         var content = separator >= 0 ? payload[(separator + 1)..] : string.Empty;
 
         return new ToolAction
         {
             Kind = ToolActionKind.WriteFile,
-            TargetPath = ResolveTargetPath(workspaceRoot, path),
+            TargetPath = ProgramPathParsingHelpers.ResolveTargetPath(workspaceRoot, path),
             Payload = content
         };
     }
@@ -263,7 +263,7 @@ static Func<string, ToolAction> CreateFileActionFactory(string workspaceRoot) =>
         return new ToolAction
         {
             Kind = ToolActionKind.DeleteFile,
-            TargetPath = ResolveTargetPath(workspaceRoot, path)
+            TargetPath = ProgramPathParsingHelpers.ResolveTargetPath(workspaceRoot, path)
         };
     }
 
@@ -272,15 +272,15 @@ static Func<string, ToolAction> CreateFileActionFactory(string workspaceRoot) =>
     {
         var isMove = input.StartsWith("move:", StringComparison.OrdinalIgnoreCase);
         var payload = input[(isMove ? 5 : 7)..];
-        var separator = FindPathPairSeparator(payload);
+        var separator = ProgramPathParsingHelpers.FindPathPairSeparator(payload);
         var source = separator >= 0 ? payload[..separator].Trim() : payload.Trim();
         var destination = separator >= 0 ? payload[(separator + 1)..].Trim() : string.Empty;
 
         return new ToolAction
         {
             Kind = isMove ? ToolActionKind.MoveFile : ToolActionKind.RenameFile,
-            SourcePath = ResolveTargetPath(workspaceRoot, source),
-            DestinationPath = ResolveTargetPath(workspaceRoot, destination)
+            SourcePath = ProgramPathParsingHelpers.ResolveTargetPath(workspaceRoot, source),
+            DestinationPath = ProgramPathParsingHelpers.ResolveTargetPath(workspaceRoot, destination)
         };
     }
 
@@ -298,41 +298,10 @@ static Func<string, ToolAction> CreateBuildActionFactory(string workspaceRoot) =
     return new ToolAction
     {
         Kind = ToolActionKind.Build,
-        WorkingDirectory = ResolveTargetPath(workspaceRoot, target)
+        WorkingDirectory = ProgramPathParsingHelpers.ResolveTargetPath(workspaceRoot, target)
     };
 };
 
-static string ResolveTargetPath(string workspaceRoot, string path)
-{
-    if (string.IsNullOrWhiteSpace(path))
-        return workspaceRoot;
-
-    return Path.IsPathFullyQualified(path)
-        ? Path.GetFullPath(path)
-        : Path.GetFullPath(Path.Combine(workspaceRoot, path));
-}
-
-static int FindWriteSeparator(string payload)
-{
-    if (string.IsNullOrWhiteSpace(payload))
-        return -1;
-
-    if (payload.Length >= 3 && payload[1] == ':' && (payload[2] == '\\' || payload[2] == '/'))
-        return payload.IndexOf(':', 3);
-
-    return payload.IndexOf(':');
-}
-
-static int FindPathPairSeparator(string payload)
-{
-    if (string.IsNullOrWhiteSpace(payload))
-        return -1;
-
-    if (payload.Length >= 3 && payload[1] == ':' && (payload[2] == '\\' || payload[2] == '/'))
-        return payload.IndexOf(':', 3);
-
-    return payload.IndexOf(':');
-}
 
 static ParsedArgs ParseArgs(string[] args)
 {

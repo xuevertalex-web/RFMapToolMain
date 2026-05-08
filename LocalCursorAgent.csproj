@@ -12,6 +12,7 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="Program.Models.cs" />
+    <Compile Include="Program.PathParsingHelpers.cs" />
     <Compile Include="Configuration\**\*.cs" />
     <Compile Include="Context\**\*.cs" />
     <Compile Include="Core\**\*.cs" />
