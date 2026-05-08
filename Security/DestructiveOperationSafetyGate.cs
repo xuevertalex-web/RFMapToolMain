@@ -176,12 +176,13 @@ public sealed class DestructiveOperationSafetyGate
             if (!DestructivePathHelpers.Exists(resolvedDestination) || DestructivePathHelpers.Exists(resolvedSource))
             {
                 Trace(isMove ? "Move" : "Rename", "DestructiveApplyFailed", resolvedSource, resolvedDestination, snapshot.SnapshotPath, true, false, true, false, false, false, PermissionReasonCodes.DestructiveApplyFailed, 5);
-                Trace(isMove ? "Move" : "Rename", "DestructiveRollbackStarted", resolvedSource, resolvedDestination, snapshot.SnapshotPath, true, false, true, false, false, false, isMove ? PermissionReasonCodes.MoveRollbackFailed : PermissionReasonCodes.RenameRollbackFailed, 6);
-                var rollback = await RollbackAsync(snapshot, isMove ? PermissionReasonCodes.MoveRollbackFailed : PermissionReasonCodes.RenameRollbackFailed, isMove ? "Move" : "Rename", restoreTo: resolvedSource, renameDestination: resolvedDestination);
+                var rollbackReasonCode = DestructiveOperationReasonCodes.ResolveRollbackReasonCode(isMove);
+                Trace(isMove ? "Move" : "Rename", "DestructiveRollbackStarted", resolvedSource, resolvedDestination, snapshot.SnapshotPath, true, false, true, false, false, false, rollbackReasonCode, 6);
+                var rollback = await RollbackAsync(snapshot, rollbackReasonCode, isMove ? "Move" : "Rename", restoreTo: resolvedSource, renameDestination: resolvedDestination);
                 Trace(isMove ? "Move" : "Rename", rollback.RollbackSucceeded ? "DestructiveRollbackSucceeded" : "DestructiveRollbackFailed", resolvedSource, resolvedDestination, snapshot.SnapshotPath, true, false, true, rollback.RollbackSucceeded, rollback.RollbackFailed, false, rollback.ReasonCode, 7);
                 rollback.ApplySucceeded = false;
                 rollback.ApplyFailed = true;
-                rollback.ReasonCode = isMove ? PermissionReasonCodes.MoveRollbackFailed : PermissionReasonCodes.RenameRollbackFailed;
+                rollback.ReasonCode = rollbackReasonCode;
                 rollback.Message = "Rename/move verification failed; rollback attempted.";
                 return rollback;
             }
@@ -205,12 +206,13 @@ public sealed class DestructiveOperationSafetyGate
         catch (Exception ex)
         {
             Trace(isMove ? "Move" : "Rename", "DestructiveApplyFailed", resolvedSource, resolvedDestination, snapshot.SnapshotPath, true, false, true, false, false, false, PermissionReasonCodes.DestructiveApplyFailed, 5);
-            Trace(isMove ? "Move" : "Rename", "DestructiveRollbackStarted", resolvedSource, resolvedDestination, snapshot.SnapshotPath, true, false, true, false, false, false, isMove ? PermissionReasonCodes.MoveRollbackFailed : PermissionReasonCodes.RenameRollbackFailed, 6);
-            var rollback = await RollbackAsync(snapshot, isMove ? PermissionReasonCodes.MoveRollbackFailed : PermissionReasonCodes.RenameRollbackFailed, isMove ? "Move" : "Rename", restoreTo: resolvedSource, renameDestination: resolvedDestination);
+            var rollbackReasonCode = DestructiveOperationReasonCodes.ResolveRollbackReasonCode(isMove);
+            Trace(isMove ? "Move" : "Rename", "DestructiveRollbackStarted", resolvedSource, resolvedDestination, snapshot.SnapshotPath, true, false, true, false, false, false, rollbackReasonCode, 6);
+            var rollback = await RollbackAsync(snapshot, rollbackReasonCode, isMove ? "Move" : "Rename", restoreTo: resolvedSource, renameDestination: resolvedDestination);
             Trace(isMove ? "Move" : "Rename", rollback.RollbackSucceeded ? "DestructiveRollbackSucceeded" : "DestructiveRollbackFailed", resolvedSource, resolvedDestination, snapshot.SnapshotPath, true, false, true, rollback.RollbackSucceeded, rollback.RollbackFailed, false, rollback.ReasonCode, 7);
             rollback.ApplySucceeded = false;
             rollback.ApplyFailed = true;
-            rollback.ReasonCode = isMove ? PermissionReasonCodes.MoveRollbackFailed : PermissionReasonCodes.RenameRollbackFailed;
+            rollback.ReasonCode = rollbackReasonCode;
             rollback.Message = ex.Message;
             return rollback;
         }
