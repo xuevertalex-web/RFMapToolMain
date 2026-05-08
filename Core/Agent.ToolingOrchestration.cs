@@ -100,20 +100,13 @@ namespace LocalCursorAgent.Core
             var unknownToolError = toolResultsProcessed.UnknownToolError;
             if (!string.IsNullOrWhiteSpace(unknownToolError))
             {
-                return new IterationToolingResult
-                {
-                    NextResponse = $@"Tool call rejected: {unknownToolError}
-
-Use only the registered tools exactly as listed in the prompt. The only valid tool names are 'file' and 'build'. If the task is analysis-only, respond directly without any tool call.",
-                    ShouldContinue = true,
-                    PatchStarted = patchStarted,
-                    BuildStarted = false,
-                    LastDeniedToolResult = lastDeniedToolResult,
-                    LastBuildErrorSignature = lastBuildErrorSignature,
-                    LastBuildFailureCode = lastBuildFailureCode,
-                    LastSuccessfulStep = "ToolCallsExecuted",
-                    LastKnownAction = $"Executed {toolCalls.Count} tool calls"
-                };
+                return BuildUnknownToolCallRejectedResult(
+                    unknownToolError,
+                    patchStarted,
+                    lastDeniedToolResult,
+                    lastBuildErrorSignature,
+                    lastBuildFailureCode,
+                    toolCalls.Count);
             }
 
             var buildStarted = false;
@@ -170,23 +163,19 @@ Use only the registered tools exactly as listed in the prompt. The only valid to
                 lastBuildErrorMessageLength = buildVerification.LastBuildErrorMessageLength;
                 if (buildVerification.NextResponse != null)
                 {
-                    nextResponse = buildVerification.NextResponse;
-                    return new IterationToolingResult
-                    {
-                        NextResponse = nextResponse,
-                        ShouldContinue = true,
-                        PatchStarted = patchStarted,
-                        BuildStarted = buildStarted,
-                        LastDeniedToolResult = lastDeniedToolResult,
-                        LastBuildErrorSignature = lastBuildErrorSignature,
-                        LastBuildFailureCode = lastBuildFailureCode,
-                        LastBuildExitCode = lastBuildExitCode,
-                        LastBuildTimedOut = lastBuildTimedOut,
-                        LastBuildErrorMessageTruncated = lastBuildErrorMessageTruncated,
-                        LastBuildErrorMessageLength = lastBuildErrorMessageLength,
-                        LastSuccessfulStep = lastSuccessfulStep,
-                        LastKnownAction = lastKnownAction
-                    };
+                    return BuildMutationContinuationResult(
+                        buildVerification.NextResponse,
+                        patchStarted,
+                        buildStarted,
+                        lastDeniedToolResult,
+                        lastBuildErrorSignature,
+                        lastBuildFailureCode,
+                        lastBuildExitCode,
+                        lastBuildTimedOut,
+                        lastBuildErrorMessageTruncated,
+                        lastBuildErrorMessageLength,
+                        lastSuccessfulStep,
+                        lastKnownAction);
                 }
             }
 
