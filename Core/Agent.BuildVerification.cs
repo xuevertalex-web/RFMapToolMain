@@ -2,21 +2,6 @@ namespace LocalCursorAgent.Core
 {
     public partial class Agent
     {
-        private sealed class MutationBuildVerificationResult
-        {
-            public required bool BuildStarted { get; init; }
-            public required string LastSuccessfulStep { get; init; }
-            public required string LastKnownAction { get; init; }
-            public string? LastBuildErrorSignature { get; init; }
-            public string? LastBuildFailureCode { get; init; }
-            public int? LastBuildExitCode { get; init; }
-            public bool? LastBuildTimedOut { get; init; }
-            public bool? LastBuildErrorMessageTruncated { get; init; }
-            public int? LastBuildErrorMessageLength { get; init; }
-            public string? NextResponse { get; init; }
-            public string? FinalResult { get; init; }
-        }
-
         private async Task<MutationBuildVerificationResult> HandleMutationBuildVerificationAsync(
             ToolCaller.ToolCall mutationCall,
             HashSet<string> changedFiles,
@@ -160,38 +145,5 @@ namespace LocalCursorAgent.Core
             };
         }
 
-        private static bool TryBuildRepeatedFailureDiagnostic(
-            string? lastBuildErrorSignature,
-            string? lastBuildFailureCode,
-            string currentErrorMessage,
-            out string structuredBuildFailureCode,
-            out string repeatedBuildFailure)
-        {
-            structuredBuildFailureCode = string.Empty;
-            repeatedBuildFailure = string.Empty;
-
-            if (!string.Equals(lastBuildErrorSignature, currentErrorMessage, StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            structuredBuildFailureCode = BuildFailureReasonCodeMapper.ToStructuredReasonCode(lastBuildFailureCode ?? string.Empty);
-            repeatedBuildFailure = string.IsNullOrWhiteSpace(lastBuildFailureCode)
-                ? currentErrorMessage
-                : $"[{lastBuildFailureCode}] {currentErrorMessage}";
-
-            return true;
-        }
-
-        private static StructuredDiagnostic BuildRepeatedFailureDiagnosticPayload(string attemptedFix, string repeatedBuildFailure)
-        {
-            return new StructuredDiagnostic
-            {
-                RootCause = "The same build failure repeated after a fix attempt.",
-                AttemptedFix = attemptedFix,
-                WhyDenied = repeatedBuildFailure,
-                NextSafeAction = "Inspect the compiler error and regenerate one targeted edit that directly addresses it."
-            };
-        }
     }
 }
