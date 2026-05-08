@@ -22,84 +22,27 @@ namespace LocalCursorAgent.Core
         {
             if (!_toolCaller.ContainsToolCalls(currentResponse))
             {
-                var noToolDecision = HandleNoToolCallResponse(task, currentResponse, requestedNewFile);
-                if (noToolDecision.IsHandled)
-                {
-                    if (noToolDecision.ShouldContinue)
-                    {
-                        return new IterationToolingResult
-                        {
-                            NextResponse = noToolDecision.Payload,
-                            ShouldContinue = true,
-                            PatchStarted = false,
-                            BuildStarted = false,
-                            LastDeniedToolResult = lastDeniedToolResult,
-                            LastBuildErrorSignature = lastBuildErrorSignature,
-                            LastBuildFailureCode = lastBuildFailureCode
-                        };
-                    }
-
-                    return new IterationToolingResult
-                    {
-                        NextResponse = currentResponse,
-                        ShouldContinue = false,
-                        FinalResult = noToolDecision.Payload,
-                        PatchStarted = false,
-                        BuildStarted = false,
-                        LastDeniedToolResult = lastDeniedToolResult,
-                        LastBuildErrorSignature = lastBuildErrorSignature,
-                        LastBuildFailureCode = lastBuildFailureCode
-                    };
-                }
-
-                return new IterationToolingResult
-                {
-                    NextResponse = currentResponse,
-                    ShouldContinue = false,
-                    PatchStarted = false,
-                    BuildStarted = false,
-                    LastDeniedToolResult = lastDeniedToolResult,
-                    LastBuildErrorSignature = lastBuildErrorSignature,
-                    LastBuildFailureCode = lastBuildFailureCode
-                };
+                return HandleNoToolCallIterationResult(
+                    task,
+                    currentResponse,
+                    requestedNewFile,
+                    lastDeniedToolResult,
+                    lastBuildErrorSignature,
+                    lastBuildFailureCode);
             }
 
             var toolCalls = _toolCaller.ParseToolCalls(currentResponse);
             if (toolCalls.Count == 0)
             {
-                var emptyToolDecision = HandleEmptyParsedToolCalls(task, analysisOnlyTask, currentResponse);
-                if (emptyToolDecision.IsHandled)
-                {
-                    if (emptyToolDecision.ShouldContinue)
-                    {
-                        return new IterationToolingResult
-                        {
-                            NextResponse = emptyToolDecision.Payload,
-                            ShouldContinue = true,
-                            PatchStarted = false,
-                            BuildStarted = false,
-                            LastDeniedToolResult = lastDeniedToolResult,
-                            LastBuildErrorSignature = lastBuildErrorSignature,
-                            LastBuildFailureCode = lastBuildFailureCode,
-                            LastSuccessfulStep = "ToolCallsParsed",
-                            LastKnownAction = "Parsed 0 tool calls"
-                        };
-                    }
-
-                    return new IterationToolingResult
-                    {
-                        NextResponse = currentResponse,
-                        ShouldContinue = false,
-                        FinalResult = emptyToolDecision.Payload,
-                        PatchStarted = false,
-                        BuildStarted = false,
-                        LastDeniedToolResult = lastDeniedToolResult,
-                        LastBuildErrorSignature = lastBuildErrorSignature,
-                        LastBuildFailureCode = lastBuildFailureCode,
-                        LastSuccessfulStep = "ToolCallsParsed",
-                        LastKnownAction = "Parsed 0 tool calls"
-                    };
-                }
+                var emptyToolResult = HandleEmptyToolCallIterationResult(
+                    task,
+                    analysisOnlyTask,
+                    currentResponse,
+                    lastDeniedToolResult,
+                    lastBuildErrorSignature,
+                    lastBuildFailureCode);
+                if (emptyToolResult != null)
+                    return emptyToolResult;
             }
 
             var mutationIntentTask = MutationIntentDetector.IsMutationIntentTask(task) || requestedNewFile != null;
