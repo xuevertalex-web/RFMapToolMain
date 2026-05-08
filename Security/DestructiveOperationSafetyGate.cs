@@ -27,7 +27,7 @@ public sealed class DestructiveOperationSafetyGate
 
     public async Task<DestructiveOperationResult> DeleteAsync(string targetPath)
     {
-        var resolvedTarget = ResolvePath(targetPath);
+        var resolvedTarget = DestructivePathHelpers.ResolvePath(_session.ActiveWorkspaceRoot, targetPath);
         if (string.IsNullOrWhiteSpace(resolvedTarget))
             return Denied(PermissionReasonCodes.PathNormalizationFailed, "Failed to normalize target path.", targetPath);
 
@@ -69,7 +69,7 @@ public sealed class DestructiveOperationSafetyGate
                 Directory.Delete(resolvedTarget, recursive: true);
             }
 
-            if (Exists(resolvedTarget))
+            if (DestructivePathHelpers.Exists(resolvedTarget))
             {
                 Trace("Delete", "DestructiveApplyFailed", resolvedTarget, null, snapshot.SnapshotPath, true, false, true, false, false, false, PermissionReasonCodes.DestructiveApplyFailed, 5);
                 Trace("Delete", "DestructiveRollbackStarted", resolvedTarget, null, snapshot.SnapshotPath, true, false, true, false, false, false, PermissionReasonCodes.DeleteRollbackFailed, 6);
@@ -113,15 +113,15 @@ public sealed class DestructiveOperationSafetyGate
 
     public async Task<DestructiveOperationResult> RenameAsync(string sourcePath, string destinationPath, bool isMove)
     {
-        var resolvedSource = ResolvePath(sourcePath);
-        var resolvedDestination = ResolvePath(destinationPath);
+        var resolvedSource = DestructivePathHelpers.ResolvePath(_session.ActiveWorkspaceRoot, sourcePath);
+        var resolvedDestination = DestructivePathHelpers.ResolvePath(_session.ActiveWorkspaceRoot, destinationPath);
         if (string.IsNullOrWhiteSpace(resolvedSource) || string.IsNullOrWhiteSpace(resolvedDestination))
             return Denied(PermissionReasonCodes.PathNormalizationFailed, "Failed to normalize source or destination path.", sourcePath, resolvedDestination);
 
-        if (!Exists(resolvedSource))
+        if (!DestructivePathHelpers.Exists(resolvedSource))
             return Denied(PermissionReasonCodes.TargetFileNotFound, "Source path not found.", resolvedSource, resolvedDestination);
 
-        if (Exists(resolvedDestination))
+        if (DestructivePathHelpers.Exists(resolvedDestination))
             return Denied(PermissionReasonCodes.TargetPathConflict, "Destination path already exists.", resolvedSource, resolvedDestination);
 
         var action = new ToolAction
@@ -173,7 +173,7 @@ public sealed class DestructiveOperationSafetyGate
                 Directory.Move(resolvedSource, resolvedDestination);
             }
 
-            if (!Exists(resolvedDestination) || Exists(resolvedSource))
+            if (!DestructivePathHelpers.Exists(resolvedDestination) || DestructivePathHelpers.Exists(resolvedSource))
             {
                 Trace(isMove ? "Move" : "Rename", "DestructiveApplyFailed", resolvedSource, resolvedDestination, snapshot.SnapshotPath, true, false, true, false, false, false, PermissionReasonCodes.DestructiveApplyFailed, 5);
                 Trace(isMove ? "Move" : "Rename", "DestructiveRollbackStarted", resolvedSource, resolvedDestination, snapshot.SnapshotPath, true, false, true, false, false, false, isMove ? PermissionReasonCodes.MoveRollbackFailed : PermissionReasonCodes.RenameRollbackFailed, 6);
@@ -231,7 +231,7 @@ public sealed class DestructiveOperationSafetyGate
             if (Directory.Exists(path))
             {
                 Directory.CreateDirectory(snapshotPath);
-                CopyDirectory(path, snapshotPath);
+                DestructivePathHelpers.CopyDirectory(path, snapshotPath);
                 return new SnapshotInfo(true, snapshotPath, true, path, string.Empty);
             }
         }
@@ -271,7 +271,7 @@ public sealed class DestructiveOperationSafetyGate
                 var source = snapshot.SnapshotPath;
                 var target = restoreTo ?? snapshot.OriginalPath;
 
-                if (Exists(target))
+                if (DestructivePathHelpers.Exists(target))
                 {
                     if (File.Exists(target))
                         File.Delete(target);
@@ -285,7 +285,7 @@ public sealed class DestructiveOperationSafetyGate
                     if (!string.IsNullOrWhiteSpace(target))
                     {
                         Directory.CreateDirectory(target);
-                        CopyDirectory(source, target);
+                        DestructivePathHelpers.CopyDirectory(source, target);
                     }
                 }
             }
@@ -335,35 +335,6 @@ public sealed class DestructiveOperationSafetyGate
         finally
         {
             await Task.CompletedTask;
-        }
-    }
-
-    private static bool Exists(string path) => File.Exists(path) || Directory.Exists(path);
-
-    private string ResolvePath(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-            return string.Empty;
-
-        var fullPath = Path.IsPathFullyQualified(path)
-            ? path
-            : Path.Combine(_session.ActiveWorkspaceRoot, path);
-
-        return Path.GetFullPath(fullPath);
-    }
-
-    private static void CopyDirectory(string source, string destination)
-    {
-        Directory.CreateDirectory(destination);
-
-        foreach (var file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
-        {
-            var relative = Path.GetRelativePath(source, file);
-            var destFile = Path.Combine(destination, relative);
-            var dir = Path.GetDirectoryName(destFile);
-            if (dir != null && !Directory.Exists(dir))
-                Directory.CreateDirectory(dir);
-            File.Copy(file, destFile, overwrite: true);
         }
     }
 
