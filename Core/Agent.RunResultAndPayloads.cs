@@ -91,7 +91,7 @@ namespace LocalCursorAgent.Core
                 FinalStatus = finalStatus ?? string.Empty,
                 BuildSucceeded = buildSucceeded,
                 BuildStarted = buildStarted,
-                Verification = VerificationOutcomeFactory.Create(
+                Verification = BuildVerificationOutcomePayload(
                     buildStarted,
                     buildSucceeded,
                     failure?.FailedStage,
@@ -141,6 +141,29 @@ namespace LocalCursorAgent.Core
 
             Console.WriteLine(JsonSerializer.Serialize(payload));
             return message;
+        }
+
+        private static VerificationOutcomePayload BuildVerificationOutcomePayload(
+            bool buildStarted,
+            bool buildSucceeded,
+            string? failedStage,
+            string? failureReasonCode,
+            string fallbackReasonCode)
+        {
+            var status = !buildStarted
+                ? VerificationOutcomeStatus.NotStarted
+                : buildSucceeded
+                    ? VerificationOutcomeStatus.Succeeded
+                    : VerificationOutcomeStatus.Failed;
+
+            return new VerificationOutcomePayload
+            {
+                Status = status.ToString(),
+                BuildStarted = buildStarted,
+                BuildSucceeded = buildSucceeded,
+                FailedStage = failedStage ?? string.Empty,
+                ReasonCode = failureReasonCode ?? fallbackReasonCode
+            };
         }
 
         private sealed class AgentRunResultPayload
