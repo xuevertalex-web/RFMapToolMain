@@ -143,28 +143,22 @@ namespace LocalCursorAgent.Core
                     runState.LastSuccessfulStep = "ModelRequestCompleted";
                     runState.LastKnownAction = "Model response received";
 
-                    var isHardFailure = runtimeResult?.IsFailure ?? LlmFailureDetector.IsHardLlmFailureResponse(runState.CurrentResponse);
-                    if (isHardFailure &&
-                        TryHandleHardModelFailure(
-                            analysisOnlyTask,
-                            runtimeResult,
-                            contextInfo,
-                            iteration,
-                            runState.CurrentResponse,
-                            changedFiles,
-                            changedHints,
-                            changedRanges,
-                            changedKinds,
-                            runStartedUtc,
-                            runtimeMetadata,
-                            out var hardFailureResult))
+                    var modelDecision = HandleModelResponseDecision(
+                        task,
+                        analysisOnlyTask,
+                        runtimeResult,
+                        iteration,
+                        runState.CurrentResponse,
+                        contextInfo,
+                        runStartedUtc,
+                        runtimeMetadata,
+                        changedFiles,
+                        changedHints,
+                        changedRanges,
+                        changedKinds);
+                    if (modelDecision.IsHandled)
                     {
-                        return hardFailureResult;
-                    }
-
-                    if (TryHandleAnalysisDirectResponse(task, analysisOnlyTask, runState.CurrentResponse, contextInfo, runStartedUtc, runtimeMetadata, out var analysisResult))
-                    {
-                        return analysisResult;
+                        return modelDecision.FinalResult!;
                     }
 
                     var toolHandling = await HandleIterationToolingAsync(
@@ -219,19 +213,7 @@ namespace LocalCursorAgent.Core
                     LogIterationCompleted(tracer, runState.ActualIterationsUsed, runState.LastSuccessfulStep, runState.LastKnownAction);
                 }
 
-                return FinalizeMaxIterationsFailure(
-                    tracer,
-                    runState.ActualIterationsUsed,
-                    runState.LastSuccessfulStep,
-                    runState.LastKnownAction,
-                    runState.ModelCallStarted,
-                    runState.PatchStarted,
-                    runState.BuildStarted,
-                    runState.LastBuildFailureCode,
-                    runState.LastBuildExitCode,
-                    runState.LastBuildTimedOut,
-                    runState.LastBuildErrorMessageTruncated,
-                    runState.LastBuildErrorMessageLength);
+                return BuildTerminalFailureResult(tracer, runState);
             }
             catch (Exception ex)
             {
