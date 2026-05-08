@@ -1,5 +1,7 @@
 using LocalCursorAgent.Security;
 
+using LocalCursorAgent.Diagnostics;
+
 namespace LocalCursorAgent.Core
 {
     internal static class ApprovalStatusSummaryBuilder

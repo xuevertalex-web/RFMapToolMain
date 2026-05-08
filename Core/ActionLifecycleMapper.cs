@@ -1,3 +1,5 @@
+using LocalCursorAgent.Diagnostics;
+
 namespace LocalCursorAgent.Core
 {
     internal static class ActionLifecycleMapper
