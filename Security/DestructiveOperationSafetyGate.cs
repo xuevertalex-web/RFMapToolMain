@@ -374,39 +374,26 @@ public sealed class DestructiveOperationSafetyGate
         string? reasonCode,
         int stepOrder)
     {
-        _tracer?.LogDestructiveOperation(new DestructiveTraceRecord
-        {
-            OperationKind = operationKind,
-            Step = step,
-            OriginalPath = originalPath,
-            TargetPath = targetPath,
-            SnapshotPath = snapshotPath,
-            PreviewAccepted = previewAccepted,
-            ApplySucceeded = applySucceeded,
-            ApplyFailed = applyFailed,
-            RollbackSucceeded = rollbackSucceeded,
-            RollbackFailed = rollbackFailed,
-            CommitSucceeded = commitSucceeded,
-            CommitFailed = false,
-            ReasonCode = reasonCode,
-            TimestampUtc = DateTime.UtcNow,
-            StepOrder = stepOrder
-        });
+        DestructiveOperationTraceHelpers.Trace(
+            _tracer,
+            operationKind,
+            step,
+            originalPath,
+            targetPath,
+            snapshotPath,
+            previewAccepted,
+            applySucceeded,
+            applyFailed,
+            rollbackSucceeded,
+            rollbackFailed,
+            commitSucceeded,
+            reasonCode,
+            stepOrder);
     }
 
     private bool ShouldForceFailure(string operationKind, string step, string originalPath, string? targetPath)
     {
-        if (_failureHook == null)
-            return false;
-
-        return _failureHook(new DestructiveTraceRecord
-        {
-            OperationKind = operationKind,
-            Step = step,
-            OriginalPath = originalPath,
-            TargetPath = targetPath,
-            TimestampUtc = DateTime.UtcNow
-        });
+        return DestructiveOperationTraceHelpers.ShouldForceFailure(_failureHook, operationKind, step, originalPath, targetPath);
     }
 
 }
