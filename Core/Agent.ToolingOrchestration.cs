@@ -117,67 +117,36 @@ namespace LocalCursorAgent.Core
             int? lastBuildErrorMessageLength = null;
             var lastSuccessfulStep = "ToolCallsExecuted";
             var lastKnownAction = $"Executed {toolCalls.Count} tool calls";
-            if (mutationCall != null)
-            {
-                var buildVerification = await HandleMutationBuildVerificationAsync(
-                    mutationCall,
-                    changedFiles,
-                    changedHints,
-                    changedRanges,
-                    changedKinds,
-                    lastBuildErrorSignature,
-                    lastBuildFailureCode);
-                if (buildVerification.BuildStarted)
-                {
-                    buildStarted = true;
-                    lastSuccessfulStep = buildVerification.LastSuccessfulStep;
-                    lastKnownAction = buildVerification.LastKnownAction;
-                }
+            var mutationContinuationResult = await HandleMutationContinuationFlowAsync(
+                mutationCall,
+                changedFiles,
+                changedHints,
+                changedRanges,
+                changedKinds,
+                currentResponse,
+                patchStarted,
+                lastDeniedToolResult,
+                lastBuildErrorSignature,
+                lastBuildFailureCode,
+                buildStarted,
+                lastBuildExitCode,
+                lastBuildTimedOut,
+                lastBuildErrorMessageTruncated,
+                lastBuildErrorMessageLength,
+                lastSuccessfulStep,
+                lastKnownAction);
+            if (mutationContinuationResult.ShouldReturn)
+                return mutationContinuationResult.Result!;
 
-                if (buildVerification.FinalResult != null)
-                {
-                    return new IterationToolingResult
-                    {
-                        NextResponse = currentResponse,
-                        ShouldContinue = false,
-                        FinalResult = buildVerification.FinalResult,
-                        PatchStarted = patchStarted,
-                        BuildStarted = buildStarted,
-                        LastDeniedToolResult = lastDeniedToolResult,
-                        LastBuildErrorSignature = buildVerification.LastBuildErrorSignature,
-                        LastBuildFailureCode = buildVerification.LastBuildFailureCode,
-                        LastBuildExitCode = buildVerification.LastBuildExitCode,
-                        LastBuildTimedOut = buildVerification.LastBuildTimedOut,
-                        LastBuildErrorMessageTruncated = buildVerification.LastBuildErrorMessageTruncated,
-                        LastBuildErrorMessageLength = buildVerification.LastBuildErrorMessageLength,
-                        LastSuccessfulStep = lastSuccessfulStep,
-                        LastKnownAction = lastKnownAction
-                    };
-                }
-
-                lastBuildErrorSignature = buildVerification.LastBuildErrorSignature;
-                lastBuildFailureCode = buildVerification.LastBuildFailureCode;
-                lastBuildExitCode = buildVerification.LastBuildExitCode;
-                lastBuildTimedOut = buildVerification.LastBuildTimedOut;
-                lastBuildErrorMessageTruncated = buildVerification.LastBuildErrorMessageTruncated;
-                lastBuildErrorMessageLength = buildVerification.LastBuildErrorMessageLength;
-                if (buildVerification.NextResponse != null)
-                {
-                    return BuildMutationContinuationResult(
-                        buildVerification.NextResponse,
-                        patchStarted,
-                        buildStarted,
-                        lastDeniedToolResult,
-                        lastBuildErrorSignature,
-                        lastBuildFailureCode,
-                        lastBuildExitCode,
-                        lastBuildTimedOut,
-                        lastBuildErrorMessageTruncated,
-                        lastBuildErrorMessageLength,
-                        lastSuccessfulStep,
-                        lastKnownAction);
-                }
-            }
+            buildStarted = mutationContinuationResult.BuildStarted;
+            lastBuildErrorSignature = mutationContinuationResult.LastBuildErrorSignature;
+            lastBuildFailureCode = mutationContinuationResult.LastBuildFailureCode;
+            lastBuildExitCode = mutationContinuationResult.LastBuildExitCode;
+            lastBuildTimedOut = mutationContinuationResult.LastBuildTimedOut;
+            lastBuildErrorMessageTruncated = mutationContinuationResult.LastBuildErrorMessageTruncated;
+            lastBuildErrorMessageLength = mutationContinuationResult.LastBuildErrorMessageLength;
+            lastSuccessfulStep = mutationContinuationResult.LastSuccessfulStep;
+            lastKnownAction = mutationContinuationResult.LastKnownAction;
 
             nextResponse = BuildPostToolContinuationResponse(
                 analysisOnlyTask,
