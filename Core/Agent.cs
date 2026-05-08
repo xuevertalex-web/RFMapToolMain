@@ -74,24 +74,15 @@ namespace LocalCursorAgent.Core
         /// </summary>
         public async Task<string> RunTask(string task)
         {
-            var runStartedUtc = DateTime.UtcNow;
-            _memory.Add("task_start", task);
-            var tracer = _contextBuilder.Tracer;
-            var requestedNewFile = NewFilePathExtractor.ExtractRequestedNewFilePath(task);
-            tracer.LogActionEvent("TaskReceived", "Agent", ExecutionTracer.ActionLogLevel.Info, "received", metadata: new Dictionary<string, object?>
+            var bootstrap = PrepareRunTaskBootstrap(task);
+            if (bootstrap.IsRejected)
             {
-                { "task", task }
-            });
-            tracer.LogActionEvent("TaskLifecycle", "Agent", ExecutionTracer.ActionLogLevel.Info, "started", metadata: new Dictionary<string, object?>
-            {
-                { "task", task },
-                { "requested_new_file", requestedNewFile ?? string.Empty }
-            });
-
-            if (TryRejectTaskBeforeExecution(task, tracer, out var precheckResult))
-            {
-                return precheckResult;
+                return bootstrap.RejectedResult!;
             }
+
+            var runStartedUtc = bootstrap.RunStartedUtc;
+            var tracer = bootstrap.Tracer;
+            var requestedNewFile = bootstrap.RequestedNewFile;
 
             try
             {
