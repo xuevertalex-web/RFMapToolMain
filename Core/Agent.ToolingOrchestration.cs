@@ -81,19 +81,13 @@ namespace LocalCursorAgent.Core
                 tracer);
             if (toolResultsProcessed.FinalResult != null)
             {
-                return new IterationToolingResult
-                {
-                    NextResponse = currentResponse,
-                    ShouldContinue = false,
-                    FinalResult = toolResultsProcessed.FinalResult,
-                    PatchStarted = patchStarted,
-                    BuildStarted = false,
-                    LastDeniedToolResult = toolResultsProcessed.LastDeniedToolResult,
-                    LastBuildErrorSignature = lastBuildErrorSignature,
-                    LastBuildFailureCode = lastBuildFailureCode,
-                    LastSuccessfulStep = "ToolCallsExecuted",
-                    LastKnownAction = $"Executed {toolCalls.Count} tool calls"
-                };
+                return BuildToolResultsFinalResult(
+                    currentResponse,
+                    toolResultsProcessed,
+                    patchStarted,
+                    lastBuildErrorSignature,
+                    lastBuildFailureCode,
+                    toolCalls.Count);
             }
 
             lastDeniedToolResult = toolResultsProcessed.LastDeniedToolResult;
