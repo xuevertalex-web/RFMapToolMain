@@ -218,6 +218,8 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         return structured.approvalRequiredActions
           .filter(item => item && typeof item === 'object')
           .map(item => ({
+            proposalId: normalizeOptionalText(item.proposalId),
+            approvalTokenFormat: normalizeOptionalText(item.approvalTokenFormat),
             actionType: normalizeText(item.actionType, 'not available'),
             path: normalizeOptionalText(item.path),
             command: normalizeOptionalText(item.command),

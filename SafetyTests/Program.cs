@@ -1156,6 +1156,8 @@ static async Task RunStructuredActionLifecycleReportingRegression()
     {
         approvalRequiredActions = tracer.GetApprovalRequiredActions().Select(x => new
         {
+            x.ProposalId,
+            ApprovalTokenFormat = string.IsNullOrWhiteSpace(x.ProposalId) ? string.Empty : $"APPROVED:{x.ProposalId}",
             x.ActionType,
             x.Command,
             x.Path,
@@ -1185,6 +1187,13 @@ static async Task RunStructuredActionLifecycleReportingRegression()
 
     var approvalRequired = root.GetProperty("approvalRequiredActions");
     AssertTrue(approvalRequired.ValueKind == JsonValueKind.Array && approvalRequired.GetArrayLength() == 1, "Expected single approval-required action.");
+    var approvalItem = approvalRequired[0];
+    var hasProposalId = (approvalItem.TryGetProperty("proposalId", out var proposalIdElement) || approvalItem.TryGetProperty("ProposalId", out proposalIdElement))
+        && !string.IsNullOrWhiteSpace(proposalIdElement.GetString());
+    AssertTrue(hasProposalId, "Expected proposalId in approval-required payload.");
+    var hasApprovalTokenFormat = (approvalItem.TryGetProperty("approvalTokenFormat", out var approvalTokenElement) || approvalItem.TryGetProperty("ApprovalTokenFormat", out approvalTokenElement))
+        && (approvalTokenElement.GetString() ?? string.Empty).StartsWith("APPROVED:", StringComparison.Ordinal);
+    AssertTrue(hasApprovalTokenFormat, "Expected approvalTokenFormat in payload.");
 
     var externalAttempts = root.GetProperty("externalAttempts").GetInt32();
     AssertTrue(externalAttempts == 1, "Expected externalAttempts to equal approval-required attempts.");

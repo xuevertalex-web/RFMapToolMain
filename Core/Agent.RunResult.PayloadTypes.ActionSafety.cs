@@ -21,6 +21,12 @@ namespace LocalCursorAgent.Core
 
         internal sealed class ApprovalRequiredActionPayload
         {
+            [JsonPropertyName("proposalId")]
+            public string ProposalId { get; init; } = string.Empty;
+
+            [JsonPropertyName("approvalTokenFormat")]
+            public string ApprovalTokenFormat { get; init; } = string.Empty;
+
             [JsonPropertyName("actionType")]
             public string ActionType { get; init; } = string.Empty;
 

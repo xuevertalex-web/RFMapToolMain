@@ -8,6 +8,8 @@ namespace LocalCursorAgent.Core
         {
             return proposals.Select(p => new Agent.ApprovalRequiredActionPayload
             {
+                ProposalId = p.ProposalId,
+                ApprovalTokenFormat = string.IsNullOrWhiteSpace(p.ProposalId) ? string.Empty : $"APPROVED:{p.ProposalId}",
                 ActionType = p.ActionType,
                 Command = p.Command ?? string.Empty,
                 Path = p.Path ?? string.Empty,

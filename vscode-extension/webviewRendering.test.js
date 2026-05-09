@@ -366,6 +366,8 @@ function testRunNormalizationContracts() {
       message: 'approval required',
       approvalRequiredActions: [
         {
+          proposalId: 'abc123',
+          approvalTokenFormat: 'APPROVED:abc123',
           actionType: 'ReadFile',
           path: 'C:/outside.txt',
           command: '',
@@ -389,6 +391,8 @@ function testRunNormalizationContracts() {
   });
   assert.strictEqual(approvalRun.approvalRequiredCount, 1);
   assert.strictEqual(approvalRun.approvalRequiredActions[0].reasonCode, 'ACCESS_DENIED_OUTSIDE_WORKSPACE');
+  assert.strictEqual(approvalRun.approvalRequiredActions[0].proposalId, 'abc123');
+  assert.strictEqual(approvalRun.approvalRequiredActions[0].approvalTokenFormat, 'APPROVED:abc123');
   assert.strictEqual(approvalRun.approvalRequiredActions[0].expectedEffect, 'Reads file content from the specified target path.');
   assert.strictEqual(approvalRun.approvalRequiredActions[0].isInsideSandbox, false);
   assert.strictEqual(approvalRun.externalAttempts, 1);
@@ -520,6 +524,8 @@ function testRunNormalizationContracts() {
       finalStatus: 'error',
       approvalRequiredActions: [
         {
+          proposalId: 'id-1',
+          approvalTokenFormat: 'APPROVED:id-1',
           actionType: 'ReadFile',
           path: 'C:/outside.txt',
           normalizedTarget: 'C:/outside.txt',
@@ -535,6 +541,8 @@ function testRunNormalizationContracts() {
   });
   assert.strictEqual(approvalShapeRun.approvalRequiredActions.length, 1);
   assert.strictEqual(approvalShapeRun.approvalRequiredActions[0].reasonCode, 'ACCESS_DENIED_OUTSIDE_WORKSPACE');
+  assert.strictEqual(approvalShapeRun.approvalRequiredActions[0].proposalId, 'id-1');
+  assert.strictEqual(approvalShapeRun.approvalRequiredActions[0].approvalTokenFormat, 'APPROVED:id-1');
   assert.strictEqual(approvalShapeRun.approvalRequiredActions[0].expectedEffect, 'Reads file content from the specified target path.');
   assert.strictEqual(Object.prototype.hasOwnProperty.call(approvalShapeRun.approvalRequiredActions[0], 'hiddenThought'), false);
 }
@@ -665,7 +673,10 @@ function testStatusAndSummaryRendering() {
       approvalRequired: 2,
       denied: 2,
       notApplicable: 0
-    }
+    },
+    approvalRequiredActions: [
+      { proposalId: 'p-1', approvalTokenFormat: 'APPROVED:p-1' }
+    ]
   };
 
   context.renderRunStatus(fallbackRun);
@@ -688,6 +699,8 @@ function testStatusAndSummaryRendering() {
   assert.ok(fallbackRows.some(([key, value]) => key === 'approval status allowed' && value === '1'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'approval status required' && value === '2'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'approval status denied' && value === '2'));
+  assert.ok(fallbackRows.some(([key]) => key === 'approval proposal id'));
+  assert.ok(fallbackRows.some(([key]) => key === 'approval token format'));
 
   context.renderRunSummary(fallbackRun);
   assert.strictEqual(context.resultBadge.textContent, 'fallback-success');
