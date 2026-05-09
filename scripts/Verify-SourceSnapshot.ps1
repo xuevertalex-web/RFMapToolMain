@@ -19,6 +19,8 @@ try {
         'bin/',
         'obj/',
         '.vs/',
+        '.vscode/',
+        'vscode-extension/.vscode/',
         'TestResults/',
         'coverage/',
         'vscode-extension/*.vsix',
@@ -29,7 +31,7 @@ try {
 
     $entries = $zip.Entries | ForEach-Object { $_.FullName.Replace('\', '/') }
     foreach ($pattern in $blockedPatterns) {
-        if ($entries | Where-Object { $_ -like "$pattern*" }) {
+        if ($entries | Where-Object { $_ -like $pattern -or $_ -like "$pattern*" }) {
             throw "Blocked path found in archive: $pattern"
         }
     }

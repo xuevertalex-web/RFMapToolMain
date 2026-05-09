@@ -8,6 +8,8 @@ Use source-only snapshot for sharing/review:
 
 Output archive is created under `.\release\` and contains only tracked source at `HEAD` (no `.git`, `bin`, `obj`, runtime logs, or local artifacts).
 
+Rule: do not share a manual zip of the working directory. Share only the source snapshot produced by `Create-SourceSnapshot.ps1` (or combined scripts below).
+
 Validate snapshot contents:
 
 ```powershell

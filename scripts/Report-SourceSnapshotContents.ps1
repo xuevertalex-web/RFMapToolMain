@@ -20,6 +20,7 @@ try {
         contains_bin = ($entries | Where-Object { $_ -like "bin/*" }).Count
         contains_obj = ($entries | Where-Object { $_ -like "obj/*" }).Count
         contains_vs = ($entries | Where-Object { $_ -like ".vs/*" }).Count
+        contains_vscode = ($entries | Where-Object { $_ -like ".vscode/*" -or $_ -like "vscode-extension/.vscode/*" }).Count
         contains_vsix = ($entries | Where-Object { $_ -like "*.vsix" }).Count
         contains_local_secrets = ($entries | Where-Object { $_ -like "localcursoragent.secrets.json" -or $_ -like "*/localcursoragent.secrets.json" }).Count
     }
