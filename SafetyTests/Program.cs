@@ -33,6 +33,7 @@ await RunPatchApplyDiagnosticsClassificationRegression();
 await RunExternalActionApprovalProposalRegression();
 await RunActionLifecycleLedgerRegression();
 await RunStructuredActionLifecycleReportingRegression();
+await RunEndToEndExecutionPipelineRegression();
 await RunBroadIntentNoToolCallsRequiresActionRegression();
 await RunTechnicalNoToolCallsRequiresActionRegression();
 await RunHostDiagnosticsCommandApprovalRegression();
@@ -1236,6 +1237,152 @@ static async Task RunStructuredActionLifecycleReportingRegression()
     Console.WriteLine("PASS StructuredActionLifecycleReporting_ApprovalRequiredAndExecutedSeparation");
 }
 
+static async Task RunEndToEndExecutionPipelineRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    var worktreeRoot = Path.Combine(runtimeRoot, "worktrees", "session");
+    var outsideRoot = Path.Combine(tempRoot, "outside");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    Directory.CreateDirectory(worktreeRoot);
+    Directory.CreateDirectory(outsideRoot);
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "inside.txt"), "inside");
+    await File.WriteAllTextAsync(Path.Combine(worktreeRoot, "inside-worktree.txt"), "inside-worktree");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        ExecutionWorkspaceRoot = worktreeRoot,
+        WorktreeRoot = worktreeRoot,
+        ExecutionWorkspaceKind = "worktree",
+        ActiveWorkspaceUsed = false,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+    var tracer = new ExecutionTracer(runtimeRoot);
+    tracer.StartRun("e2e-pipeline", "e2e-pipeline", workspaceRoot, runtimeRoot, AgentAccessMode.WorkspaceWrite.ToString(), "test", "test");
+    var guard = new PermissionGuard();
+    var patchGate = new PatchSafetyGate(session, guard, tracer);
+    var destructiveGate = new DestructiveOperationSafetyGate(session, guard, tracer);
+    var sandbox = new SandboxManager(worktreeRoot, runtimeRoot);
+    await sandbox.CreateSandbox();
+    var fileTool = new FileTool(session, guard, patchGate, destructiveGate, sandbox, tracer);
+    var guarded = new GuardedTool(fileTool, guard, session, CreateFileActionFactory(worktreeRoot), tracer);
+
+    var lowRiskResult = await guarded.Execute("write:new.txt:ok");
+    AssertTrue(lowRiskResult.StartsWith("Successfully wrote", StringComparison.Ordinal), "Expected low-risk inside write to execute.");
+    var lowRiskPath = Path.Combine(worktreeRoot, "new.txt");
+    AssertTrue(File.Exists(lowRiskPath), "Expected low-risk write to mutate execution worktree root.");
+
+    var noApprovalDelete = await guarded.Execute("delete:new.txt");
+    AssertTrue(noApprovalDelete.StartsWith("DENIED", StringComparison.Ordinal), "Expected destructive action without approval to be denied.");
+    AssertTrue(File.Exists(lowRiskPath), "Expected file to remain after no-approval delete.");
+
+    var deleteDecision = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.DeleteFile, TargetPath = lowRiskPath });
+    AssertTrue(deleteDecision.ApprovalProposal is not null, "Expected approval proposal for destructive delete.");
+    var deleteProposalId = deleteDecision.ApprovalProposal!.ProposalId;
+
+    var approvedDelete = await guarded.Execute($"delete:new.txt APPROVED:{deleteProposalId}");
+    AssertTrue(approvedDelete.StartsWith("Successfully deleted", StringComparison.Ordinal), "Expected approved destructive action to execute.");
+    AssertTrue(!File.Exists(lowRiskPath), "Expected approved delete to remove file.");
+
+    await File.WriteAllTextAsync(Path.Combine(worktreeRoot, "reused.txt"), "reused");
+    var reusedTokenDelete = await guarded.Execute($"delete:reused.txt APPROVED:{deleteProposalId}");
+    AssertTrue(reusedTokenDelete.StartsWith("DENIED", StringComparison.Ordinal), "Expected consumed token reuse to remain denied.");
+    AssertTrue(File.Exists(Path.Combine(worktreeRoot, "reused.txt")), "Expected file to remain after token reuse.");
+
+    var decisionA = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.DeleteFile, TargetPath = Path.Combine(worktreeRoot, "reused.txt") });
+    var decisionB = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.DeleteFile, TargetPath = Path.Combine(worktreeRoot, "inside-worktree.txt") });
+    AssertTrue(decisionA.ApprovalProposal is not null && decisionB.ApprovalProposal is not null, "Expected proposal ids for both deletes.");
+    var wrongTokenCrossProposal = await guarded.Execute($"delete:inside-worktree.txt APPROVED:{decisionA.ApprovalProposal!.ProposalId}");
+    AssertTrue(wrongTokenCrossProposal.StartsWith("DENIED", StringComparison.Ordinal), "Expected token for proposal A not to authorize proposal B.");
+    AssertTrue(File.Exists(Path.Combine(worktreeRoot, "inside-worktree.txt")), "Expected target for proposal B to remain.");
+
+    var outsidePath = Path.Combine(outsideRoot, "outside.txt");
+    await File.WriteAllTextAsync(outsidePath, "outside");
+    var outsideDecision = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.DeleteFile, TargetPath = outsidePath });
+    AssertTrue(outsideDecision.ApprovalProposal is not null, "Expected outside proposal.");
+    var outsideApproved = await guarded.Execute($"delete:{outsidePath} APPROVED:{outsideDecision.ApprovalProposal!.ProposalId}");
+    AssertTrue(outsideApproved.StartsWith("DENIED", StringComparison.Ordinal), "Expected outside-boundary action to stay denied.");
+    AssertTrue(File.Exists(outsidePath), "Expected outside file to remain untouched.");
+
+    var failingGuarded = new GuardedTool(new ThrowingTool(), guard, session, _ => new ToolAction
+    {
+        Kind = ToolActionKind.ReadFile,
+        TargetPath = Path.Combine(worktreeRoot, "inside-worktree.txt")
+    }, tracer);
+    try
+    {
+        _ = await failingGuarded.Execute("read:inside-worktree.txt");
+        throw new InvalidOperationException("Expected ThrowingTool to throw.");
+    }
+    catch (InvalidOperationException ex)
+    {
+        AssertTrue(ex.Message.Contains("expected failure", StringComparison.OrdinalIgnoreCase), "Expected failure path exception from ThrowingTool.");
+    }
+
+    var lifecycle = tracer.GetActionLedger();
+    AssertTrue(lifecycle.Any(x => x.LifecycleState == ActionLifecycleState.Requested), "Expected requested lifecycle entries.");
+    AssertTrue(lifecycle.Any(x => x.LifecycleState == ActionLifecycleState.ApprovalRequired), "Expected approval-required lifecycle entries.");
+    AssertTrue(lifecycle.Any(x => x.LifecycleState == ActionLifecycleState.Executed), "Expected executed lifecycle entries.");
+    AssertTrue(lifecycle.Any(x => x.LifecycleState == ActionLifecycleState.Failed), "Expected failed lifecycle entries.");
+    AssertTrue(!lifecycle.Any(x => x.LifecycleState == ActionLifecycleState.Executed && x.Target.Contains("outside.txt", StringComparison.OrdinalIgnoreCase)), "Expected outside-boundary action not to be executed.");
+
+    var summaryJson = JsonSerializer.Serialize(new
+    {
+        executionMode = session.ExecutionWorkspaceKind,
+        executionWorkspaceKind = session.ExecutionWorkspaceKind,
+        activeWorkspaceUsed = session.ActiveWorkspaceUsed,
+        sandboxRoot = session.ExecutionWorkspaceRoot,
+        worktreeRoot = session.WorktreeRoot,
+        approvalRequiredActions = tracer.GetApprovalRequiredActions().Select(x => new
+        {
+            x.ProposalId,
+            ApprovalTokenFormat = string.IsNullOrWhiteSpace(x.ProposalId) ? string.Empty : $"APPROVED:{x.ProposalId}",
+            x.ActionType,
+            x.Path,
+            x.NormalizedTarget,
+            x.RiskLevel,
+            x.Reason,
+            ApprovalStatus = x.ApprovalStatus.ToString()
+        }).ToArray(),
+        externalAttempts = tracer.GetApprovalRequiredActions().Count,
+        deniedActions = tracer.GetDeniedPermissionDecisionCount(),
+        blockedActions = tracer.GetActionLedger().Count(x => x.LifecycleState == ActionLifecycleState.Blocked),
+        requestedActions = tracer.GetActionLedger().Count(x => x.LifecycleState == ActionLifecycleState.Requested),
+        executedActions = tracer.GetActionLedger().Count(x => x.LifecycleState == ActionLifecycleState.Executed),
+        failedActions = tracer.GetActionLedger().Count(x => x.LifecycleState == ActionLifecycleState.Failed),
+        actionLifecycle = tracer.GetActionLedger().Select(x => new
+        {
+            x.Sequence,
+            x.ActionCorrelationId,
+            x.ActionType,
+            x.Target,
+            x.NormalizedTarget,
+            LifecycleState = x.LifecycleState.ToString(),
+            x.ReasonCode,
+            x.ApprovalStatus
+        }).ToArray()
+    });
+    using var doc = JsonDocument.Parse(summaryJson);
+    var root = doc.RootElement;
+    AssertTrue(string.Equals(root.GetProperty("executionMode").GetString(), "worktree", StringComparison.Ordinal), "Expected executionMode=worktree.");
+    AssertTrue(string.Equals(root.GetProperty("executionWorkspaceKind").GetString(), "worktree", StringComparison.Ordinal), "Expected executionWorkspaceKind=worktree.");
+    AssertTrue(root.GetProperty("activeWorkspaceUsed").GetBoolean() == false, "Expected activeWorkspaceUsed=false in worktree mode.");
+    AssertTrue(string.Equals(root.GetProperty("sandboxRoot").GetString(), worktreeRoot, StringComparison.OrdinalIgnoreCase), "Expected sandboxRoot to match execution root.");
+    AssertTrue(string.Equals(root.GetProperty("worktreeRoot").GetString(), worktreeRoot, StringComparison.OrdinalIgnoreCase), "Expected worktreeRoot to match execution root.");
+    AssertTrue(root.GetProperty("approvalRequiredActions").EnumerateArray().Any(x => (x.TryGetProperty("ProposalId", out var p) ? p.GetString() : x.GetProperty("proposalId").GetString()) is { Length: > 0 }), "Expected proposalId in approvalRequiredActions.");
+    AssertTrue(root.GetProperty("approvalRequiredActions").EnumerateArray().Any(x => (x.TryGetProperty("ApprovalTokenFormat", out var t) ? t.GetString() : x.GetProperty("approvalTokenFormat").GetString())?.StartsWith("APPROVED:", StringComparison.Ordinal) == true), "Expected approvalTokenFormat in approvalRequiredActions.");
+    AssertTrue(root.GetProperty("executedActions").GetInt32() > 0, "Expected executedActions > 0.");
+    AssertTrue(root.GetProperty("failedActions").GetInt32() > 0, "Expected failedActions > 0.");
+
+    Console.WriteLine("PASS EndToEndExecutionPipeline_TruthfulPaths");
+}
+
 static async Task RunBroadIntentNoToolCallsRequiresActionRegression()
 {
     var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
@@ -2263,6 +2410,13 @@ sealed class FakeNoopTool : ITool
     public string Name => "fake";
     public string Description => "noop";
     public Task<string> Execute(string input) => Task.FromResult("ok");
+}
+
+sealed class ThrowingTool : ITool
+{
+    public string Name => "throwing";
+    public string Description => "always throws";
+    public Task<string> Execute(string input) => throw new InvalidOperationException("expected failure from throwing tool");
 }
 
 sealed class FakeTimeoutLlmClient : ILLMClient
