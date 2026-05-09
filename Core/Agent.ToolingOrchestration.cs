@@ -75,14 +75,15 @@ namespace LocalCursorAgent.Core
                     toolCalls.Count);
             }
 
-            var buildStarted = false;
-            string? nextResponse = currentResponse;
-            int? lastBuildExitCode = null;
-            bool? lastBuildTimedOut = null;
-            bool? lastBuildErrorMessageTruncated = null;
-            int? lastBuildErrorMessageLength = null;
-            var lastSuccessfulStep = "ToolCallsExecuted";
-            var lastKnownAction = $"Executed {toolCalls.Count} tool calls";
+            var continuationState = CreateInitialToolingContinuationState(toolCalls.Count, currentResponse);
+            var buildStarted = continuationState.BuildStarted;
+            string? nextResponse = continuationState.NextResponse;
+            int? lastBuildExitCode = continuationState.LastBuildExitCode;
+            bool? lastBuildTimedOut = continuationState.LastBuildTimedOut;
+            bool? lastBuildErrorMessageTruncated = continuationState.LastBuildErrorMessageTruncated;
+            int? lastBuildErrorMessageLength = continuationState.LastBuildErrorMessageLength;
+            var lastSuccessfulStep = continuationState.LastSuccessfulStep;
+            var lastKnownAction = continuationState.LastKnownAction;
             var mutationContinuationResult = await HandleMutationContinuationFlowAsync(
                 mutationCall,
                 changedFiles,
