@@ -40,6 +40,7 @@ await RunEndToEndExecutionPipelineRegression();
 await RunBroadIntentNoToolCallsRequiresActionRegression();
 await RunTechnicalNoToolCallsRequiresActionRegression();
 await RunHostDiagnosticsCommandApprovalRegression();
+await RunProcessExecutionHardeningRegression();
 await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
 await RunDestructiveFileApprovalMarkerRegression();
 await RunGuardedToolExplicitApprovalHandoffRegression();
@@ -1067,7 +1068,9 @@ static async Task RunExternalActionApprovalProposalRegression()
         WorkingDirectory = tempRoot
     });
     AssertTrue(!cmdResult.Success, "Expected outside-workspace command not to execute.");
-    AssertTrue(cmdResult.ReasonCode == PermissionReasonCodes.AccessDeniedOutsideWorkspace, "Expected outside-workspace command denial reason.");
+    AssertTrue(
+        cmdResult.ReasonCode == PermissionReasonCodes.AccessDeniedOutsideWorkspace || cmdResult.ReasonCode == "BLOCKED_PROCESS_EXECUTION",
+        "Expected outside-workspace command denial reason.");
 
     var protectedDecision = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.ReadFile, TargetPath = runtimeRoot });
     AssertTrue(!protectedDecision.Allowed, "Expected protected/system-like path to be non-success.");
@@ -1632,6 +1635,71 @@ static async Task RunHostDiagnosticsCommandApprovalRegression()
     AssertTrue(result.ReasonCode == PermissionReasonCodes.HighRiskApprovalRequired, "Expected approval-required host diagnostics denial reason.");
     AssertTrue(tracer.GetActionLedger().Any(x => x.LifecycleState == ActionLifecycleState.ApprovalRequired && x.ActionType == ToolActionKind.RunCommand.ToString()), "Expected ApprovalRequired lifecycle for host diagnostics command.");
     Console.WriteLine("PASS HostDiagnosticsCommand_ApprovalRequired");
+}
+
+static async Task RunProcessExecutionHardeningRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    var outsideRoot = Path.Combine(tempRoot, "outside");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    Directory.CreateDirectory(outsideRoot);
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+    var tracer = new ExecutionTracer(runtimeRoot);
+    var guard = new PermissionGuard();
+    var runner = new SafeProcessRunner(session, guard, tracer);
+
+    var allowed = await runner.RunAsync(new SafeProcessRequest
+    {
+        Kind = ToolActionKind.Build,
+        Command = "dotnet",
+        Args = new[] { "--version" },
+        WorkingDirectory = workspaceRoot,
+        Timeout = TimeSpan.FromSeconds(20)
+    });
+    AssertTrue(allowed.Success, "Expected whitelisted command to pass.");
+
+    var forbidden = await runner.RunAsync(new SafeProcessRequest
+    {
+        Kind = ToolActionKind.RunCommand,
+        Command = "powershell",
+        Args = new[] { "-Command", "Get-ChildItem" },
+        WorkingDirectory = workspaceRoot,
+        Timeout = TimeSpan.FromSeconds(5)
+    });
+    AssertTrue(!forbidden.Success && forbidden.ReasonCode == "INVALID_COMMAND", "Expected non-whitelisted command to be blocked.");
+
+    var injection = await runner.RunAsync(new SafeProcessRequest
+    {
+        Kind = ToolActionKind.RunCommand,
+        Command = "git",
+        Args = new[] { "status&&whoami" },
+        WorkingDirectory = workspaceRoot,
+        Timeout = TimeSpan.FromSeconds(5)
+    });
+    AssertTrue(!injection.Success && injection.ReasonCode == "BLOCKED_PROCESS_EXECUTION", "Expected shell injection pattern to be blocked.");
+
+    var outside = await runner.RunAsync(new SafeProcessRequest
+    {
+        Kind = ToolActionKind.RunCommand,
+        Command = "git",
+        Args = new[] { "status" },
+        WorkingDirectory = outsideRoot,
+        Timeout = TimeSpan.FromSeconds(5)
+    });
+    AssertTrue(!outside.Success && outside.ReasonCode == "BLOCKED_PROCESS_EXECUTION", "Expected out-of-workspace working directory to be blocked.");
+
+    Console.WriteLine("PASS ProcessExecution_HardeningValidation");
 }
 
 static async Task RunRuntimeGpuDiagnosticsTruthfulReportingRegression()

@@ -15,8 +15,11 @@ public sealed class SafeProcessRunner
 
     private static readonly HashSet<string> AllowedCommands = new(StringComparer.OrdinalIgnoreCase)
     {
-        "dotnet"
+        "dotnet",
+        "git",
+        "npm"
     };
+    private static readonly string[] ForbiddenShellTokens = { "&&", "|", ">", "<", ";" };
 
     private readonly AgentSessionContext _session;
     private readonly PermissionGuard _permissionGuard;
@@ -44,17 +47,24 @@ public sealed class SafeProcessRunner
                 { "working_directory", request.WorkingDirectory },
                 { "args", request.Args?.ToArray() ?? Array.Empty<string>() }
             });
-            return SafeProcessResult.Denied(
-                PermissionReasonCode.ToolDeniedByPolicy,
-                $"Command '{request.Command}' is not allowed",
-                request.Command,
-                request.WorkingDirectory);
+            return SafeProcessResult.InvalidCommand($"Command '{request.Command}' is not allowed", request.Command, request.WorkingDirectory);
+        }
+        if (ContainsForbiddenShellTokens(request.Command) || (request.Args?.Any(ContainsForbiddenShellTokens) ?? false))
+        {
+            return SafeProcessResult.BlockedProcessExecution("Shell chaining/redirection tokens are not allowed", request.Command, request.WorkingDirectory);
         }
 
+        var workingDirectory = string.IsNullOrWhiteSpace(request.WorkingDirectory)
+            ? (_session.ExecutionWorkspaceRoot ?? _session.ActiveWorkspaceRoot)
+            : request.WorkingDirectory!;
+        if (!IsWithinExecutionRoot(workingDirectory))
+        {
+            return SafeProcessResult.BlockedProcessExecution("Working directory must stay within execution workspace", request.Command, workingDirectory);
+        }
         var action = new ToolAction
         {
             Kind = request.Kind,
-            WorkingDirectory = request.WorkingDirectory,
+            WorkingDirectory = workingDirectory,
             Payload = string.Join(" ", request.Args ?? Array.Empty<string>())
         };
 
@@ -74,10 +84,6 @@ public sealed class SafeProcessRunner
                 request.Command,
                 request.WorkingDirectory);
         }
-
-        var workingDirectory = string.IsNullOrWhiteSpace(request.WorkingDirectory)
-            ? (_session.ExecutionWorkspaceRoot ?? _session.ActiveWorkspaceRoot)
-            : request.WorkingDirectory!;
 
         if (!Directory.Exists(workingDirectory))
         {
@@ -256,6 +262,22 @@ public sealed class SafeProcessRunner
 
         return arg.Any(char.IsWhiteSpace) ? $"\"{arg.Replace("\"", "\\\"")}\"" : arg;
     }
+
+    private bool IsWithinExecutionRoot(string path)
+    {
+        var root = _session.ExecutionWorkspaceRoot ?? _session.ActiveWorkspaceRoot;
+        var normalizedRoot = Path.GetFullPath(root);
+        var normalizedPath = Path.GetFullPath(path);
+        return normalizedPath.Equals(normalizedRoot, StringComparison.OrdinalIgnoreCase) ||
+               normalizedPath.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ContainsForbiddenShellTokens(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+        return ForbiddenShellTokens.Any(token => value.Contains(token, StringComparison.Ordinal));
+    }
 }
 
 public sealed class SafeProcessRequest
@@ -306,6 +328,28 @@ public sealed class SafeProcessResult
         TimedOut = false,
         ExitCode = -1,
         ReasonCode = PermissionReasonCodes.ToolDeniedByPolicy,
+        Message = message,
+        Command = command,
+        WorkingDirectory = workingDirectory
+    };
+
+    public static SafeProcessResult BlockedProcessExecution(string message, string command, string workingDirectory) => new()
+    {
+        Success = false,
+        TimedOut = false,
+        ExitCode = -1,
+        ReasonCode = "BLOCKED_PROCESS_EXECUTION",
+        Message = message,
+        Command = command,
+        WorkingDirectory = workingDirectory
+    };
+
+    public static SafeProcessResult InvalidCommand(string message, string command, string workingDirectory) => new()
+    {
+        Success = false,
+        TimedOut = false,
+        ExitCode = -1,
+        ReasonCode = "INVALID_COMMAND",
         Message = message,
         Command = command,
         WorkingDirectory = workingDirectory
