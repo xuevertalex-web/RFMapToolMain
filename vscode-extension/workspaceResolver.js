@@ -16,11 +16,18 @@ function resolveWorkspaceRoot(options = {}) {
       };
     }
 
-    return enforceBackendWorkspaceGuard(
-      { workspaceRoot: configuredWorkspaceRoot, reason: 'configured' },
+    const guardedConfigured = enforceBackendWorkspaceGuard(
+      { workspaceRoot: configuredWorkspaceRoot, reason: 'configured', targetWorkspacePath: configuredWorkspaceRoot },
       backendProjectPath,
       allowBackendWorkspace
     );
+    if (!guardedConfigured.workspaceRoot) {
+      return guardedConfigured;
+    }
+    if (options.initializeIfMissing === true) {
+      return ensureProjectWorkspace(guardedConfigured.workspaceRoot, options.projectNameHint);
+    }
+    return guardedConfigured;
   }
 
   const folders = vscode.workspace.workspaceFolders;
@@ -50,6 +57,63 @@ function resolveWorkspaceRoot(options = {}) {
   }
 
   return { workspaceRoot: '', reason: 'ambiguous' };
+}
+
+function ensureProjectWorkspace(targetRoot, projectNameHint) {
+  const sandboxRoot = path.resolve(targetRoot);
+  if (!fs.existsSync(sandboxRoot) || !fs.statSync(sandboxRoot).isDirectory()) {
+    return {
+      workspaceRoot: '',
+      reason: 'configured_not_found',
+      targetWorkspacePath: sandboxRoot
+    };
+  }
+
+  const folderName = buildProjectFolderName(projectNameHint);
+  const projectRoot = path.join(sandboxRoot, folderName);
+  if (!fs.existsSync(projectRoot)) {
+    fs.mkdirSync(projectRoot, { recursive: true });
+    return {
+      workspaceRoot: projectRoot,
+      reason: 'created_from_target_root',
+      workspaceInitialized: true,
+      workspaceInitializationMode: 'created_from_target_root',
+      targetWorkspacePath: sandboxRoot,
+      initializedProjectRoot: projectRoot,
+      suggestedProjectFolderName: folderName
+    };
+  }
+
+  return {
+    workspaceRoot: projectRoot,
+    reason: 'configured',
+    workspaceInitialized: false,
+    workspaceInitializationMode: 'existing',
+    targetWorkspacePath: sandboxRoot,
+    initializedProjectRoot: projectRoot,
+    suggestedProjectFolderName: folderName
+  };
+}
+
+function buildProjectFolderName(hint) {
+  const raw = String(hint || '').trim();
+  const normalized = raw
+    .replace(/[^a-zA-Z0-9\-_ ]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 4)
+    .join('-');
+  if (normalized.length >= 3) {
+    return normalized;
+  }
+
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const hh = String(now.getHours()).padStart(2, '0');
+  const min = String(now.getMinutes()).padStart(2, '0');
+  return `NewProject-${yyyy}${mm}${dd}-${hh}${min}`;
 }
 
 function enforceBackendWorkspaceGuard(state, backendProjectPath, allowBackendWorkspace) {

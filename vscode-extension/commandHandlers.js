@@ -7,17 +7,27 @@ function createExtensionCommandHandlers(options) {
   const runAgent = options.runAgent;
   const getIsAgentRunning = options.getIsAgentRunning;
   const setIsAgentRunning = options.setIsAgentRunning;
+  function workspaceErrorText(workspaceState) {
+    const reason = String(workspaceState && workspaceState.reason || '');
+    if (reason === 'configured_not_found') {
+      return 'Configured target workspace path not found';
+    }
+    if (reason === 'backend_workspace_blocked') {
+      return 'Configured workspace is blocked (backend workspace). Enable allowBackendWorkspace to permit this.';
+    }
+    if (reason === 'not_found') {
+      return 'Workspace not found. Set localCursorAgent.targetWorkspacePath in settings for empty VS Code windows.';
+    }
+    return 'Cannot determine active workspace';
+  }
 
   return {
     async handleRunTask() {
-      const workspaceState = resolveWorkspaceRoot();
-      if (!workspaceState.workspaceRoot && workspaceState.reason === 'not_found') {
-        vscode.window.showErrorMessage('Workspace not found');
-        return;
-      }
-
+      const workspaceState = resolveWorkspaceRoot({
+        initializeIfMissing: true
+      });
       if (!workspaceState.workspaceRoot) {
-        vscode.window.showErrorMessage('Cannot determine active workspace');
+        vscode.window.showErrorMessage(workspaceErrorText(workspaceState));
         return;
       }
 

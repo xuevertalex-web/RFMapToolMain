@@ -602,6 +602,12 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           planRequired,
           nextActionCandidates
         );
+        const workspaceInitializationRequired = structured && structured.workspaceInitializationRequired === true;
+        const workspaceInitialized = structured && structured.workspaceInitialized === true;
+        const workspaceInitializationMode = normalizeOptionalText(structured && structured.workspaceInitializationMode);
+        const targetWorkspacePath = normalizeOptionalText(structured && structured.targetWorkspacePath);
+        const initializedProjectRoot = normalizeOptionalText(structured && structured.initializedProjectRoot);
+        const suggestedProjectFolderName = normalizeOptionalText(structured && structured.suggestedProjectFolderName);
 
         return {
           ok,
@@ -629,6 +635,12 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           activeWorkspaceUsed,
           sandboxRoot,
           worktreeRoot,
+          workspaceInitializationRequired,
+          workspaceInitialized,
+          workspaceInitializationMode,
+          targetWorkspacePath,
+          initializedProjectRoot,
+          suggestedProjectFolderName,
           modelUsed,
           reasonCode,
           continuationHint,

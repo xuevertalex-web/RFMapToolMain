@@ -27,19 +27,29 @@ function activate(context) {
       borderRadius: '3px'
     });
 
+    const getBackendProjectPath = () => String(
+      vscode.workspace.getConfiguration('localCursorAgent').get('backendProjectPath') || ''
+    ).trim();
+    const getTargetWorkspacePath = () => String(
+      vscode.workspace.getConfiguration('localCursorAgent').get('targetWorkspacePath') || ''
+    ).trim();
+    const getAllowBackendWorkspace = () => vscode.workspace.getConfiguration('localCursorAgent').get('allowBackendWorkspace') === true;
+    const resolveConfiguredWorkspaceRoot = () => resolveWorkspaceRoot({
+      configuredWorkspaceRoot: getTargetWorkspacePath(),
+      backendProjectPath: getBackendProjectPath(),
+      allowBackendWorkspace: getAllowBackendWorkspace()
+    });
+
     const editorNavigation = createEditorNavigationService({
       changedRangeDecoration,
       output,
-      resolveWorkspaceRoot
+      resolveWorkspaceRoot: resolveConfiguredWorkspaceRoot
     });
     const exportService = createExportService({
       extensionRoot,
       output,
-      resolveWorkspaceRoot
+      resolveWorkspaceRoot: resolveConfiguredWorkspaceRoot
     });
-    const getBackendProjectPath = () => String(
-      vscode.workspace.getConfiguration('localCursorAgent').get('backendProjectPath') || ''
-    ).trim();
     let selectedModelState = getSelectedOllamaModelSync(context.globalState);
     const runConfiguredAgent = (panel, workspaceRoot, task, runOutput, runExtensionRoot, selectedModelOverride) => {
       const runModel = String(selectedModelOverride || '').trim() || selectedModelState.model;
@@ -48,7 +58,7 @@ function activate(context) {
     const commandHandlers = createExtensionCommandHandlers({
       output,
       extensionRoot,
-      resolveWorkspaceRoot,
+      resolveWorkspaceRoot: resolveConfiguredWorkspaceRoot,
       runAgent: runConfiguredAgent,
       getIsAgentRunning: () => isAgentRunning,
       setIsAgentRunning: value => {
@@ -65,7 +75,7 @@ function activate(context) {
       panel: webviewHost,
       output,
       extensionRoot,
-      resolveWorkspaceRoot,
+      resolveWorkspaceRoot: resolveConfiguredWorkspaceRoot,
       runAgent: runConfiguredAgent,
       hasRunningProcess,
       stopCurrentAgent,

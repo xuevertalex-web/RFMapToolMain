@@ -95,6 +95,12 @@ const webviewClientStatusRenderer = `function renderRunStatus(run) {
         }
         rows.push(['model used', modelUsed]);
         rows.push(['execution mode', normalizeStatusCell(run.executionMode, 'active-workspace')]);
+        rows.push(['workspace init required', String(run.workspaceInitializationRequired === true)]);
+        rows.push(['workspace initialized', String(run.workspaceInitialized === true)]);
+        if (normalizeStatusCell(run.workspaceInitializationMode, '')) rows.push(['workspace init mode', normalizeStatusCell(run.workspaceInitializationMode, '')]);
+        if (normalizeStatusCell(run.targetWorkspacePath, '')) rows.push(['target workspace path', normalizeStatusCell(run.targetWorkspacePath, '')]);
+        if (normalizeStatusCell(run.initializedProjectRoot, '')) rows.push(['initialized project root', normalizeStatusCell(run.initializedProjectRoot, '')]);
+        if (normalizeStatusCell(run.suggestedProjectFolderName, '')) rows.push(['suggested project folder', normalizeStatusCell(run.suggestedProjectFolderName, '')]);
         rows.push(['execution workspace', normalizeStatusCell(run.executionWorkspaceKind, 'active workspace')]);
         rows.push(['active workspace used', String(run.activeWorkspaceUsed !== false)]);
         if (normalizeStatusCell(run.sandboxRoot, '')) rows.push(['sandbox root', normalizeStatusCell(run.sandboxRoot, '')]);

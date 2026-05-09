@@ -9,6 +9,20 @@ function createPanelRunController(options) {
   const getIsAgentRunning = options.getIsAgentRunning;
   const setIsAgentRunning = options.setIsAgentRunning;
 
+  function workspaceErrorText(workspaceState) {
+    const reason = String(workspaceState && workspaceState.reason || '');
+    if (reason === 'configured_not_found') {
+      return 'Configured target workspace path not found';
+    }
+    if (reason === 'backend_workspace_blocked') {
+      return 'Configured workspace is blocked (backend workspace). Enable allowBackendWorkspace to permit this.';
+    }
+    if (reason === 'not_found') {
+      return 'Workspace not found. Set localCursorAgent.targetWorkspacePath in settings for empty VS Code windows.';
+    }
+    return 'Cannot determine active workspace';
+  }
+
   async function handleSendTask(message) {
     const task = String(message.task || '').trim();
     if (!task) {
@@ -22,14 +36,12 @@ function createPanelRunController(options) {
     }
 
     try {
-      const workspaceState = resolveWorkspaceRoot();
-      if (!workspaceState.workspaceRoot && workspaceState.reason === 'not_found') {
-        postWorkspaceFailure('Workspace not found');
-        return;
-      }
-
+      const workspaceState = resolveWorkspaceRoot({
+        initializeIfMissing: true,
+        projectNameHint: task
+      });
       if (!workspaceState.workspaceRoot) {
-        postWorkspaceFailure('Cannot determine active workspace');
+        postWorkspaceFailure(workspaceErrorText(workspaceState), workspaceState);
         return;
       }
 
@@ -71,9 +83,24 @@ function createPanelRunController(options) {
     }
   }
 
-  function postWorkspaceFailure(text) {
+  function postWorkspaceFailure(text, workspaceState) {
     panel.webview.postMessage({ type: 'result', text });
-    panel.webview.postMessage({ type: 'agentFinished', ok: false, error: text });
+    panel.webview.postMessage({
+      type: 'agentFinished',
+      ok: false,
+      error: text,
+      structuredResult: {
+        ok: false,
+        finalStatus: 'error',
+        message: text,
+        workspaceInitializationRequired: true,
+        workspaceInitialized: false,
+        workspaceInitializationMode: 'requires_user_selection',
+        targetWorkspacePath: String(workspaceState && workspaceState.targetWorkspacePath || ''),
+        initializedProjectRoot: String(workspaceState && workspaceState.initializedProjectRoot || ''),
+        suggestedProjectFolderName: String(workspaceState && workspaceState.suggestedProjectFolderName || 'NewProject')
+      }
+    });
   }
 
   return { handleSendTask };
