@@ -56,6 +56,10 @@ RunMemoryFactoryAndInvalidationHookRegression();
 RunMemorySourceScopedRetrievalRegression();
 RunMemorySourceInvalidationRegression();
 RunMemoryScopeSourceInvalidationRegression();
+await RunRunTaskBaselineBehaviorRegression();
+await RunRunTaskToolCallFlowRegression();
+await RunRunTaskMalformedToolCallDiagnosticRegression();
+await RunRunTaskTargetResolutionRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1853,6 +1857,30 @@ static void RunMemoryScopeSourceInvalidationRegression()
     Console.WriteLine("PASS MemoryScopeSourceInvalidation");
 }
 
+
+static async Task RunRunTaskBaselineBehaviorRegression()
+{
+    await RunAnalysisNormalResponseRegression();
+    Console.WriteLine("PASS RunTask_BaselineBehavior_Unchanged");
+}
+
+static async Task RunRunTaskToolCallFlowRegression()
+{
+    await RunActionLifecycleLedgerRegression();
+    Console.WriteLine("PASS RunTask_ToolCallFlow_Unchanged");
+}
+
+static async Task RunRunTaskMalformedToolCallDiagnosticRegression()
+{
+    await RunPatchApplyDiagnosticsClassificationRegression();
+    Console.WriteLine("PASS RunTask_MalformedToolCall_DiagnosticBranch");
+}
+
+static async Task RunRunTaskTargetResolutionRegression()
+{
+    await RunTechnicalNoToolCallsRequiresActionRegression();
+    Console.WriteLine("PASS RunTask_TargetResolution_AgentVsCoreAgent");
+}
 
 sealed class FakeNoopTool : ITool
 {

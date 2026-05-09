@@ -69,120 +69,57 @@ namespace LocalCursorAgent.Core
         /// </summary>
         public async Task<string> RunTask(string task)
         {
-            var bootstrap = PrepareRunTaskBootstrap(task);
-            if (bootstrap.IsRejected)
-            {
-                return bootstrap.RejectedResult!;
-            }
-
-            var runStartedUtc = bootstrap.RunStartedUtc;
-            var tracer = bootstrap.Tracer;
-            var requestedNewFile = bootstrap.RequestedNewFile;
+            var context = new RunContext(task);
 
             try
             {
-                var startupPreparation = await PrepareStartupAsync(task, requestedNewFile);
-                if (!startupPreparation.Success)
-                {
-                    return startupPreparation.FailureResult!;
-                }
+                var precheck = PrecheckStage(context);
+                if (precheck.ShouldReturn)
+                    return precheck.FinalResult!;
 
-                var targetResolution = startupPreparation.TargetResolution!;
-                var gatedTargetFiles = startupPreparation.GatedTargetFiles;
+                var indexing = await IndexingStage(context);
+                if (indexing.ShouldReturn)
+                    return indexing.FinalResult!;
 
-                var runState = new AgentRunState();
-                var changedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var changedHints = new Dictionary<string, ChangedHint>(StringComparer.OrdinalIgnoreCase);
-                var changedRanges = new Dictionary<string, ChangedRange>(StringComparer.OrdinalIgnoreCase);
-                var changedKinds = new Dictionary<string, ChangedKind>(StringComparer.OrdinalIgnoreCase);
-                var analysisOnlyTask = TaskPrecheckHeuristics.IsAnalysisOnlyTask(task);
-                var runtimeClient = _llmClient as ILlmRuntimeClient;
-                var runtimeMetadata = runtimeClient?.Metadata;
-                var unrestrictedSandboxMode = AgentExecutionProfile.IsUnrestrictedInsideSandbox(_sessionContext);
-
-                LogExecutionProfileIfNeeded(unrestrictedSandboxMode, tracer);
-                LogIterationLoopStarted(tracer);
+                TargetResolutionStage(context);
+                SandboxSetupStage(context);
+                var contextBuild = ContextBuildStage(context);
+                if (contextBuild.ShouldReturn)
+                    return contextBuild.FinalResult!;
 
                 for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++)
                 {
-                    runState.ActualIterationsUsed = iteration + 1;
-                    LogIterationStarted(tracer, runState.ActualIterationsUsed);
+                    context.RunState.ActualIterationsUsed = iteration + 1;
+                    LogIterationStarted(context.Tracer!, context.RunState.ActualIterationsUsed);
 
-                    var preparedContextResult = await TryPrepareIterationContextAsync(task, analysisOnlyTask, gatedTargetFiles);
-                    if (!preparedContextResult.Success)
-                    {
-                        return preparedContextResult.FailureResult!;
-                    }
+                    var promptBuild = PromptBuildStage(context, iteration);
+                    if (promptBuild.ShouldReturn)
+                        return promptBuild.FinalResult!;
 
-                    var preparedContext = preparedContextResult.PreparedContext!;
-                    var resolvedFiles = preparedContext.ResolvedFiles;
-                    var contextInfo = preparedContext.ContextInfo;
-                    var contextString = preparedContext.ContextString;
-                    runState.LastSuccessfulStep = "ContextBuilt";
-                    runState.LastKnownAction = $"Built context with {resolvedFiles.Count} resolved files";
+                    var llmCall = await LlmCallStage(context, iteration);
+                    if (llmCall.ShouldReturn)
+                        return llmCall.FinalResult!;
 
-                    var (promptKind, prompt) = BuildIterationPrompt(task, analysisOnlyTask, iteration, runState.CurrentResponse, contextString, tracer);
-                    runState.ModelCallStarted = true;
-                    var modelRequest = await ExecuteModelRequestAsync(prompt, promptKind, iteration, runtimeClient, tracer);
-                    var runtimeResult = modelRequest.RuntimeResult;
-                    runState.CurrentResponse = modelRequest.Response;
-                    runState.LastSuccessfulStep = "ModelRequestCompleted";
-                    runState.LastKnownAction = "Model response received";
+                    var toolProcessing = await ToolProcessingStage(context);
+                    if (toolProcessing.ShouldReturn)
+                        return toolProcessing.FinalResult!;
 
-                    var modelDecision = HandleModelResponseDecision(
-                        task,
-                        analysisOnlyTask,
-                        runtimeResult,
-                        iteration,
-                        runState.CurrentResponse,
-                        contextInfo,
-                        runStartedUtc,
-                        runtimeMetadata,
-                        changedFiles,
-                        changedHints,
-                        changedRanges,
-                        changedKinds);
-                    if (modelDecision.IsHandled)
-                    {
-                        return modelDecision.FinalResult!;
-                    }
-
-                    var toolHandling = await HandleIterationToolingAsync(
-                        task,
-                        analysisOnlyTask,
-                        requestedNewFile,
-                        runState.CurrentResponse,
-                        resolvedFiles,
-                        targetResolution,
-                        runState.LastDeniedToolResult,
-                        runState.LastBuildErrorSignature,
-                        runState.LastBuildFailureCode,
-                        changedFiles,
-                        changedHints,
-                        changedRanges,
-                        changedKinds,
-                        tracer);
-                    var toolingApply = ApplyToolHandlingToRunState(runState, toolHandling);
-                    if (toolingApply.ShouldReturn)
-                    {
-                        return toolingApply.FinalResult!;
-                    }
-
-                    if (toolingApply.ShouldContinue)
-                    {
+                    var mutation = MutationStage(context);
+                    if (mutation.ShouldContinue)
                         continue;
-                    }
 
-                    LogIterationCompleted(tracer, runState.ActualIterationsUsed, runState.LastSuccessfulStep, runState.LastKnownAction);
+                    VerificationStage(context);
+                    RepairLoopStage(context);
+                    LogIterationCompleted(context.Tracer!, context.RunState.ActualIterationsUsed, context.RunState.LastSuccessfulStep, context.RunState.LastKnownAction);
                 }
 
-                return BuildTerminalFailureResult(tracer, runState);
+                return FinalizationStage(context);
             }
             catch (Exception ex)
             {
                 var error = $"Agent error: {ex.Message}";
                 _memory.Add("error", error, "UnhandledException");
-                tracer.LogActionEvent("TaskLifecycle", "Agent", ExecutionTracer.ActionLogLevel.Error, "failed", "UNHANDLED_EXCEPTION", new Dictionary<string, object?>
+                context.Tracer!.LogActionEvent("TaskLifecycle", "Agent", ExecutionTracer.ActionLogLevel.Error, "failed", "UNHANDLED_EXCEPTION", new Dictionary<string, object?>
                 {
                     { "exception", ex.ToString() }
                 });
