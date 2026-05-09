@@ -504,8 +504,16 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
           .replace(/'/g, '&#39;');
       }`;
 
+const approvalCopyHelper = `function buildApprovalCopyToken(item) {
+        if (!item || typeof item !== 'object') return '';
+        const proposalId = String(item.proposalId || '').trim();
+        if (proposalId) return 'APPROVED:' + proposalId;
+        const token = String(item.approvalTokenFormat || '').trim();
+        return token.startsWith('APPROVED:') ? token : '';
+      }`;
+
 function getWebviewClientUiHelpers() {
-  return webviewClientUiHelpers;
+  return webviewClientUiHelpers + '\n' + approvalCopyHelper;
 }
 
 module.exports = { getWebviewClientUiHelpers };

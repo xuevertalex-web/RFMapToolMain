@@ -5,6 +5,7 @@ const { getWebviewClientModelSelector } = require('./webviewClientModelSelector'
 const { getWebviewClientRunNormalization } = require('./webviewClientRunNormalization');
 const { getWebviewClientStatusRenderer } = require('./webviewClientStatusRenderer');
 const { getWebviewClientSummaryRenderer } = require('./webviewClientSummaryRenderer');
+const { getWebviewClientUiHelpers } = require('./webviewClientUiHelpers');
 const { buildModelSelectionState } = require('./modelSelection');
 
 function createClassList() {
@@ -136,6 +137,7 @@ function buildContext() {
 
   vm.runInNewContext(getWebviewClientModelSelector(), context, { filename: 'webviewClientModelSelector.js' });
   vm.runInNewContext(getWebviewClientRunNormalization(), context, { filename: 'webviewClientRunNormalization.js' });
+  vm.runInNewContext(getWebviewClientUiHelpers(), context, { filename: 'webviewClientUiHelpers.js' });
   vm.runInNewContext(getWebviewClientStatusRenderer(), context, { filename: 'webviewClientStatusRenderer.js' });
   vm.runInNewContext(getWebviewClientSummaryRenderer(), context, { filename: 'webviewClientSummaryRenderer.js' });
   return context;
@@ -723,6 +725,7 @@ function testStatusAndSummaryRendering() {
   assert.ok(fallbackRows.some(([key, value]) => key === 'approval status denied' && value === '2'));
   assert.ok(fallbackRows.some(([key]) => key === 'approval proposal id'));
   assert.ok(fallbackRows.some(([key]) => key === 'approval token format'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'copy token' && value === 'APPROVED:p-1'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'context files' && value === '1'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'context chars' && value === '1200'));
   assert.ok(fallbackRows.some(([key]) => key === 'context file'));
@@ -750,9 +753,16 @@ function testStatusAndSummaryRendering() {
 
 }
 
+function testApprovalCopyHelper() {
+  const context = buildContext();
+  assert.strictEqual(context.buildApprovalCopyToken({ proposalId: 'abc123' }), 'APPROVED:abc123');
+  assert.strictEqual(context.buildApprovalCopyToken({ approvalTokenFormat: 'APPROVED:xyz' }), 'APPROVED:xyz');
+}
+
 testSelectorAndStatusPresence();
 testModelStateHydrationAndSelectorOptions();
 testRunNormalizationContracts();
 testStatusAndSummaryRendering();
+testApprovalCopyHelper();
 
 console.log('webview rendering tests passed');

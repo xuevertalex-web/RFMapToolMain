@@ -66,6 +66,12 @@ const webviewClientStatusRenderer = `function renderRunStatus(run) {
         if (firstApproval) {
           rows.push(['approval proposal id', normalizeStatusCell(firstApproval.proposalId, 'not available')]);
           rows.push(['approval token format', normalizeStatusCell(firstApproval.approvalTokenFormat, 'not available')]);
+          const copyToken = typeof buildApprovalCopyToken === 'function'
+            ? buildApprovalCopyToken(firstApproval)
+            : normalizeStatusCell(firstApproval.approvalTokenFormat, '');
+          if (copyToken) {
+            rows.push(['copy token', copyToken]);
+          }
         }
         rows.push(['model used', modelUsed]);
         rows.push(['execution mode', normalizeStatusCell(run.executionMode, 'active-workspace')]);
