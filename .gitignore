@@ -1,16 +1,32 @@
 localcursoragent.secrets.json
+# .NET
 bin/
 obj/
+
+# runtime
 .agent-runtime/
 agent-runtime/
-.vs/
-.vscode/.ropeproject/
-desktop-app/node_modules/
-node_modules/
-*.user
-*.suo
+logs/
+tmp/
 *.log
 *.tmp
+
+# Visual Studio
+.vs/
+
+# VS Code
+.vscode/
+.vscode/.ropeproject/
+
+# dependencies
+desktop-app/node_modules/
+node_modules/
+
+# IDE/user
+*.user
+*.suo
+
+# artifacts
 *.cache
 TestResults/
 coverage/
