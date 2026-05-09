@@ -90,8 +90,13 @@ namespace LocalCursorAgent.Indexing
         {
             if (fileSymbols.Count == 0)
                 return 0;
-
-            return fileSymbols.Count(symbol => query.Contains(symbol, StringComparison.Ordinal));
+            var queryTokens = query
+                .Split(new[] { ' ', '\t', '\r', '\n', '.', ',', ':', ';', '(', ')', '[', ']', '{', '}', '/', '\\' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return fileSymbols.Count(symbol =>
+                query.Contains(symbol, StringComparison.OrdinalIgnoreCase) ||
+                queryTokens.Contains(symbol));
         }
     }
 

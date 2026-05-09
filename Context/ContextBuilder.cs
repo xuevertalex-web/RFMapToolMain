@@ -26,6 +26,9 @@ namespace LocalCursorAgent.Context
         private const int LOW_COMPLEXITY_MAX_FILES = 6;
         private const int MEDIUM_COMPLEXITY_MAX_FILES = 10;
         private const int HIGH_COMPLEXITY_MAX_FILES = 15;
+        private const int LOW_COMPLEXITY_MAX_CHARS = 18000;
+        private const int MEDIUM_COMPLEXITY_MAX_CHARS = 30000;
+        private const int HIGH_COMPLEXITY_MAX_CHARS = 45000;
 
         public ContextBuilder(string projectPath, VectorStore vectorStore, FileStateManager fileStateManager, ProjectSymbolDirectory symbolDirectory, ExecutionTracer? tracer = null, AgentMemorySystem? memorySystem = null)
         {
@@ -138,8 +141,14 @@ namespace LocalCursorAgent.Context
                 .OrderByDescending(x => x.MatchPriority)
                 .ThenByDescending(x => x.SortScore)
                 .ThenBy(x => x.FilePath, StringComparer.OrdinalIgnoreCase)
-                .Take(effectiveBudget)
                 .ToList();
+
+            var maxChars = plan.Complexity switch
+            {
+                ContextComplexity.High => HIGH_COMPLEXITY_MAX_CHARS,
+                ContextComplexity.Medium => MEDIUM_COMPLEXITY_MAX_CHARS,
+                _ => LOW_COMPLEXITY_MAX_CHARS
+            };
 
             _tracer.LogEvent("ContextRanking", "Ranked context candidates", new Dictionary<string, object>
             {
@@ -153,8 +162,8 @@ namespace LocalCursorAgent.Context
                 { "SelectionStrategy", strategy.ToString() },
                 { "StrategyApplied", true },
                 { "ProfileSummary", _memorySystem.GetTaskProfileSummary(query) },
-                { "SelectedFiles", ranked.Select(x => x.FilePath).ToArray() },
-                { "Ranking", ranked.Select(x => $"{x.FilePath}:{x.MatchPriority}:{x.SortScore:F3}").ToArray() }
+                { "SelectedFiles", ranked.Take(effectiveBudget).Select(x => x.FilePath).ToArray() },
+                { "Ranking", ranked.Select(x => $"{x.FilePath}:{x.MatchPriority}:{x.SortScore:F3}:{BuildInclusionReason(x, targetToken)}").ToArray() }
             });
 
             var context = new ContextInformation
@@ -164,23 +173,25 @@ namespace LocalCursorAgent.Context
 
             foreach (var file in ranked)
             {
+                if (context.SelectedFiles.Count >= effectiveBudget)
+                    break;
+
+                var absolutePath = Path.Combine(_projectPath, file.FilePath);
+                var content = File.Exists(absolutePath)
+                    ? _textFileService.Read(absolutePath).NormalizedText
+                    : _vectorStore.GetMetadata(file.FilePath) ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(content))
+                    continue;
+
+                if (context.TotalLength > 0 && context.TotalLength + content.Length > maxChars)
+                    continue;
+
                 context.SelectedFiles.Add(file.FilePath);
                 context.FileStateFlags[file.FilePath] = _fileStateManager.GetStateFlag(file.FilePath) ?? "(Clean)";
                 context.RelevantSymbols[file.FilePath] = _symbolDirectory.GetSymbols(file.FilePath);
-
-                var absolutePath = Path.Combine(_projectPath, file.FilePath);
-                if (File.Exists(absolutePath))
-                {
-                    var snapshot = _textFileService.Read(absolutePath);
-                    context.FileContents[file.FilePath] = snapshot.NormalizedText;
-                }
-                else
-                {
-                    context.FileContents[file.FilePath] = _vectorStore.GetMetadata(file.FilePath) ?? string.Empty;
-                }
+                context.FileContents[file.FilePath] = content;
+                context.TotalLength += content.Length;
             }
-
-            context.TotalLength = context.FileContents.Values.Sum(v => v.Length);
             return context;
         }
 
@@ -446,6 +457,14 @@ namespace LocalCursorAgent.Context
                 return 1;
 
             return 0;
+        }
+
+        private static string BuildInclusionReason(RankedFileScore score, string targetToken)
+        {
+            if (!string.IsNullOrWhiteSpace(targetToken) && score.MatchPriority >= 3) return "exact_path_match";
+            if (!string.IsNullOrWhiteSpace(targetToken) && score.MatchPriority == 2) return "same_directory_or_prefix";
+            if (score.SymbolMatches > 0) return "symbol_match";
+            return "fallback";
         }
 
         private ContextSelectionStrategy DetermineSelectionStrategy(TaskTypeProfile? taskProfile)

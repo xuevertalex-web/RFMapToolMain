@@ -68,6 +68,7 @@ await RunRunTaskTargetResolutionRegression();
 await RunTargetResolutionPathPreservingRegression();
 await RunStructuredActionContractCompatibilityRegression();
 await RunIsolatedExecutionWorkspaceRoutingRegression();
+await RunContextSelectionPrecisionRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -2351,6 +2352,36 @@ static async Task RunIsolatedExecutionWorkspaceRoutingRegression()
     AssertTrue(normalCmd.WorkingDirectory.Equals(activeWorkspaceRoot, StringComparison.OrdinalIgnoreCase), "Expected normal command working directory to stay active workspace.");
 
     Console.WriteLine("PASS IsolatedExecutionWorkspace_Routing");
+}
+
+static async Task RunContextSelectionPrecisionRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    Directory.CreateDirectory(Path.Combine(workspaceRoot, "Core"));
+    Directory.CreateDirectory(Path.Combine(workspaceRoot, "Noise"));
+
+    var targetFile = Path.Combine(workspaceRoot, "Core", "TargetService.cs");
+    var relatedFile = Path.Combine(workspaceRoot, "Core", "TargetServiceHelper.cs");
+    var noiseFile = Path.Combine(workspaceRoot, "Noise", "Unrelated.cs");
+    await File.WriteAllTextAsync(targetFile, "public class TargetService { public void Handle() {} }");
+    await File.WriteAllTextAsync(relatedFile, "public class TargetServiceHelper { public void Assist() {} }");
+    await File.WriteAllTextAsync(noiseFile, new string('x', 50000));
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    var builder = new ContextBuilder(workspaceRoot, new VectorStore(), new FileStateManager(), new ProjectSymbolDirectory(), tracer);
+
+    var semantic = new List<string> { "Noise/Unrelated.cs", "Core/TargetService.cs", "Core/TargetServiceHelper.cs" };
+    var symbols = new List<string> { "Core/TargetService.cs", "Core/TargetServiceHelper.cs" };
+    var info = builder.BuildContext("Fix TargetService.Handle method", semantic, symbols, 6);
+
+    AssertTrue(info.SelectedFiles.Contains("Core/TargetService.cs", StringComparer.OrdinalIgnoreCase), "Expected exact target file in context.");
+    AssertTrue(!info.SelectedFiles.Contains("Noise/Unrelated.cs", StringComparer.OrdinalIgnoreCase), "Expected unrelated oversized file to be excluded by relevance/budget.");
+    AssertTrue(info.TotalLength > 0 && info.TotalLength <= 30000, "Expected context to respect medium complexity size budget.");
+    Console.WriteLine("PASS ContextSelection_PrecisionAndBudget");
 }
 
 static async Task<(JsonElement structured, string workspaceRoot, string runtimeRoot)> RunAgentWithAdapter(ILlmProviderAdapter adapter)
