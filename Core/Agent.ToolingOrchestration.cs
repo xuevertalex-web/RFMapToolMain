@@ -20,44 +20,22 @@ namespace LocalCursorAgent.Core
             Dictionary<string, ChangedKind> changedKinds,
             ExecutionTracer tracer)
         {
-            if (!_toolCaller.ContainsToolCalls(currentResponse))
-            {
-                return HandleNoToolCallIterationResult(
-                    task,
-                    currentResponse,
-                    requestedNewFile,
-                    lastDeniedToolResult,
-                    lastBuildErrorSignature,
-                    lastBuildFailureCode);
-            }
+            var precheckResult = TryHandleToolingPrecheck(
+                task,
+                analysisOnlyTask,
+                requestedNewFile,
+                currentResponse,
+                targetResolution,
+                lastDeniedToolResult,
+                lastBuildErrorSignature,
+                lastBuildFailureCode,
+                tracer);
+            if (precheckResult.FinalResult != null)
+                return precheckResult.FinalResult;
 
-            var toolCalls = _toolCaller.ParseToolCalls(currentResponse);
-            if (toolCalls.Count == 0)
-            {
-                var emptyToolResult = HandleEmptyToolCallIterationResult(
-                    task,
-                    analysisOnlyTask,
-                    currentResponse,
-                    lastDeniedToolResult,
-                    lastBuildErrorSignature,
-                    lastBuildFailureCode);
-                if (emptyToolResult != null)
-                    return emptyToolResult;
-            }
-
+            var toolCalls = precheckResult.ToolCalls;
             var mutationIntentTask = MutationIntentDetector.IsMutationIntentTask(task) || requestedNewFile != null;
-            var mutationCall = toolCalls.FirstOrDefault(ToolCallMutationHeuristics.IsMutationLikeToolCall);
-            if (mutationCall != null &&
-                TryValidateMutationToolCalls(task, toolCalls, mutationCall, targetResolution, tracer, out var gateFailureResult))
-            {
-                return BuildMutationGateFailureResult(
-                    currentResponse,
-                    gateFailureResult!,
-                    lastDeniedToolResult,
-                    lastBuildErrorSignature,
-                    lastBuildFailureCode,
-                    toolCalls.Count);
-            }
+            var mutationCall = precheckResult.MutationCall;
 
             var patchStarted = toolCalls.Any(ToolCallMutationHeuristics.IsMutationLikeToolCall);
             var toolResults = await _toolCaller.ExecuteToolCalls(toolCalls);
