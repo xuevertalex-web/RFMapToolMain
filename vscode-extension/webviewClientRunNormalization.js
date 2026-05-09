@@ -52,6 +52,15 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         return normalizeText([provider, model].filter(Boolean).join(' / '), 'not available');
       }
 
+      function normalizeExecutionWorkspaceKind(kind, activeWorkspaceUsed) {
+        const normalized = normalizeOptionalText(kind).toLowerCase();
+        if (normalized === 'sandbox') return 'sandbox';
+        if (normalized === 'worktree') return 'worktree';
+        if (normalized === 'active-workspace' || normalized === 'active_workspace') return 'active workspace';
+        if (activeWorkspaceUsed === true) return 'active workspace';
+        return normalizeText(kind, 'active workspace');
+      }
+
       function normalizeEmbeddingsSummary(embeddingsStatus, degradedFlags) {
         const normalizedStatus = normalizeOptionalText(embeddingsStatus).toLowerCase();
         const flags = Array.isArray(degradedFlags)
@@ -484,6 +493,13 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         const gpuUsageMeasured = typeof (structured && structured.gpuUsageMeasured) === 'boolean'
           ? structured.gpuUsageMeasured
           : false;
+        const executionMode = normalizeText(structured && structured.executionMode, 'active-workspace');
+        const activeWorkspaceUsed = typeof (structured && structured.activeWorkspaceUsed) === 'boolean'
+          ? structured.activeWorkspaceUsed
+          : true;
+        const executionWorkspaceKind = normalizeExecutionWorkspaceKind(structured && structured.executionWorkspaceKind, activeWorkspaceUsed);
+        const sandboxRoot = normalizeOptionalText(structured && structured.sandboxRoot);
+        const worktreeRoot = normalizeOptionalText(structured && structured.worktreeRoot);
         const modelUsed = normalizeModelUsedText(provider, model);
         const duration = normalizeDurationText(structured);
         const fallbackReason = normalizeOptionalText(structured && structured.fallbackReason);
@@ -547,6 +563,11 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           runtimeTuningApplied,
           runtimeTuningWarnings,
           gpuUsageMeasured,
+          executionMode,
+          executionWorkspaceKind,
+          activeWorkspaceUsed,
+          sandboxRoot,
+          worktreeRoot,
           modelUsed,
           reasonCode,
           continuationHint,

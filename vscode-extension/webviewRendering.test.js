@@ -202,6 +202,11 @@ function testRunNormalizationContracts() {
       finalStatus: 'success',
       summary: 'analysis complete',
       message: 'done',
+      executionMode: 'active-workspace',
+      executionWorkspaceKind: 'active-workspace',
+      activeWorkspaceUsed: true,
+      sandboxRoot: 'C:/repo/workspace',
+      worktreeRoot: 'C:/repo/workspace',
       model: 'qwen2.5-coder:7b-instruct-q4_K_M',
       provider: 'ollama',
       buildStarted: false,
@@ -247,6 +252,11 @@ function testRunNormalizationContracts() {
   assert.strictEqual(Array.isArray(success.runtimeTuningWarnings), true);
   assert.strictEqual(success.runtimeTuningWarnings.length, 0);
   assert.strictEqual(success.gpuUsageMeasured, false);
+  assert.strictEqual(success.executionMode, 'active-workspace');
+  assert.strictEqual(success.executionWorkspaceKind, 'active workspace');
+  assert.strictEqual(success.activeWorkspaceUsed, true);
+  assert.strictEqual(success.sandboxRoot, 'C:/repo/workspace');
+  assert.strictEqual(success.worktreeRoot, 'C:/repo/workspace');
   assertNoMojibake(success.summary, 'success summary');
 
   const timeoutFallback = context.normalizeRunResult({
@@ -550,6 +560,11 @@ function testStatusAndSummaryRendering() {
     embeddingsWarning: false,
     duration: '500 ms',
     workspace: 'workspace',
+    executionMode: 'active-workspace',
+    executionWorkspaceKind: 'active workspace',
+    activeWorkspaceUsed: true,
+    sandboxRoot: 'C:/repo/workspace',
+    worktreeRoot: 'C:/repo/workspace',
     taskPreview: 'analysis task',
     messageText: 'done',
     summary: 'analysis complete'
@@ -576,6 +591,11 @@ function testStatusAndSummaryRendering() {
   assert.ok(successRows.some(([key, value]) => key === 'approval status denied' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'approval status n/a' && value === '0'));
   assert.ok(successRows.some(([key, value]) => key === 'model used' && value === 'ollama / qwen2.5-coder:7b-instruct-q4_K_M'));
+  assert.ok(successRows.some(([key, value]) => key === 'execution mode' && value === 'active-workspace'));
+  assert.ok(successRows.some(([key, value]) => key === 'execution workspace' && value === 'active workspace'));
+  assert.ok(successRows.some(([key, value]) => key === 'active workspace used' && value === 'true'));
+  assert.ok(successRows.some(([key, value]) => key === 'sandbox root' && value === 'C:/repo/workspace'));
+  assert.ok(successRows.some(([key, value]) => key === 'worktree root' && value === 'C:/repo/workspace'));
   assert.ok(successRows.some(([key, value]) => key === 'runtime profile' && value === 'ollama/qwen2.5-coder-7b-quality-gpu-tuned'));
   assert.ok(successRows.some(([key, value]) => key === 'runtime endpoint' && value === 'http://localhost:11434'));
   assert.ok(successRows.some(([key, value]) => key === 'configured context window' && value === '8192'));

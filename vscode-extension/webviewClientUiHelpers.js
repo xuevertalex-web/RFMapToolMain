@@ -260,6 +260,11 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
         const modelProvider = normalizeOptionalLogText(payload.provider || payload.modelProvider);
         const model = normalizeOptionalLogText(payload.model);
         const modelText = [modelProvider, model].filter(Boolean).join(' / ');
+        const executionMode = normalizeOptionalLogText(payload.executionMode);
+        const executionWorkspaceKind = normalizeOptionalLogText(payload.executionWorkspaceKind);
+        const activeWorkspaceUsed = typeof payload.activeWorkspaceUsed === 'boolean' ? payload.activeWorkspaceUsed : true;
+        const sandboxRootField = normalizeOptionalLogText(payload.sandboxRoot);
+        const worktreeRootField = normalizeOptionalLogText(payload.worktreeRoot);
         const embeddingsStatus = normalizeOptionalLogText(payload.embeddingsStatus || payload.EmbeddingsStatus);
         const degradedFlags = Array.isArray(payload.degradedFlags)
           ? payload.degradedFlags.map(item => normalizeOptionalLogText(item)).filter(Boolean)
@@ -287,6 +292,11 @@ const webviewClientUiHelpers = `function normalizeFileKey(value) {
         lines.push('ApprovalStatusDenied: ' + String(approvalStatusDenied));
         lines.push('ApprovalStatusNotApplicable: ' + String(approvalStatusNotApplicable));
         lines.push('HostBoundaryPreserved: ' + String(hostBoundaryPreserved));
+        lines.push('ExecutionMode: ' + (executionMode || 'active-workspace'));
+        lines.push('ExecutionWorkspace: ' + (executionWorkspaceKind || (activeWorkspaceUsed ? 'active workspace' : 'not available')));
+        lines.push('ActiveWorkspaceUsed: ' + String(activeWorkspaceUsed));
+        if (sandboxRootField) lines.push('SandboxRoot: ' + sandboxRootField);
+        if (worktreeRootField) lines.push('WorktreeRoot: ' + worktreeRootField);
         for (const item of approvalRequiredActions.slice(0, 3)) {
           const actionType = normalizeOptionalLogText(item.actionType) || 'UnknownAction';
           const rawPath = normalizeOptionalLogText(item.path);

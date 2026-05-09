@@ -52,6 +52,11 @@ const webviewClientStatusRenderer = `function renderRunStatus(run) {
         rows.push(['approval status denied', String(Math.max(0, Number(run.approvalStatusSummary && run.approvalStatusSummary.denied) || 0))]);
         rows.push(['approval status n/a', String(Math.max(0, Number(run.approvalStatusSummary && run.approvalStatusSummary.notApplicable) || 0))]);
         rows.push(['model used', modelUsed]);
+        rows.push(['execution mode', normalizeStatusCell(run.executionMode, 'active-workspace')]);
+        rows.push(['execution workspace', normalizeStatusCell(run.executionWorkspaceKind, 'active workspace')]);
+        rows.push(['active workspace used', String(run.activeWorkspaceUsed !== false)]);
+        if (normalizeStatusCell(run.sandboxRoot, '')) rows.push(['sandbox root', normalizeStatusCell(run.sandboxRoot, '')]);
+        if (normalizeStatusCell(run.worktreeRoot, '')) rows.push(['worktree root', normalizeStatusCell(run.worktreeRoot, '')]);
         rows.push(['runtime profile', normalizeStatusCell(run.runtimeProfile, 'not available')]);
         rows.push(['runtime endpoint', normalizeStatusCell(run.runtimeEndpoint, 'not available')]);
         rows.push(['configured context window', normalizeStatusCell(run.configuredContextWindow, 'not available')]);
