@@ -374,27 +374,43 @@ static async Task RunAnalysisFallbackLlmRequestFailedRegression()
 
 static async Task RunLlmRetrySuccessRegression()
 {
-    var (structured, _, _) = await RunAgentWithAdapter(new FailOnceThenSuccessAdapter("Error: request timed out"));
+    var (structured, _, runtimeRoot) = await RunAgentWithAdapter(new FailOnceThenSuccessAdapter("Error: request timed out"));
     AssertTrue(structured.GetProperty("ok").GetBoolean(), "Expected success after retry.");
     AssertTrue(structured.GetProperty("retryCount").GetInt32() > 0, "Expected retryCount > 0.");
+    var retryEvents = LoadRetryAttemptEvents(runtimeRoot);
+    AssertTrue(retryEvents.Count >= 1, "Expected retry attempt diagnostics events.");
+    var first = retryEvents[0];
+    var firstMetadata = GetCaseInsensitiveProperty(first, "metadata");
+    AssertTrue(GetCaseInsensitiveProperty(firstMetadata, "attempt").GetInt32() == 1, "Expected retry attempt=1.");
+    AssertTrue(GetCaseInsensitiveProperty(firstMetadata, "will_retry").GetBoolean(), "Expected will_retry=true for first failed attempt.");
+    AssertTrue(!GetCaseInsensitiveProperty(firstMetadata, "final_attempt").GetBoolean(), "Expected final_attempt=false for first failed attempt.");
+    AssertTrue(GetCaseInsensitiveProperty(firstMetadata, "delay_ms").GetInt32() > 0, "Expected positive retry delay.");
     Console.WriteLine("PASS LlmRetry_SuccessAfterRetry");
 }
 
 static async Task RunLlmRetryFailRegression()
 {
-    var (structured, _, _) = await RunAgentWithAdapter(new AlwaysThrowAdapter("429 rate limit"));
+    var (structured, _, runtimeRoot) = await RunAgentWithAdapter(new AlwaysThrowAdapter("429 rate limit"));
     AssertTrue(!structured.GetProperty("ok").GetBoolean(), "Expected failure after retry exhaustion.");
     AssertTrue(structured.GetProperty("retryCount").GetInt32() > 0, "Expected retryCount > 0 for fail path.");
     var errorType = structured.GetProperty("errorType").GetString() ?? string.Empty;
     AssertTrue(string.Equals(errorType, "provider_rate_limit", StringComparison.Ordinal), $"Expected provider_rate_limit, got {errorType}.");
+    var retryEvents = LoadRetryAttemptEvents(runtimeRoot);
+    AssertTrue(retryEvents.Count == 3, "Expected retry diagnostics for all 3 failed attempts.");
+    var last = retryEvents[^1];
+    var lastMetadata = GetCaseInsensitiveProperty(last, "metadata");
+    AssertTrue(GetCaseInsensitiveProperty(lastMetadata, "final_attempt").GetBoolean(), "Expected final_attempt=true for last failed attempt.");
+    AssertTrue(!GetCaseInsensitiveProperty(lastMetadata, "will_retry").GetBoolean(), "Expected will_retry=false for last failed attempt.");
     Console.WriteLine("PASS LlmRetry_FailAfterRetries");
 }
 
 static async Task RunLlmRetryNoRetryRegression()
 {
-    var (structured, _, _) = await RunAgentWithAdapter(new StaticSuccessAdapter("analysis success"));
+    var (structured, _, runtimeRoot) = await RunAgentWithAdapter(new StaticSuccessAdapter("analysis success"));
     AssertTrue(structured.GetProperty("ok").GetBoolean(), "Expected first-attempt success.");
     AssertTrue(structured.GetProperty("retryCount").GetInt32() == 0, "Expected retryCount=0 without retries.");
+    var retryEvents = LoadRetryAttemptEvents(runtimeRoot);
+    AssertTrue(retryEvents.Count == 0, "Expected no retry attempt diagnostics for no-retry success.");
     Console.WriteLine("PASS LlmRetry_NoRetryOnFirstSuccess");
 }
 
@@ -1282,6 +1298,53 @@ static async Task RunStructuredActionLifecycleReportingRegression()
     AssertTrue(hasCorrelationId, "Expected non-empty actionCorrelationId in all lifecycle entries.");
 
     Console.WriteLine("PASS StructuredActionLifecycleReporting_ApprovalRequiredAndExecutedSeparation");
+}
+
+static List<JsonElement> LoadRetryAttemptEvents(string runtimeRoot)
+{
+    var runsDir = Path.Combine(runtimeRoot, "logs", "machine", "runs");
+    var eventsFile = Directory.GetFiles(runsDir, "*.events.jsonl")
+        .Select(path => new FileInfo(path))
+        .OrderByDescending(f => f.LastWriteTimeUtc)
+        .FirstOrDefault()?.FullName;
+    AssertTrue(!string.IsNullOrWhiteSpace(eventsFile), "Expected events jsonl file for run.");
+
+    var items = new List<JsonElement>();
+    foreach (var line in File.ReadLines(eventsFile!))
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            continue;
+        using var doc = JsonDocument.Parse(line);
+        if (TryGetCaseInsensitiveProperty(doc.RootElement, "eventType", out var eventType) &&
+            string.Equals(eventType.GetString(), "ModelRetryAttempt", StringComparison.Ordinal))
+            items.Add(doc.RootElement.Clone());
+    }
+
+    return items;
+}
+
+static bool TryGetCaseInsensitiveProperty(JsonElement element, string propertyName, out JsonElement property)
+{
+    if (element.TryGetProperty(propertyName, out property))
+        return true;
+
+    foreach (var candidate in element.EnumerateObject())
+    {
+        if (string.Equals(candidate.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+        {
+            property = candidate.Value;
+            return true;
+        }
+    }
+
+    property = default;
+    return false;
+}
+
+static JsonElement GetCaseInsensitiveProperty(JsonElement element, string propertyName)
+{
+    AssertTrue(TryGetCaseInsensitiveProperty(element, propertyName, out var property), $"Expected property '{propertyName}'.");
+    return property;
 }
 
 static async Task RunEndToEndExecutionPipelineRegression()

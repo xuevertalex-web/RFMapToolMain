@@ -82,21 +82,40 @@ namespace LocalCursorAgent.Core
                 catch (Exception ex)
                 {
                     errorType = ClassifyProviderError(ex.Message);
+                    var delayMs = (int)TimeSpan.FromMilliseconds(200 * attempt).TotalMilliseconds;
+                    var willRetry = attempt < maxAttempts;
+                    var finalAttempt = !willRetry;
                     if (attempt >= maxAttempts)
                     {
+                        tracer.LogActionEvent("ModelRetryAttempt", "Agent", ExecutionTracer.ActionLogLevel.Warning, "failed", errorType, metadata: new Dictionary<string, object?>
+                        {
+                            { "attempt", attempt },
+                            { "reason", ex.Message },
+                            { "delay_ms", 0 },
+                            { "will_retry", false },
+                            { "final_attempt", true }
+                        });
                         _lastLlmRetryCount = retryCount;
                         _lastLlmErrorType = errorType;
                         throw;
                     }
 
                     retryCount++;
+                    tracer.LogActionEvent("ModelRetryAttempt", "Agent", ExecutionTracer.ActionLogLevel.Warning, "retrying", errorType, metadata: new Dictionary<string, object?>
+                    {
+                        { "attempt", attempt },
+                        { "reason", ex.Message },
+                        { "delay_ms", delayMs },
+                        { "will_retry", willRetry },
+                        { "final_attempt", finalAttempt }
+                    });
                     tracer.LogActionEvent("ModelRequestRetry", "Agent", ExecutionTracer.ActionLogLevel.Warning, "retrying", errorType, metadata: new Dictionary<string, object?>
                     {
                         { "attempt", attempt },
                         { "max_attempts", maxAttempts },
                         { "error", ex.Message }
                     });
-                    await Task.Delay(TimeSpan.FromMilliseconds(200 * attempt), CancellationToken.None);
+                    await Task.Delay(TimeSpan.FromMilliseconds(delayMs), CancellationToken.None);
                 }
             }
             _lastLlmRetryCount = retryCount;
