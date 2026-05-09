@@ -536,7 +536,16 @@ function testRunNormalizationContracts() {
           approvalStatus: 'ApprovalRequired',
           hiddenThought: 'must not leak'
         }
-      ]
+      ],
+      contextDiagnostics: {
+        items: [
+          { path: 'Core/TargetService.cs', reason: 'exact_path_match', priority: 3, charCount: 1200 }
+        ],
+        totalFiles: 1,
+        totalChars: 1200,
+        budgetUsed: 1,
+        budgetLimit: 6
+      }
     }
   });
   assert.strictEqual(approvalShapeRun.approvalRequiredActions.length, 1);
@@ -545,6 +554,10 @@ function testRunNormalizationContracts() {
   assert.strictEqual(approvalShapeRun.approvalRequiredActions[0].approvalTokenFormat, 'APPROVED:id-1');
   assert.strictEqual(approvalShapeRun.approvalRequiredActions[0].expectedEffect, 'Reads file content from the specified target path.');
   assert.strictEqual(Object.prototype.hasOwnProperty.call(approvalShapeRun.approvalRequiredActions[0], 'hiddenThought'), false);
+  assert.strictEqual(approvalShapeRun.contextDiagnostics.items.length, 1);
+  assert.strictEqual(approvalShapeRun.contextDiagnostics.items[0].path, 'Core/TargetService.cs');
+  assert.strictEqual(approvalShapeRun.contextDiagnostics.items[0].reason, 'exact_path_match');
+  assert.strictEqual(approvalShapeRun.contextDiagnostics.totalChars, 1200);
 }
 
 function readStatusRows(grid) {
@@ -676,7 +689,16 @@ function testStatusAndSummaryRendering() {
     },
     approvalRequiredActions: [
       { proposalId: 'p-1', approvalTokenFormat: 'APPROVED:p-1' }
-    ]
+    ],
+    contextDiagnostics: {
+      items: [
+        { path: 'Core/TargetService.cs', reason: 'exact_path_match', priority: 3, charCount: 1200 }
+      ],
+      totalFiles: 1,
+      totalChars: 1200,
+      budgetUsed: 1,
+      budgetLimit: 6
+    }
   };
 
   context.renderRunStatus(fallbackRun);
@@ -701,6 +723,9 @@ function testStatusAndSummaryRendering() {
   assert.ok(fallbackRows.some(([key, value]) => key === 'approval status denied' && value === '2'));
   assert.ok(fallbackRows.some(([key]) => key === 'approval proposal id'));
   assert.ok(fallbackRows.some(([key]) => key === 'approval token format'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'context files' && value === '1'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'context chars' && value === '1200'));
+  assert.ok(fallbackRows.some(([key]) => key === 'context file'));
 
   context.renderRunSummary(fallbackRun);
   assert.strictEqual(context.resultBadge.textContent, 'fallback-success');

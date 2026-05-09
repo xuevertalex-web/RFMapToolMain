@@ -115,7 +115,27 @@ namespace LocalCursorAgent.Core
                 FailedActions = actionCounters.FailedActions,
                 HostBoundaryPreserved = true,
                 ActionLifecycle = ActionLifecycleMapper.MapActionLifecycle(actionLifecycleEntries),
-                ApprovalStatusSummary = ApprovalStatusSummaryBuilder.Build(actionLifecycleEntries)
+                ApprovalStatusSummary = ApprovalStatusSummaryBuilder.Build(actionLifecycleEntries),
+                ContextDiagnostics = BuildContextDiagnosticsPayload()
+            };
+        }
+
+        private static ContextDiagnosticsPayload BuildContextDiagnosticsPayload()
+        {
+            var diagnostics = Context.ContextBuilder.GetLatestDiagnostics();
+            return new ContextDiagnosticsPayload
+            {
+                Items = diagnostics.Items.Select(x => new ContextDiagnosticsItemPayload
+                {
+                    Path = x.Path,
+                    Reason = x.Reason,
+                    Priority = x.Priority,
+                    CharCount = x.CharCount
+                }).ToArray(),
+                TotalFiles = diagnostics.TotalFiles,
+                TotalChars = diagnostics.TotalChars,
+                BudgetUsed = diagnostics.BudgetUsed,
+                BudgetLimit = diagnostics.BudgetLimit
             };
         }
 

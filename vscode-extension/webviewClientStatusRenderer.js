@@ -51,6 +51,17 @@ const webviewClientStatusRenderer = `function renderRunStatus(run) {
         rows.push(['approval status required', String(Math.max(0, Number(run.approvalStatusSummary && run.approvalStatusSummary.approvalRequired) || 0))]);
         rows.push(['approval status denied', String(Math.max(0, Number(run.approvalStatusSummary && run.approvalStatusSummary.denied) || 0))]);
         rows.push(['approval status n/a', String(Math.max(0, Number(run.approvalStatusSummary && run.approvalStatusSummary.notApplicable) || 0))]);
+        const contextDiagnostics = run.contextDiagnostics && typeof run.contextDiagnostics === 'object' ? run.contextDiagnostics : null;
+        if (contextDiagnostics) {
+          rows.push(['context files', String(Math.max(0, Number(contextDiagnostics.totalFiles) || 0))]);
+          rows.push(['context chars', String(Math.max(0, Number(contextDiagnostics.totalChars) || 0))]);
+          rows.push(['context budget', String(Math.max(0, Number(contextDiagnostics.budgetUsed) || 0)) + ' / ' + String(Math.max(0, Number(contextDiagnostics.budgetLimit) || 0))]);
+          const preview = Array.isArray(contextDiagnostics.items) ? contextDiagnostics.items.slice(0, 3) : [];
+          for (const item of preview) {
+            const itemText = [normalizeStatusCell(item.path, ''), normalizeStatusCell(item.reason, ''), String(Math.max(0, Number(item.charCount) || 0))].filter(Boolean).join(' | ');
+            rows.push(['context file', normalizeStatusCell(itemText, 'not available')]);
+          }
+        }
         const firstApproval = Array.isArray(run.approvalRequiredActions) && run.approvalRequiredActions.length > 0 ? run.approvalRequiredActions[0] : null;
         if (firstApproval) {
           rows.push(['approval proposal id', normalizeStatusCell(firstApproval.proposalId, 'not available')]);

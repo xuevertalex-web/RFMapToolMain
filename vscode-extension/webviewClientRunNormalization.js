@@ -250,6 +250,30 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           }));
       }
 
+      function normalizeContextDiagnostics(structured) {
+        if (!structured || typeof structured !== 'object' || !structured.contextDiagnostics || typeof structured.contextDiagnostics !== 'object') {
+          return { items: [], totalFiles: 0, totalChars: 0, budgetUsed: 0, budgetLimit: 0 };
+        }
+        const source = structured.contextDiagnostics;
+        const items = Array.isArray(source.items)
+          ? source.items
+              .filter(item => item && typeof item === 'object')
+              .map(item => ({
+                path: normalizeText(item.path, 'not available'),
+                reason: normalizeText(item.reason, 'fallback'),
+                priority: Number.isFinite(item.priority) ? Math.max(0, Math.floor(item.priority)) : 0,
+                charCount: Number.isFinite(item.charCount) ? Math.max(0, Math.floor(item.charCount)) : 0
+              }))
+          : [];
+        return {
+          items,
+          totalFiles: Number.isFinite(source.totalFiles) ? Math.max(0, Math.floor(source.totalFiles)) : items.length,
+          totalChars: Number.isFinite(source.totalChars) ? Math.max(0, Math.floor(source.totalChars)) : items.reduce((acc, x) => acc + x.charCount, 0),
+          budgetUsed: Number.isFinite(source.budgetUsed) ? Math.max(0, Math.floor(source.budgetUsed)) : items.length,
+          budgetLimit: Number.isFinite(source.budgetLimit) ? Math.max(0, Math.floor(source.budgetLimit)) : items.length
+        };
+      }
+
       function buildActionLifecycleCounts(entries) {
         const counts = {
           requested: 0,
@@ -442,6 +466,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         const actionLifecycle = normalizeActionLifecycle(structured);
         const actionLifecycleCounts = buildActionLifecycleCounts(actionLifecycle);
         const approvalStatusSummary = normalizeApprovalStatusSummary(structured, actionLifecycle);
+        const contextDiagnostics = normalizeContextDiagnostics(structured);
         const externalAttempts = Number.isFinite(structured && structured.externalAttempts)
           ? Math.max(0, Math.floor(structured.externalAttempts))
           : approvalRequiredActions.length;
@@ -606,6 +631,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           actionLifecycle,
           actionLifecycleCounts,
           approvalStatusSummary,
+          contextDiagnostics,
           changedHints,
           changedRanges,
           changedKinds,

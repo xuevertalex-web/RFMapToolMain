@@ -15,6 +15,8 @@ namespace LocalCursorAgent.Context
 {
     public class ContextBuilder
     {
+        private static readonly object DiagnosticsLock = new();
+        private static ContextDiagnosticsSnapshot _latestDiagnostics = new();
         private readonly string _projectPath;
         private readonly VectorStore _vectorStore;
         private readonly FileStateManager _fileStateManager;
@@ -42,6 +44,14 @@ namespace LocalCursorAgent.Context
         }
 
         public ExecutionTracer Tracer => _tracer;
+
+        public static ContextDiagnosticsSnapshot GetLatestDiagnostics()
+        {
+            lock (DiagnosticsLock)
+            {
+                return _latestDiagnostics.Clone();
+            }
+        }
 
         // Backward-compatible constructor for diagnostics-oriented flow.
         public ContextBuilder(ExecutionTracer tracer, AgentMemorySystem memorySystem)
@@ -170,6 +180,7 @@ namespace LocalCursorAgent.Context
             {
                 BudgetPlan = plan
             };
+            var diagnosticsItems = new List<ContextDiagnosticsItem>();
 
             foreach (var file in ranked)
             {
@@ -191,6 +202,24 @@ namespace LocalCursorAgent.Context
                 context.RelevantSymbols[file.FilePath] = _symbolDirectory.GetSymbols(file.FilePath);
                 context.FileContents[file.FilePath] = content;
                 context.TotalLength += content.Length;
+                diagnosticsItems.Add(new ContextDiagnosticsItem
+                {
+                    Path = file.FilePath,
+                    Reason = BuildInclusionReason(file, targetToken),
+                    Priority = file.MatchPriority,
+                    CharCount = content.Length
+                });
+            }
+            lock (DiagnosticsLock)
+            {
+                _latestDiagnostics = new ContextDiagnosticsSnapshot
+                {
+                    Items = diagnosticsItems,
+                    TotalFiles = diagnosticsItems.Count,
+                    TotalChars = context.TotalLength,
+                    BudgetUsed = diagnosticsItems.Count,
+                    BudgetLimit = effectiveBudget
+                };
             }
             return context;
         }
@@ -506,6 +535,41 @@ namespace LocalCursorAgent.Context
             if (age <= TimeSpan.FromHours(1)) return 0.6;
             if (age <= TimeSpan.FromHours(24)) return 0.3;
             return 0.1;
+        }
+    }
+
+    public sealed class ContextDiagnosticsItem
+    {
+        public string Path { get; set; } = string.Empty;
+        public string Reason { get; set; } = string.Empty;
+        public int Priority { get; set; }
+        public int CharCount { get; set; }
+    }
+
+    public sealed class ContextDiagnosticsSnapshot
+    {
+        public List<ContextDiagnosticsItem> Items { get; set; } = new();
+        public int TotalFiles { get; set; }
+        public int TotalChars { get; set; }
+        public int BudgetUsed { get; set; }
+        public int BudgetLimit { get; set; }
+
+        public ContextDiagnosticsSnapshot Clone()
+        {
+            return new ContextDiagnosticsSnapshot
+            {
+                Items = Items.Select(x => new ContextDiagnosticsItem
+                {
+                    Path = x.Path,
+                    Reason = x.Reason,
+                    Priority = x.Priority,
+                    CharCount = x.CharCount
+                }).ToList(),
+                TotalFiles = TotalFiles,
+                TotalChars = TotalChars,
+                BudgetUsed = BudgetUsed,
+                BudgetLimit = BudgetLimit
+            };
         }
     }
 

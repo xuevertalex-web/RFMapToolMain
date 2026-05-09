@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using LocalCursorAgent.Context;
 
 namespace LocalCursorAgent.Core
 {
@@ -239,6 +240,42 @@ namespace LocalCursorAgent.Core
 
             [JsonPropertyName("approvalStatusSummary")]
             public ApprovalStatusSummaryPayload ApprovalStatusSummary { get; init; } = new();
+
+            [JsonPropertyName("contextDiagnostics")]
+            public ContextDiagnosticsPayload ContextDiagnostics { get; init; } = new();
+        }
+
+        private sealed class ContextDiagnosticsPayload
+        {
+            [JsonPropertyName("items")]
+            public ContextDiagnosticsItemPayload[] Items { get; init; } = Array.Empty<ContextDiagnosticsItemPayload>();
+
+            [JsonPropertyName("totalFiles")]
+            public int TotalFiles { get; init; }
+
+            [JsonPropertyName("totalChars")]
+            public int TotalChars { get; init; }
+
+            [JsonPropertyName("budgetUsed")]
+            public int BudgetUsed { get; init; }
+
+            [JsonPropertyName("budgetLimit")]
+            public int BudgetLimit { get; init; }
+        }
+
+        private sealed class ContextDiagnosticsItemPayload
+        {
+            [JsonPropertyName("path")]
+            public string Path { get; init; } = string.Empty;
+
+            [JsonPropertyName("reason")]
+            public string Reason { get; init; } = string.Empty;
+
+            [JsonPropertyName("priority")]
+            public int Priority { get; init; }
+
+            [JsonPropertyName("charCount")]
+            public int CharCount { get; init; }
         }
 
     }

@@ -257,6 +257,18 @@ static async Task RunAnalysisNormalResponseRegression()
     AssertTrue(stages.All(s => !s.Contains("Patch", StringComparison.OrdinalIgnoreCase)), "Expected no patch stages.");
     AssertTrue(stages.All(s => !s.Contains("Build", StringComparison.OrdinalIgnoreCase)), "Expected no build stages.");
     AssertTrue(stages.All(s => !s.Contains("Destructive", StringComparison.OrdinalIgnoreCase)), "Expected no destructive stages.");
+    AssertTrue(structured.TryGetProperty("contextDiagnostics", out var contextDiagnostics), "Expected contextDiagnostics in payload.");
+    var contextItems = contextDiagnostics.GetProperty("items");
+    AssertTrue(contextItems.ValueKind == JsonValueKind.Array, "Expected contextDiagnostics.items array.");
+    AssertTrue(contextItems.GetArrayLength() > 0, "Expected non-empty context diagnostics items.");
+    var firstContext = contextItems[0];
+    AssertTrue(!string.IsNullOrWhiteSpace(firstContext.GetProperty("path").GetString()), "Expected context diagnostics path.");
+    AssertTrue(!string.IsNullOrWhiteSpace(firstContext.GetProperty("reason").GetString()), "Expected context diagnostics reason.");
+    AssertTrue(firstContext.GetProperty("charCount").GetInt32() > 0, "Expected context diagnostics charCount > 0.");
+    var totalChars = contextDiagnostics.GetProperty("totalChars").GetInt32();
+    var budgetLimit = contextDiagnostics.GetProperty("budgetLimit").GetInt32();
+    AssertTrue(totalChars <= 45000, "Expected context diagnostics totalChars to stay bounded.");
+    AssertTrue(budgetLimit > 0, "Expected context diagnostics budgetLimit > 0.");
 
     Console.WriteLine("PASS Analysis_NormalModelResponse_NoFallbackTimeline");
 }
