@@ -354,12 +354,15 @@ namespace LocalCursorAgent.Tools
         private static bool HasApprovalMarker(string input, out string normalized)
         {
             normalized = input ?? string.Empty;
-            var marker = "APPROVED:true";
+            var marker = "APPROVED:";
             var idx = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
             if (idx < 0)
                 return false;
 
-            normalized = normalized.Remove(idx, marker.Length).Trim();
+            var tokenEnd = normalized.IndexOfAny(new[] { ' ', '\t', '\r', '\n' }, idx + marker.Length);
+            normalized = tokenEnd >= 0
+                ? normalized.Remove(idx, tokenEnd - idx).Trim()
+                : normalized[..idx].Trim();
             return true;
         }
 

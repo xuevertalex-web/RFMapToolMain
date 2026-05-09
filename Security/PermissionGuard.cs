@@ -181,8 +181,10 @@ public sealed class PermissionGuard
 
     private static PermissionDecision CreateApprovalRequired(ToolAction action, PermissionReasonCode code, string message, string normalizedTarget, string normalizedWorkspace, string riskLevel = "high")
     {
+        var proposalId = ComputeProposalId(action, code, normalizedTarget, normalizedWorkspace);
         var proposal = new ActionApprovalProposal
         {
+            ProposalId = proposalId,
             ActionType = action.Kind.ToString(),
             Command = action.Kind == ToolActionKind.RunCommand ? action.Payload : null,
             Path = action.TargetPath ?? action.SourcePath ?? action.DestinationPath ?? action.WorkingDirectory,
@@ -205,6 +207,20 @@ public sealed class PermissionGuard
             proposal,
             normalizedTarget,
             normalizedWorkspace);
+    }
+
+    private static string ComputeProposalId(ToolAction action, PermissionReasonCode code, string normalizedTarget, string normalizedWorkspace)
+    {
+        var signature = string.Join("|", new[]
+        {
+            action.Kind.ToString(),
+            normalizedTarget,
+            normalizedWorkspace,
+            code.ToString(),
+            action.Payload ?? string.Empty
+        });
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(signature)))
+            .ToLowerInvariant()[..16];
     }
 
     private static string BuildExpectedEffect(ToolAction action)

@@ -1503,11 +1503,13 @@ static async Task RunDestructiveFileApprovalMarkerRegression()
     AssertTrue(noApprovalDecision.ApprovalProposal?.ReasonCode == PermissionReasonCodes.AccessDeniedDeleteOperation, "Expected destructive approval proposal to carry stable reasonCode.");
     AssertTrue(!string.IsNullOrWhiteSpace(noApprovalDecision.ApprovalProposal?.ExpectedEffect), "Expected destructive approval proposal to carry expectedEffect.");
 
+    var approvalProposal = noApprovalDecision.ApprovalProposal;
+    AssertTrue(approvalProposal is not null && !string.IsNullOrWhiteSpace(approvalProposal.ProposalId), "Expected proposal id for destructive approval.");
     var approvedDecision = guard.Evaluate(session, new ToolAction
     {
         Kind = ToolActionKind.DeleteFile,
         TargetPath = filePath,
-        Payload = "APPROVED:true"
+        Payload = $"APPROVED:{approvalProposal!.ProposalId}"
     });
     AssertTrue(approvedDecision.Allowed, "Expected delete with approval marker to pass guard.");
     Console.WriteLine("PASS DestructiveFileApprovalMarker");
@@ -1550,11 +1552,22 @@ static async Task RunGuardedToolExplicitApprovalHandoffRegression()
     AssertTrue(noApproval.StartsWith("DENIED", StringComparison.Ordinal), "Expected approval-required delete to be denied before approval.");
     AssertTrue(File.Exists(insidePath), "Expected file to remain without explicit approval.");
 
-    var approved = await guarded.Execute("delete:delete-inside.txt APPROVED:true");
+    var decision = guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.DeleteFile,
+        TargetPath = insidePath
+    });
+    AssertTrue(decision.ApprovalProposal is not null, "Expected approval proposal for inside delete.");
+    var proposalId = decision.ApprovalProposal!.ProposalId;
+    var wrongApproved = await guarded.Execute("delete:delete-inside.txt APPROVED:wrong-token");
+    AssertTrue(wrongApproved.StartsWith("DENIED", StringComparison.Ordinal), "Expected wrong token to stay denied.");
+    AssertTrue(File.Exists(insidePath), "Expected file to remain for wrong approval token.");
+
+    var approved = await guarded.Execute($"delete:delete-inside.txt APPROVED:{proposalId}");
     AssertTrue(approved.StartsWith("Successfully deleted", StringComparison.Ordinal), $"Expected approved delete to execute. Actual: {approved}");
     AssertTrue(!File.Exists(insidePath), "Expected approved delete to remove inside file.");
 
-    var outsideApproved = await guarded.Execute($"delete:{outsidePath} APPROVED:true");
+    var outsideApproved = await guarded.Execute($"delete:{outsidePath} APPROVED:{proposalId}");
     AssertTrue(outsideApproved.StartsWith("DENIED", StringComparison.Ordinal), "Expected outside-boundary action to remain denied even with approval.");
     AssertTrue(File.Exists(outsidePath), "Expected outside file to remain untouched.");
 

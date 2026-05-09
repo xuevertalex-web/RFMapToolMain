@@ -26,15 +26,13 @@ public sealed class GuardedTool : ITool
     public async Task<string> Execute(string input)
     {
         var action = _actionFactory(input);
-        if (CommandRiskPolicy.HasExplicitApprovalMarker(input))
-            action = CreateApprovedAction(action);
-
+        if (CommandRiskPolicy.TryExtractApprovalToken(input, out _))
+            action = SanitizeApprovalTokenFromPaths(action);
         var decision = _guard.Evaluate(_session, action);
-        if (!decision.Allowed && decision.RequiresApproval && CommandRiskPolicy.HasExplicitApprovalMarker(input))
+        if (!decision.Allowed && decision.RequiresApproval && TryApplyProposalBoundApproval(input, action, decision, out var approvedAction, out var approvedDecision))
         {
-            var approvedAction = CreateApprovedAction(action);
-            decision = _guard.Evaluate(_session, approvedAction);
             action = approvedAction;
+            decision = approvedDecision;
         }
         _tracer?.LogPermissionDecision(_session, _inner.Name, action, decision);
 
@@ -54,29 +52,61 @@ public sealed class GuardedTool : ITool
         }
     }
 
-    private static string? StripApprovalMarker(string? value)
+    private bool TryApplyProposalBoundApproval(string input, ToolAction action, PermissionDecision decision, out ToolAction approvedAction, out PermissionDecision approvedDecision)
     {
-        if (string.IsNullOrWhiteSpace(value))
-            return value;
+        approvedAction = action;
+        approvedDecision = decision;
+        if (!CommandRiskPolicy.TryExtractApprovalToken(input, out var token))
+            return false;
 
-        var marker = "APPROVED:true";
-        var idx = value.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0)
-            return value;
+        var expectedToken = decision.ExpectedApprovalToken;
+        if (string.IsNullOrWhiteSpace(expectedToken))
+            return false;
 
-        return value.Remove(idx, marker.Length).Trim();
+        var expectedId = expectedToken["APPROVED:".Length..];
+        if (!token.Equals(expectedId, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        approvedAction = CreateApprovedAction(action);
+        approvedDecision = _guard.Evaluate(_session, approvedAction);
+        return true;
     }
 
     private static ToolAction CreateApprovedAction(ToolAction action) => new()
     {
         Kind = action.Kind,
-        TargetPath = StripApprovalMarker(action.TargetPath),
-        SourcePath = StripApprovalMarker(action.SourcePath),
-        DestinationPath = StripApprovalMarker(action.DestinationPath),
-        WorkingDirectory = StripApprovalMarker(action.WorkingDirectory),
+        TargetPath = action.TargetPath,
+        SourcePath = action.SourcePath,
+        DestinationPath = action.DestinationPath,
+        WorkingDirectory = action.WorkingDirectory,
         Payload = string.IsNullOrWhiteSpace(action.Payload)
-            ? "APPROVED:true"
-            : $"{action.Payload} APPROVED:true"
+            ? "APPROVED:token"
+            : $"{action.Payload} APPROVED:token"
     };
 
+    private static ToolAction SanitizeApprovalTokenFromPaths(ToolAction action) => new()
+    {
+        Kind = action.Kind,
+        TargetPath = StripApprovalMarkerFromPath(action.TargetPath),
+        SourcePath = StripApprovalMarkerFromPath(action.SourcePath),
+        DestinationPath = StripApprovalMarkerFromPath(action.DestinationPath),
+        WorkingDirectory = StripApprovalMarkerFromPath(action.WorkingDirectory),
+        Payload = action.Payload
+    };
+
+    private static string? StripApprovalMarkerFromPath(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return value;
+
+        var marker = "APPROVED:";
+        var idx = value.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0)
+            return value;
+
+        var tokenEnd = value.IndexOfAny(new[] { ' ', '\t', '\r', '\n' }, idx + marker.Length);
+        return tokenEnd >= 0
+            ? value.Remove(idx, tokenEnd - idx).Trim()
+            : value[..idx].Trim();
+    }
 }

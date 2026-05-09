@@ -33,6 +33,7 @@ public sealed class PermissionDecision
     public string? NormalizedTargetPath { get; init; }
     public string? NormalizedWorkspaceRoot { get; init; }
     public ActionApprovalProposal? ApprovalProposal { get; init; }
+    public string? ExpectedApprovalToken { get; init; }
 
     public static PermissionDecision Allow(string? target, string? workspace) => new()
     {
@@ -42,7 +43,8 @@ public sealed class PermissionDecision
         ReasonCode = PermissionReasonCode.Allowed,
         Message = "Allowed",
         NormalizedTargetPath = target,
-        NormalizedWorkspaceRoot = workspace
+        NormalizedWorkspaceRoot = workspace,
+        ExpectedApprovalToken = null
     };
 
     public static PermissionDecision Deny(PermissionReasonCode code, string message, string? target = null, string? workspace = null) => new()
@@ -53,7 +55,8 @@ public sealed class PermissionDecision
         ReasonCode = code,
         Message = message,
         NormalizedTargetPath = target,
-        NormalizedWorkspaceRoot = workspace
+        NormalizedWorkspaceRoot = workspace,
+        ExpectedApprovalToken = null
     };
 
     public static PermissionDecision ApprovalRequired(
@@ -70,6 +73,7 @@ public sealed class PermissionDecision
         Message = message,
         NormalizedTargetPath = target,
         NormalizedWorkspaceRoot = workspace,
-        ApprovalProposal = proposal
+        ApprovalProposal = proposal,
+        ExpectedApprovalToken = string.IsNullOrWhiteSpace(proposal.ProposalId) ? null : $"APPROVED:{proposal.ProposalId}"
     };
 }
