@@ -42,7 +42,7 @@
                                               "properties":  {
                                                                  "localCursorAgent.backendProjectPath":  {
                                                                                                              "type":  "string",
-                                                                                                             "default":  "C:\\Users\\Enot.DESKTOP-C19QK7E\\Desktop\\LocalCursorAgent\\LocalCursorAgent.csproj",
+                                                                                                             "default":  "${workspaceFolder}/LocalCursorAgent.csproj",
                                                                                                              "description":  "Absolute path to LocalCursorAgent.csproj."
                                                                                                          },
                                                                  "localCursorAgent.targetWorkspacePath":  {

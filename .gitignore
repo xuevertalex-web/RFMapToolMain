@@ -16,3 +16,4 @@ TestResults/
 coverage/
 *.trx
 *.vsix
+release/*.zip
