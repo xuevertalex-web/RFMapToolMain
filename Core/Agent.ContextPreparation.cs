@@ -22,7 +22,8 @@ namespace LocalCursorAgent.Core
         private async Task<IterationContextPreparationResult> TryPrepareIterationContextAsync(
             string task,
             bool analysisOnlyTask,
-            List<string>? gatedTargetFiles)
+            List<string>? gatedTargetFiles,
+            TargetResolutionGateResult targetResolution)
         {
             var semanticTopK = analysisOnlyTask ? 8 : 25 + CONTEXT_EXPANSION_BUFFER;
             var candidateFiles = gatedTargetFiles ?? await _projectIndexer.FindRelevantFiles(task, semanticTopK);
@@ -47,9 +48,9 @@ namespace LocalCursorAgent.Core
             }
             else
             {
-                if (!_contextBuilder.TryResolveTarget(task, candidateFiles, new List<string>(), out resolvedFiles, out var failureMessage))
+                if (targetResolution.IsFailed && !analysisOnlyTask)
                 {
-                    var safeFailure = failureMessage ?? "Target symbol not found in workspace";
+                    var safeFailure = targetResolution.Reason;
                     _memory.Add("context_failure", safeFailure, "TargetResolutionSafeFailure");
                     _memory.Add("context_failure_reason", "Target resolution returned safe failure before patch generation", safeFailure);
                     _contextBuilder.Tracer.MarkStopPoint("TargetResolutionGate", "TARGET_RESOLUTION_FAILED", safeFailure, new[] { "ModelRequest", "PatchApply", "BuildVerification" });
@@ -59,6 +60,8 @@ namespace LocalCursorAgent.Core
                         FailureResult = FinalizeRunResult(false, safeFailure, "Target resolution failed before patch generation", "TARGET_RESOLUTION_FAILED", Array.Empty<string>(), Array.Empty<ChangedHint>(), Array.Empty<ChangedRange>(), Array.Empty<ChangedKind>(), false)
                     };
                 }
+
+                resolvedFiles = candidateFiles;
             }
 
             var contextInfo = _contextBuilder.BuildContext(task, resolvedFiles, new List<string>(), planningSignals.Budget);

@@ -60,6 +60,7 @@ await RunRunTaskBaselineBehaviorRegression();
 await RunRunTaskToolCallFlowRegression();
 await RunRunTaskMalformedToolCallDiagnosticRegression();
 await RunRunTaskTargetResolutionRegression();
+await RunTargetResolutionPathPreservingRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1890,6 +1891,42 @@ static async Task RunRunTaskTargetResolutionRegression()
 {
     await RunTechnicalNoToolCallsRequiresActionRegression();
     Console.WriteLine("PASS RunTask_TargetResolution_AgentVsCoreAgent");
+}
+
+static async Task RunTargetResolutionPathPreservingRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    Directory.CreateDirectory(Path.Combine(workspaceRoot, "Core"));
+    Directory.CreateDirectory(Path.Combine(workspaceRoot, "Features"));
+    Directory.CreateDirectory(Path.Combine(workspaceRoot, "Legacy"));
+    File.WriteAllText(Path.Combine(workspaceRoot, "Core", "Agent.cs"), "namespace App.Core; public class Agent {}");
+    File.WriteAllText(Path.Combine(workspaceRoot, "Features", "Agent.cs"), "namespace App.Features; public class Agent {}");
+    File.WriteAllText(Path.Combine(workspaceRoot, "Legacy", "Agent.cs"), "namespace App.Legacy; public class Agent {}");
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    var vectorStore = new VectorStore();
+    var fileStateManager = new FileStateManager();
+    var embeddingService = new EmbeddingService(disabled: true);
+    var indexer = new ProjectIndexer(workspaceRoot, embeddingService, vectorStore, new AgentConfig(workspaceRoot), fileStateManager);
+    var indexResult = await indexer.IndexProject();
+    AssertTrue(indexResult.Success, "Expected project index success for target path regression.");
+    var gate = new TargetResolutionGate(indexer, tracer);
+
+    var pathResult = await gate.ResolveAsync("edit Core/Agent.cs");
+    AssertTrue(pathResult.IsResolved, "Expected path-like target to resolve.");
+    AssertTrue(
+        pathResult.SelectedFiles.Count == 1 &&
+        string.Equals(pathResult.SelectedFiles[0].Replace('\\', '/'), "Core/Agent.cs", StringComparison.OrdinalIgnoreCase),
+        "Expected Core/Agent.cs path to be preserved.");
+
+    var basenameResult = await gate.ResolveAsync("edit Agent.cs");
+    AssertTrue(basenameResult.IsFailed, "Expected basename-only target with duplicates to be ambiguous.");
+
+    Console.WriteLine("PASS TargetResolution_PathPreserving");
 }
 
 sealed class FakeNoopTool : ITool

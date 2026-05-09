@@ -48,7 +48,7 @@ internal static class TargetTokenHeuristics
         var pathLike = Regex.Match(query, @"([A-Za-z0-9_\-./\\]+\.cs)\b");
         if (pathLike.Success)
         {
-            var token = Path.GetFileNameWithoutExtension(pathLike.Groups[1].Value);
+            var token = pathLike.Groups[1].Value.Trim();
             if (!string.IsNullOrWhiteSpace(token))
                 return token;
         }
@@ -56,7 +56,7 @@ internal static class TargetTokenHeuristics
         var pathSegment = Regex.Match(query, @"(?:^|[\s\""'`])([A-Za-z0-9_\-]+(?:[\\/][A-Za-z0-9_\-./\\]+)+)(?:$|[\s\""'`,:;])");
         if (pathSegment.Success)
         {
-            var token = Path.GetFileNameWithoutExtension(pathSegment.Groups[1].Value);
+            var token = pathSegment.Groups[1].Value.Trim();
             if (!string.IsNullOrWhiteSpace(token))
                 return token;
         }

@@ -61,7 +61,13 @@ public sealed class TargetResolutionGate
             }, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>());
         }
 
-        var exactSymbolCandidates = ResolveExactSymbolCandidates(rawToken);
+        var indexedFiles = _projectIndexer.GetIndexedFiles().ToList();
+        if (indexedFiles.Count == 0)
+        {
+            indexedFiles = await _projectIndexer.FindRelevantFiles(rawToken, 15);
+        }
+
+        var exactSymbolCandidates = ResolveExactSymbolCandidates(rawToken, indexedFiles);
         if (exactSymbolCandidates.Count == 1)
         {
             return LogAndReturn(query, new TargetResolutionGateResult
@@ -91,7 +97,7 @@ public sealed class TargetResolutionGate
             }, exactSymbolCandidates, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>());
         }
 
-        var exactFilenameCandidates = ResolveExactFilenameCandidates(rawToken);
+        var exactFilenameCandidates = ResolveExactFilenameCandidates(rawToken, indexedFiles);
         if (exactFilenameCandidates.Count == 1)
         {
             return LogAndReturn(query, new TargetResolutionGateResult
@@ -121,7 +127,7 @@ public sealed class TargetResolutionGate
             }, Array.Empty<string>(), exactFilenameCandidates, Array.Empty<string>(), Array.Empty<string>());
         }
 
-        var partialCandidates = ResolvePartialCandidates(rawToken, classification);
+        var partialCandidates = ResolvePartialCandidates(rawToken, classification, indexedFiles);
         if (partialCandidates.Count == 1)
         {
             return LogAndReturn(query, new TargetResolutionGateResult
@@ -229,9 +235,9 @@ public sealed class TargetResolutionGate
         return result;
     }
 
-    private List<string> ResolveExactSymbolCandidates(string rawToken)
+    private List<string> ResolveExactSymbolCandidates(string rawToken, IReadOnlyList<string> indexedFiles)
     {
-        return _projectIndexer.GetIndexedFiles()
+        return indexedFiles
             .Where(filePath =>
             {
                 var symbols = _projectIndexer.SymbolDirectory.GetSymbols(filePath);
@@ -242,21 +248,21 @@ public sealed class TargetResolutionGate
             .ToList();
     }
 
-    private List<string> ResolveExactFilenameCandidates(string rawToken)
+    private List<string> ResolveExactFilenameCandidates(string rawToken, IReadOnlyList<string> indexedFiles)
     {
-        return _projectIndexer.GetIndexedFiles()
+        return indexedFiles
             .Where(filePath => IsExactFilenameMatch(filePath, rawToken))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
-    private List<string> ResolvePartialCandidates(string rawToken, string classification)
+    private List<string> ResolvePartialCandidates(string rawToken, string classification, IReadOnlyList<string> indexedFiles)
     {
         if (!TargetTokenHeuristics.IsMeaningfulPartialToken(rawToken))
             return new List<string>();
 
-        return _projectIndexer.GetIndexedFiles()
+        return indexedFiles
             .Where(filePath =>
             {
                 var stem = Path.GetFileNameWithoutExtension(filePath);

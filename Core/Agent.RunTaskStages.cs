@@ -49,7 +49,7 @@ namespace LocalCursorAgent.Core
 
         private async Task<RunStageResult> LlmCallStage(RunContext context, int iteration)
         {
-            var preparedContextResult = await TryPrepareIterationContextAsync(context.Task, context.AnalysisOnlyTask, context.GatedTargetFiles!);
+            var preparedContextResult = await TryPrepareIterationContextAsync(context.Task, context.AnalysisOnlyTask, context.GatedTargetFiles!, context.TargetResolution!);
             if (!preparedContextResult.Success)
                 return RunStageResult.Return(preparedContextResult.FailureResult!);
 
