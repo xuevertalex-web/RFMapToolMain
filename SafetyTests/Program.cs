@@ -415,6 +415,10 @@ static async Task RunLlmRetryNoRetryRegression()
     var (structured, _, runtimeRoot) = await RunAgentWithAdapter(new StaticSuccessAdapter("analysis success"));
     AssertTrue(structured.GetProperty("ok").GetBoolean(), "Expected first-attempt success.");
     AssertTrue(structured.GetProperty("retryCount").GetInt32() == 0, "Expected retryCount=0 without retries.");
+    AssertTrue(structured.TryGetProperty("indexingDiagnostics", out var indexingDiagnostics), "Expected indexingDiagnostics in payload.");
+    AssertTrue(indexingDiagnostics.GetProperty("indexedFiles").GetInt32() >= 1, "Expected indexedFiles >= 1.");
+    AssertTrue(indexingDiagnostics.GetProperty("cacheHits").GetInt32() >= 0, "Expected cacheHits >= 0.");
+    AssertTrue(indexingDiagnostics.GetProperty("cacheMisses").GetInt32() >= 0, "Expected cacheMisses >= 0.");
     var retryDiagnostics = structured.GetProperty("retryDiagnostics");
     var retryAttemptsPayload = retryDiagnostics.GetProperty("attempts");
     AssertTrue(retryAttemptsPayload.ValueKind == JsonValueKind.Array && retryAttemptsPayload.GetArrayLength() == 0, "Expected no retryDiagnostics attempts on no-retry success.");

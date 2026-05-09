@@ -13,6 +13,8 @@ namespace LocalCursorAgent.Indexing
     /// </summary>
     public class ProjectIndexer
     {
+        private static readonly object DiagnosticsLock = new();
+        private static IndexingDiagnosticsSnapshot _latestDiagnostics = new();
         private readonly EmbeddingService _embeddingService;
         private readonly VectorStore _vectorStore;
         private readonly string _projectPath;
@@ -101,6 +103,21 @@ namespace LocalCursorAgent.Indexing
             if (_fileStateManager != null && result.IndexedFiles.Count > 0)
             {
                 _fileStateManager.InitializeFilesAsClean(result.IndexedFiles);
+            }
+
+            lock (DiagnosticsLock)
+            {
+                var processed = Math.Max(0, result.FilesProcessed);
+                var hits = Math.Max(0, _cacheHits);
+                var misses = Math.Max(0, _cacheMisses);
+                _latestDiagnostics = new IndexingDiagnosticsSnapshot
+                {
+                    IndexedFiles = processed,
+                    CacheHits = hits,
+                    CacheMisses = misses,
+                    FullRebuild = hits == 0 && misses > 0 && processed == misses,
+                    PartialRefresh = hits > 0 && misses > 0
+                };
             }
 
             return result;
@@ -220,6 +237,13 @@ namespace LocalCursorAgent.Indexing
 
         public int CacheHits => _cacheHits;
         public int CacheMisses => _cacheMisses;
+        public static IndexingDiagnosticsSnapshot GetLatestDiagnostics()
+        {
+            lock (DiagnosticsLock)
+            {
+                return _latestDiagnostics.Clone();
+            }
+        }
 
         private List<string> FindRelevantFilesWithoutEmbeddings(string query, int topK)
         {
@@ -291,6 +315,27 @@ namespace LocalCursorAgent.Indexing
             public string RelativePath { get; set; } = string.Empty;
             public DateTime LastWriteTimeUtc { get; set; }
             public List<string> Symbols { get; set; } = new();
+        }
+
+        public sealed class IndexingDiagnosticsSnapshot
+        {
+            public int IndexedFiles { get; set; }
+            public int CacheHits { get; set; }
+            public int CacheMisses { get; set; }
+            public bool FullRebuild { get; set; }
+            public bool PartialRefresh { get; set; }
+
+            public IndexingDiagnosticsSnapshot Clone()
+            {
+                return new IndexingDiagnosticsSnapshot
+                {
+                    IndexedFiles = IndexedFiles,
+                    CacheHits = CacheHits,
+                    CacheMisses = CacheMisses,
+                    FullRebuild = FullRebuild,
+                    PartialRefresh = PartialRefresh
+                };
+            }
         }
 
         /// <summary>

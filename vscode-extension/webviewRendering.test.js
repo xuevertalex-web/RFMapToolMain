@@ -242,6 +242,7 @@ function testRunNormalizationContracts() {
   assert.strictEqual(success.hostBoundaryPreserved, true);
   assert.strictEqual(Array.isArray(success.retryDiagnostics.attempts), true);
   assert.strictEqual(success.retryDiagnostics.attempts.length, 0);
+  assert.strictEqual(success.indexingDiagnostics.indexedFiles, 0);
   assert.strictEqual(success.buildText, 'not started');
   assert.strictEqual(success.embeddingsSummary, 'not available');
   assert.strictEqual(success.embeddingsWarning, false);
@@ -580,6 +581,25 @@ function testRunNormalizationContracts() {
   assert.strictEqual(retryRun.retryDiagnostics.attempts.length, 2);
   assert.strictEqual(retryRun.retryDiagnostics.attempts[0].attempt, 1);
   assert.strictEqual(retryRun.retryDiagnostics.attempts[0].delayMs, 200);
+
+  const indexingRun = context.normalizeRunResult({
+    ok: true,
+    structuredResult: {
+      ok: true,
+      finalStatus: 'success',
+      indexingDiagnostics: {
+        indexedFiles: 12,
+        cacheHits: 9,
+        cacheMisses: 3,
+        fullRebuild: false,
+        partialRefresh: true
+      }
+    }
+  });
+  assert.strictEqual(indexingRun.indexingDiagnostics.indexedFiles, 12);
+  assert.strictEqual(indexingRun.indexingDiagnostics.cacheHits, 9);
+  assert.strictEqual(indexingRun.indexingDiagnostics.cacheMisses, 3);
+  assert.strictEqual(indexingRun.indexingDiagnostics.partialRefresh, true);
 }
 
 function readStatusRows(grid) {
@@ -727,6 +747,13 @@ function testStatusAndSummaryRendering() {
         { attempt: 1, reason: 'timeout', delayMs: 200, willRetry: true, finalAttempt: false },
         { attempt: 2, reason: 'rate limit', delayMs: 400, willRetry: false, finalAttempt: true }
       ]
+    },
+    indexingDiagnostics: {
+      indexedFiles: 12,
+      cacheHits: 9,
+      cacheMisses: 3,
+      fullRebuild: false,
+      partialRefresh: true
     }
   };
 
@@ -758,6 +785,9 @@ function testStatusAndSummaryRendering() {
   assert.ok(fallbackRows.some(([key]) => key === 'context file'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'retries' && value === '2'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'retry attempt' && value.includes('attempt 1') && value.includes('200 ms')));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'indexing' && value === '12 files'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'cache' && value === '9 hits / 3 misses'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'indexing mode' && value === 'partial refresh'));
 
   context.renderRunSummary(fallbackRun);
   assert.strictEqual(context.resultBadge.textContent, 'fallback-success');

@@ -292,6 +292,20 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         return { attempts };
       }
 
+      function normalizeIndexingDiagnostics(structured) {
+        if (!structured || typeof structured !== 'object' || !structured.indexingDiagnostics || typeof structured.indexingDiagnostics !== 'object') {
+          return { indexedFiles: 0, cacheHits: 0, cacheMisses: 0, fullRebuild: false, partialRefresh: false };
+        }
+        const source = structured.indexingDiagnostics;
+        return {
+          indexedFiles: Number.isFinite(source.indexedFiles) ? Math.max(0, Math.floor(source.indexedFiles)) : 0,
+          cacheHits: Number.isFinite(source.cacheHits) ? Math.max(0, Math.floor(source.cacheHits)) : 0,
+          cacheMisses: Number.isFinite(source.cacheMisses) ? Math.max(0, Math.floor(source.cacheMisses)) : 0,
+          fullRebuild: source.fullRebuild === true,
+          partialRefresh: source.partialRefresh === true
+        };
+      }
+
       function buildActionLifecycleCounts(entries) {
         const counts = {
           requested: 0,
@@ -486,6 +500,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         const approvalStatusSummary = normalizeApprovalStatusSummary(structured, actionLifecycle);
         const contextDiagnostics = normalizeContextDiagnostics(structured);
         const retryDiagnostics = normalizeRetryDiagnostics(structured);
+        const indexingDiagnostics = normalizeIndexingDiagnostics(structured);
         const externalAttempts = Number.isFinite(structured && structured.externalAttempts)
           ? Math.max(0, Math.floor(structured.externalAttempts))
           : approvalRequiredActions.length;
@@ -652,6 +667,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           approvalStatusSummary,
           contextDiagnostics,
           retryDiagnostics,
+          indexingDiagnostics,
           changedHints,
           changedRanges,
           changedKinds,

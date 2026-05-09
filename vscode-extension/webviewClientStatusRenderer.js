@@ -75,6 +75,13 @@ const webviewClientStatusRenderer = `function renderRunStatus(run) {
             rows.push(['retry attempt', retryText]);
           }
         }
+        const indexingDiagnostics = run.indexingDiagnostics && typeof run.indexingDiagnostics === 'object' ? run.indexingDiagnostics : null;
+        if (indexingDiagnostics) {
+          rows.push(['indexing', String(Math.max(0, Number(indexingDiagnostics.indexedFiles) || 0)) + ' files']);
+          rows.push(['cache', String(Math.max(0, Number(indexingDiagnostics.cacheHits) || 0)) + ' hits / ' + String(Math.max(0, Number(indexingDiagnostics.cacheMisses) || 0)) + ' misses']);
+          const indexingMode = indexingDiagnostics.fullRebuild ? 'full rebuild' : indexingDiagnostics.partialRefresh ? 'partial refresh' : 'cached';
+          rows.push(['indexing mode', indexingMode]);
+        }
         const firstApproval = Array.isArray(run.approvalRequiredActions) && run.approvalRequiredActions.length > 0 ? run.approvalRequiredActions[0] : null;
         if (firstApproval) {
           rows.push(['approval proposal id', normalizeStatusCell(firstApproval.proposalId, 'not available')]);

@@ -246,6 +246,9 @@ namespace LocalCursorAgent.Core
 
             [JsonPropertyName("contextDiagnostics")]
             public ContextDiagnosticsPayload ContextDiagnostics { get; init; } = new();
+
+            [JsonPropertyName("indexingDiagnostics")]
+            public IndexingDiagnosticsPayload IndexingDiagnostics { get; init; } = new();
         }
 
         private sealed class ContextDiagnosticsPayload
@@ -303,6 +306,24 @@ namespace LocalCursorAgent.Core
 
             [JsonPropertyName("finalAttempt")]
             public bool FinalAttempt { get; init; }
+        }
+
+        private sealed class IndexingDiagnosticsPayload
+        {
+            [JsonPropertyName("indexedFiles")]
+            public int IndexedFiles { get; init; }
+
+            [JsonPropertyName("cacheHits")]
+            public int CacheHits { get; init; }
+
+            [JsonPropertyName("cacheMisses")]
+            public int CacheMisses { get; init; }
+
+            [JsonPropertyName("fullRebuild")]
+            public bool FullRebuild { get; init; }
+
+            [JsonPropertyName("partialRefresh")]
+            public bool PartialRefresh { get; init; }
         }
 
     }

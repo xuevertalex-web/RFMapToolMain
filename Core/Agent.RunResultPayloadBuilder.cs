@@ -130,7 +130,8 @@ namespace LocalCursorAgent.Core
                 HostBoundaryPreserved = true,
                 ActionLifecycle = ActionLifecycleMapper.MapActionLifecycle(actionLifecycleEntries),
                 ApprovalStatusSummary = ApprovalStatusSummaryBuilder.Build(actionLifecycleEntries),
-                ContextDiagnostics = BuildContextDiagnosticsPayload()
+                ContextDiagnostics = BuildContextDiagnosticsPayload(),
+                IndexingDiagnostics = BuildIndexingDiagnosticsPayload()
             };
         }
 
@@ -150,6 +151,19 @@ namespace LocalCursorAgent.Core
                 TotalChars = diagnostics.TotalChars,
                 BudgetUsed = diagnostics.BudgetUsed,
                 BudgetLimit = diagnostics.BudgetLimit
+            };
+        }
+
+        private static IndexingDiagnosticsPayload BuildIndexingDiagnosticsPayload()
+        {
+            var diagnostics = Indexing.ProjectIndexer.GetLatestDiagnostics();
+            return new IndexingDiagnosticsPayload
+            {
+                IndexedFiles = Math.Max(0, diagnostics.IndexedFiles),
+                CacheHits = Math.Max(0, diagnostics.CacheHits),
+                CacheMisses = Math.Max(0, diagnostics.CacheMisses),
+                FullRebuild = diagnostics.FullRebuild,
+                PartialRefresh = diagnostics.PartialRefresh
             };
         }
 
