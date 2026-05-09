@@ -4,6 +4,21 @@ namespace LocalCursorAgent.Core
 {
     public partial class Agent
     {
+        private static class StructuredActionContract
+        {
+            public const string ExecutionWorkspaceKindActiveWorkspace = "active-workspace";
+            public const string ExecutionWorkspaceKindWorktree = "worktree";
+            public const string ApprovalStatusAllowed = "Allowed";
+            public const string ApprovalStatusApprovalRequired = "ApprovalRequired";
+            public const string ApprovalStatusDenied = "Denied";
+            public const string ApprovalStatusNotApplicable = "NotApplicable";
+            public const string LifecycleStateRequested = "Requested";
+            public const string LifecycleStateApprovalRequired = "ApprovalRequired";
+            public const string LifecycleStateBlocked = "Blocked";
+            public const string LifecycleStateExecuted = "Executed";
+            public const string LifecycleStateFailed = "Failed";
+        }
+
         private sealed class AgentRunResultPayload
         {
             [JsonPropertyName("ok")]
@@ -32,6 +47,9 @@ namespace LocalCursorAgent.Core
 
             [JsonPropertyName("executionMode")]
             public string ExecutionMode { get; init; } = string.Empty;
+
+            [JsonPropertyName("execution_mode")]
+            public string ExecutionModeAlias => ExecutionMode;
 
             [JsonPropertyName("executionWorkspaceKind")]
             public string ExecutionWorkspaceKind { get; init; } = string.Empty;

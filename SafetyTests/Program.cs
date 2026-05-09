@@ -61,6 +61,7 @@ await RunRunTaskToolCallFlowRegression();
 await RunRunTaskMalformedToolCallDiagnosticRegression();
 await RunRunTaskTargetResolutionRegression();
 await RunTargetResolutionPathPreservingRegression();
+await RunStructuredActionContractCompatibilityRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -1927,6 +1928,85 @@ static async Task RunTargetResolutionPathPreservingRegression()
     AssertTrue(basenameResult.IsFailed, "Expected basename-only target with duplicates to be ambiguous.");
 
     Console.WriteLine("PASS TargetResolution_PathPreserving");
+}
+
+static async Task RunStructuredActionContractCompatibilityRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "a.txt"), "ok");
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    tracer.StartRun("contract", "contract", workspaceRoot, runtimeRoot, AgentAccessMode.WorkspaceWrite.ToString(), "test", "test");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var guard = new PermissionGuard();
+    var outsideAction = new ToolAction { Kind = ToolActionKind.ReadFile, TargetPath = Path.Combine(tempRoot, "outside.txt") };
+    var outsideDecision = guard.Evaluate(session, outsideAction);
+    tracer.LogPermissionDecision(session, "file", outsideAction, outsideDecision);
+
+    var guarded = new GuardedTool(new FakeNoopTool(), guard, session, _ => new ToolAction
+    {
+        Kind = ToolActionKind.ReadFile,
+        TargetPath = Path.Combine(workspaceRoot, "a.txt")
+    }, tracer);
+    _ = await guarded.Execute("read:a.txt");
+
+    var payloadJson = JsonSerializer.Serialize(new
+    {
+        executionMode = "active-workspace",
+        execution_mode = "active-workspace",
+        executionWorkspaceKind = "active-workspace",
+        activeWorkspaceUsed = true,
+        sandboxRoot = workspaceRoot,
+        worktreeRoot = workspaceRoot,
+        hostBoundaryPreserved = true,
+        approvalStatusSummary = new { allowed = 1, approvalRequired = 1, denied = 0, notApplicable = 0 },
+        actionLifecycle = tracer.GetActionLedger().Select(x => new
+        {
+            lifecycleState = x.LifecycleState.ToString(),
+            approvalStatus = x.ApprovalStatus
+        }).ToArray()
+    });
+    using var doc = JsonDocument.Parse(payloadJson);
+    var root = doc.RootElement;
+
+    AssertTrue(root.TryGetProperty("executionMode", out _), "Expected executionMode key.");
+    AssertTrue(root.TryGetProperty("execution_mode", out _), "Expected execution_mode alias key.");
+    AssertTrue(root.TryGetProperty("executionWorkspaceKind", out _), "Expected executionWorkspaceKind key.");
+    AssertTrue(root.TryGetProperty("activeWorkspaceUsed", out _), "Expected activeWorkspaceUsed key.");
+    AssertTrue(root.TryGetProperty("sandboxRoot", out _), "Expected sandboxRoot key.");
+    AssertTrue(root.TryGetProperty("worktreeRoot", out _), "Expected worktreeRoot key.");
+    AssertTrue(root.TryGetProperty("hostBoundaryPreserved", out _), "Expected hostBoundaryPreserved key.");
+
+    var allowedLifecycle = new HashSet<string>(StringComparer.Ordinal) { "Requested", "ApprovalRequired", "Blocked", "Executed", "Failed" };
+    var allowedStatus = new HashSet<string>(StringComparer.Ordinal) { "Allowed", "ApprovalRequired", "Denied", "NotApplicable" };
+    var lifecycle = root.GetProperty("actionLifecycle");
+    foreach (var item in lifecycle.EnumerateArray())
+    {
+        var state = item.GetProperty("lifecycleState").GetString() ?? string.Empty;
+        var status = item.GetProperty("approvalStatus").GetString() ?? string.Empty;
+        AssertTrue(allowedLifecycle.Contains(state), $"Unexpected lifecycleState: {state}");
+        AssertTrue(allowedStatus.Contains(status), $"Unexpected approvalStatus: {status}");
+    }
+
+    var hasOutsideExecuted = tracer.GetActionLedger().Any(x =>
+        x.Target.Contains("outside.txt", StringComparison.OrdinalIgnoreCase) &&
+        x.LifecycleState == ActionLifecycleState.Executed);
+    AssertTrue(!hasOutsideExecuted, "Outside approval-required action must not be executed.");
+
+    Console.WriteLine("PASS StructuredActionContract_Compatibility");
 }
 
 sealed class FakeNoopTool : ITool

@@ -28,7 +28,8 @@ namespace LocalCursorAgent.Core
             IReadOnlyList<ActionLifecycleEntry> actionLifecycleEntries,
             ContinuationPayloadValues continuation,
             RuntimeTuningPayloadValues runtimeTuning,
-            ActionOutcomeCounters actionCounters)
+            ActionOutcomeCounters actionCounters,
+            AgentSessionContext? sessionContext)
         {
             return new AgentRunResultPayload
             {
@@ -40,11 +41,11 @@ namespace LocalCursorAgent.Core
                 ChangedRanges = normalizedChangedPayload.Ranges,
                 ChangedKinds = normalizedChangedPayload.Kinds,
                 Workspace = workspace ?? string.Empty,
-                ExecutionMode = "active-workspace",
-                ExecutionWorkspaceKind = "active-workspace",
-                ActiveWorkspaceUsed = true,
-                SandboxRoot = workspace ?? string.Empty,
-                WorktreeRoot = workspace ?? string.Empty,
+                ExecutionMode = sessionContext?.ExecutionWorkspaceKind ?? StructuredActionContract.ExecutionWorkspaceKindActiveWorkspace,
+                ExecutionWorkspaceKind = sessionContext?.ExecutionWorkspaceKind ?? StructuredActionContract.ExecutionWorkspaceKindActiveWorkspace,
+                ActiveWorkspaceUsed = sessionContext?.ActiveWorkspaceUsed ?? true,
+                SandboxRoot = sessionContext?.ExecutionWorkspaceRoot ?? workspace ?? string.Empty,
+                WorktreeRoot = sessionContext?.WorktreeRoot ?? workspace ?? string.Empty,
                 DurationMs = runStartedUtc.HasValue ? Math.Max(0, (long)(DateTime.UtcNow - runStartedUtc.Value).TotalMilliseconds) : null,
                 RuntimeElapsedMs = runStartedUtc.HasValue ? Math.Max(0, (long)(DateTime.UtcNow - runStartedUtc.Value).TotalMilliseconds) : null,
                 Provider = provider ?? string.Empty,
