@@ -50,19 +50,13 @@ namespace LocalCursorAgent.Core
             if (mutationCall != null &&
                 TryValidateMutationToolCalls(task, toolCalls, mutationCall, targetResolution, tracer, out var gateFailureResult))
             {
-                return new IterationToolingResult
-                {
-                    NextResponse = currentResponse,
-                    ShouldContinue = false,
-                    FinalResult = gateFailureResult,
-                    PatchStarted = false,
-                    BuildStarted = false,
-                    LastDeniedToolResult = lastDeniedToolResult,
-                    LastBuildErrorSignature = lastBuildErrorSignature,
-                    LastBuildFailureCode = lastBuildFailureCode,
-                    LastSuccessfulStep = "ToolCallsParsed",
-                    LastKnownAction = $"Parsed {toolCalls.Count} tool calls"
-                };
+                return BuildMutationGateFailureResult(
+                    currentResponse,
+                    gateFailureResult!,
+                    lastDeniedToolResult,
+                    lastBuildErrorSignature,
+                    lastBuildFailureCode,
+                    toolCalls.Count);
             }
 
             var patchStarted = toolCalls.Any(ToolCallMutationHeuristics.IsMutationLikeToolCall);
