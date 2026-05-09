@@ -1193,6 +1193,16 @@ static async Task RunStructuredActionLifecycleReportingRegression()
     AssertTrue(externalAttempts > deniedActions, "Expected approval-required attempts not to be merged into deniedActions.");
 
     AssertTrue(root.GetProperty("hostBoundaryPreserved").GetBoolean(), "Expected hostBoundaryPreserved=true for blocked outside action.");
+    if (root.TryGetProperty("executionMode", out var executionMode))
+        AssertTrue(string.Equals(executionMode.GetString(), "active-workspace", StringComparison.Ordinal), "Expected truthful executionMode=active-workspace.");
+    if (root.TryGetProperty("executionWorkspaceKind", out var executionWorkspaceKind))
+        AssertTrue(string.Equals(executionWorkspaceKind.GetString(), "active-workspace", StringComparison.Ordinal), "Expected truthful executionWorkspaceKind=active-workspace.");
+    if (root.TryGetProperty("activeWorkspaceUsed", out var activeWorkspaceUsed))
+        AssertTrue(activeWorkspaceUsed.GetBoolean(), "Expected activeWorkspaceUsed=true for current implementation.");
+    if (root.TryGetProperty("sandboxRoot", out var sandboxRoot))
+        AssertTrue(!string.IsNullOrWhiteSpace(sandboxRoot.GetString()), "Expected non-empty sandboxRoot surfaced as active workspace root.");
+    if (root.TryGetProperty("worktreeRoot", out var worktreeRoot))
+        AssertTrue(!string.IsNullOrWhiteSpace(worktreeRoot.GetString()), "Expected non-empty worktreeRoot surfaced as active workspace root.");
 
     var lifecycle = root.GetProperty("actionLifecycle");
     AssertTrue(lifecycle.ValueKind == JsonValueKind.Array && lifecycle.GetArrayLength() >= 2, "Expected non-empty actionLifecycle.");

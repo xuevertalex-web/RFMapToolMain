@@ -30,6 +30,21 @@ namespace LocalCursorAgent.Core
             [JsonPropertyName("workspace")]
             public string Workspace { get; init; } = string.Empty;
 
+            [JsonPropertyName("executionMode")]
+            public string ExecutionMode { get; init; } = string.Empty;
+
+            [JsonPropertyName("executionWorkspaceKind")]
+            public string ExecutionWorkspaceKind { get; init; } = string.Empty;
+
+            [JsonPropertyName("activeWorkspaceUsed")]
+            public bool ActiveWorkspaceUsed { get; init; }
+
+            [JsonPropertyName("sandboxRoot")]
+            public string SandboxRoot { get; init; } = string.Empty;
+
+            [JsonPropertyName("worktreeRoot")]
+            public string WorktreeRoot { get; init; } = string.Empty;
+
             [JsonPropertyName("durationMs")]
             public long? DurationMs { get; init; }
 
