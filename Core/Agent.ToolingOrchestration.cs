@@ -94,7 +94,7 @@ namespace LocalCursorAgent.Core
             var unknownToolError = toolResultsProcessed.UnknownToolError;
             if (!string.IsNullOrWhiteSpace(unknownToolError))
             {
-                return BuildUnknownToolCallRejectedResult(
+                return BuildUnknownToolResult(
                     unknownToolError,
                     patchStarted,
                     lastDeniedToolResult,
