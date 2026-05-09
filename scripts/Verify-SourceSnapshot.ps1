@@ -20,7 +20,11 @@ try {
         'obj/',
         '.vs/',
         'TestResults/',
-        'coverage/'
+        'coverage/',
+        'vscode-extension/*.vsix',
+        '*.vsix',
+        'localcursoragent.secrets.json',
+        '*/localcursoragent.secrets.json'
     )
 
     $entries = $zip.Entries | ForEach-Object { $_.FullName.Replace('\', '/') }

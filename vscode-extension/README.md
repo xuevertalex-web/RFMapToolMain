@@ -4,7 +4,7 @@ Minimal UI-only extension.
 
 ## Run
 
-1. Open `C:\Users\Enot.DESKTOP-C19QK7E\Desktop\LocalCursorAgent\vscode-extension` in VS Code.
+1. Open the `vscode-extension` folder in VS Code.
 2. Press `F5`.
 3. Run command: `Local Cursor Agent: Open Panel`.
 
