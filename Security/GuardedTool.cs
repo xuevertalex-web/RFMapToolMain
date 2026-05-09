@@ -26,10 +26,11 @@ public sealed class GuardedTool : ITool
     public async Task<string> Execute(string input)
     {
         var action = _actionFactory(input);
+        string consumedProposalId = string.Empty;
         if (CommandRiskPolicy.TryExtractApprovalToken(input, out _))
             action = SanitizeApprovalTokenFromPaths(action);
         var decision = _guard.Evaluate(_session, action);
-        if (!decision.Allowed && decision.RequiresApproval && TryApplyProposalBoundApproval(input, action, decision, out var approvedAction, out var approvedDecision))
+        if (!decision.Allowed && decision.RequiresApproval && TryApplyProposalBoundApproval(input, action, decision, out var approvedAction, out var approvedDecision, out consumedProposalId))
         {
             action = approvedAction;
             decision = approvedDecision;
@@ -42,6 +43,8 @@ public sealed class GuardedTool : ITool
         try
         {
             var result = await _inner.Execute(input);
+            if (!string.IsNullOrWhiteSpace(consumedProposalId))
+                _session.ConsumeApprovalProposal(consumedProposalId);
             _tracer?.LogActionExecution(_inner.Name, action, decision, succeeded: true, PermissionReasonCodes.Allowed, "Action executed.");
             return result;
         }
@@ -52,10 +55,11 @@ public sealed class GuardedTool : ITool
         }
     }
 
-    private bool TryApplyProposalBoundApproval(string input, ToolAction action, PermissionDecision decision, out ToolAction approvedAction, out PermissionDecision approvedDecision)
+    private bool TryApplyProposalBoundApproval(string input, ToolAction action, PermissionDecision decision, out ToolAction approvedAction, out PermissionDecision approvedDecision, out string consumedProposalId)
     {
         approvedAction = action;
         approvedDecision = decision;
+        consumedProposalId = string.Empty;
         if (!CommandRiskPolicy.TryExtractApprovalToken(input, out var token))
             return false;
 
@@ -66,9 +70,14 @@ public sealed class GuardedTool : ITool
         var expectedId = expectedToken["APPROVED:".Length..];
         if (!token.Equals(expectedId, StringComparison.OrdinalIgnoreCase))
             return false;
+        if (_session.IsApprovalProposalConsumed(expectedId))
+            return false;
 
         approvedAction = CreateApprovedAction(action);
         approvedDecision = _guard.Evaluate(_session, approvedAction);
+        if (!approvedDecision.Allowed)
+            return false;
+        consumedProposalId = expectedId;
         return true;
     }
 

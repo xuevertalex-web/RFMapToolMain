@@ -1535,8 +1535,10 @@ static async Task RunGuardedToolExplicitApprovalHandoffRegression()
     Directory.CreateDirectory(outsideRoot);
 
     var insidePath = Path.Combine(workspaceRoot, "delete-inside.txt");
+    var insidePathSecond = Path.Combine(workspaceRoot, "delete-inside-2.txt");
     var outsidePath = Path.Combine(outsideRoot, "delete-outside.txt");
     await File.WriteAllTextAsync(insidePath, "inside");
+    await File.WriteAllTextAsync(insidePathSecond, "inside2");
     await File.WriteAllTextAsync(outsidePath, "outside");
 
     var session = new AgentSessionContext
@@ -1575,6 +1577,26 @@ static async Task RunGuardedToolExplicitApprovalHandoffRegression()
     var approved = await guarded.Execute($"delete:delete-inside.txt APPROVED:{proposalId}");
     AssertTrue(approved.StartsWith("Successfully deleted", StringComparison.Ordinal), $"Expected approved delete to execute. Actual: {approved}");
     AssertTrue(!File.Exists(insidePath), "Expected approved delete to remove inside file.");
+
+    var reusedToken = await guarded.Execute($"delete:delete-inside-2.txt APPROVED:{proposalId}");
+    AssertTrue(reusedToken.StartsWith("DENIED", StringComparison.Ordinal), "Expected consumed token reuse to be denied.");
+    AssertTrue(File.Exists(insidePathSecond), "Expected second inside file to remain after token reuse.");
+
+    var secondDecision = guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.DeleteFile,
+        TargetPath = insidePathSecond
+    });
+    AssertTrue(secondDecision.ApprovalProposal is not null, "Expected approval proposal for second inside delete.");
+    var secondProposalId = secondDecision.ApprovalProposal!.ProposalId;
+    AssertTrue(!string.Equals(proposalId, secondProposalId, StringComparison.OrdinalIgnoreCase), "Expected distinct proposals for distinct targets.");
+    var wrongProposalToken = await guarded.Execute($"delete:delete-inside-2.txt APPROVED:{proposalId}");
+    AssertTrue(wrongProposalToken.StartsWith("DENIED", StringComparison.Ordinal), "Expected token for proposal A not to authorize proposal B.");
+    AssertTrue(File.Exists(insidePathSecond), "Expected second inside file to remain for mismatched proposal token.");
+
+    var secondApproved = await guarded.Execute($"delete:delete-inside-2.txt APPROVED:{secondProposalId}");
+    AssertTrue(secondApproved.StartsWith("Successfully deleted", StringComparison.Ordinal), $"Expected second proposal token to authorize second delete. Actual: {secondApproved}");
+    AssertTrue(!File.Exists(insidePathSecond), "Expected second inside file to be deleted with its own token.");
 
     var outsideApproved = await guarded.Execute($"delete:{outsidePath} APPROVED:{proposalId}");
     AssertTrue(outsideApproved.StartsWith("DENIED", StringComparison.Ordinal), "Expected outside-boundary action to remain denied even with approval.");
