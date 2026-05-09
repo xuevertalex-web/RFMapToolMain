@@ -98,6 +98,17 @@ namespace LocalCursorAgent.Indexing
                 query.Contains(symbol, StringComparison.OrdinalIgnoreCase) ||
                 queryTokens.Contains(symbol));
         }
+
+        /// <summary>
+        /// Clone symbols list to avoid accidental shared mutable state between cache entries and callers.
+        /// </summary>
+        public static List<string> CloneSymbols(List<string> symbols)
+        {
+            if (symbols.Count == 0)
+                return new List<string>();
+
+            return symbols.ToList();
+        }
     }
 
     /// <summary>

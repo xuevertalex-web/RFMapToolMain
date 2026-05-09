@@ -21,6 +21,9 @@ namespace LocalCursorAgent.Indexing
         private readonly ProjectSymbolDirectory _symbolDirectory;
         private readonly TextFileService _textFileService;
         private List<string>? _cachedFileList;
+        private readonly Dictionary<string, FileIndexCacheEntry> _fileIndexCache = new(StringComparer.OrdinalIgnoreCase);
+        private int _cacheHits;
+        private int _cacheMisses;
 
         public ProjectIndexer(string projectPath, EmbeddingService embeddingService, VectorStore vectorStore, AgentConfig? agentConfig = null, FileStateManager? fileStateManager = null)
         {
@@ -61,6 +64,8 @@ namespace LocalCursorAgent.Indexing
         public async Task<IndexResult> IndexProject()
         {
             var result = new IndexResult();
+            _cacheHits = 0;
+            _cacheMisses = 0;
 
             if (!Directory.Exists(_projectPath))
             {
@@ -76,7 +81,8 @@ namespace LocalCursorAgent.Indexing
             {
                 var relativePath = Path.GetRelativePath(_projectPath, filePath);
 
-                if (_vectorStore.IsIndexed(relativePath))
+                var embeddingsDisabled = _embeddingService.Status == EmbeddingRuntimeStatus.Disabled;
+                if (TryUseCache(relativePath, filePath) && (_vectorStore.IsIndexed(relativePath) || embeddingsDisabled))
                 {
                     result.FilesProcessed++;
                     result.IndexedFiles.Add(relativePath);
@@ -113,6 +119,7 @@ namespace LocalCursorAgent.Indexing
 
                 var symbols = SymbolIndexer.ExtractSymbols(content);
                 _symbolDirectory.RegisterFile(relativePath, symbols);
+                UpdateCache(relativePath, fullPath, symbols);
 
                 if (symbols.Count > 0)
                 {
@@ -169,6 +176,7 @@ namespace LocalCursorAgent.Indexing
 
                 var symbols = SymbolIndexer.ExtractSymbols(content);
                 _symbolDirectory.RegisterFile(relativePath, symbols);
+                UpdateCache(relativePath, fullPath, symbols);
 
                 var embedding = await _embeddingService.GenerateEmbedding(content);
                 if (embedding != null)
@@ -192,6 +200,9 @@ namespace LocalCursorAgent.Indexing
         public void ClearCache()
         {
             _cachedFileList = null;
+            _fileIndexCache.Clear();
+            _cacheHits = 0;
+            _cacheMisses = 0;
         }
 
         /// <summary>
@@ -206,6 +217,9 @@ namespace LocalCursorAgent.Indexing
         {
             return _vectorStore.GetAllIdentifiers().ToList();
         }
+
+        public int CacheHits => _cacheHits;
+        public int CacheMisses => _cacheMisses;
 
         private List<string> FindRelevantFilesWithoutEmbeddings(string query, int topK)
         {
@@ -240,6 +254,43 @@ namespace LocalCursorAgent.Indexing
                 .Select(path => Path.GetRelativePath(_projectPath, path))
                 .Take(topK)
                 .ToList();
+        }
+
+        private bool TryUseCache(string relativePath, string fullPath)
+        {
+            if (!_fileIndexCache.TryGetValue(relativePath, out var cacheEntry))
+            {
+                _cacheMisses++;
+                return false;
+            }
+
+            var mtimeUtc = File.GetLastWriteTimeUtc(fullPath);
+            if (cacheEntry.LastWriteTimeUtc != mtimeUtc)
+            {
+                _cacheMisses++;
+                return false;
+            }
+
+            _symbolDirectory.RegisterFile(relativePath, SymbolIndexer.CloneSymbols(cacheEntry.Symbols));
+            _cacheHits++;
+            return true;
+        }
+
+        private void UpdateCache(string relativePath, string fullPath, List<string> symbols)
+        {
+            _fileIndexCache[relativePath] = new FileIndexCacheEntry
+            {
+                RelativePath = relativePath,
+                LastWriteTimeUtc = File.GetLastWriteTimeUtc(fullPath),
+                Symbols = SymbolIndexer.CloneSymbols(symbols)
+            };
+        }
+
+        private sealed class FileIndexCacheEntry
+        {
+            public string RelativePath { get; set; } = string.Empty;
+            public DateTime LastWriteTimeUtc { get; set; }
+            public List<string> Symbols { get; set; } = new();
         }
 
         /// <summary>

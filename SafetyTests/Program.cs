@@ -71,6 +71,7 @@ await RunStructuredActionContractCompatibilityRegression();
 await RunIsolatedExecutionWorkspaceRoutingRegression();
 await RunContextSelectionPrecisionRegression();
 await RunContextSelectionAdaptiveBudgetFitRegression();
+await RunMtimeAwareIndexingCacheRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -2493,6 +2494,51 @@ static async Task RunContextSelectionAdaptiveBudgetFitRegression()
     AssertTrue(info.TotalLength == 20000, "Expected adaptive fit to use more budget than single-file tail cutoff scenario.");
     AssertTrue(info.TotalLength <= 30000, "Expected selection to stay within medium complexity budget.");
     Console.WriteLine("PASS ContextSelection_AdaptiveBudgetFit");
+}
+
+static async Task RunMtimeAwareIndexingCacheRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(Path.Combine(workspaceRoot, "Core"));
+
+    var fileA = Path.Combine(workspaceRoot, "Core", "AService.cs");
+    var fileB = Path.Combine(workspaceRoot, "Core", "BService.cs");
+    await File.WriteAllTextAsync(fileA, "public class AService { public void RunA() {} }");
+    await File.WriteAllTextAsync(fileB, "public class BService { public void RunB() {} }");
+
+    var embeddingService = new EmbeddingService(disabled: true);
+    var vectorStore = new VectorStore();
+    var fileStateManager = new FileStateManager();
+    var indexer = new ProjectIndexer(workspaceRoot, embeddingService, vectorStore, new AgentConfig(workspaceRoot), fileStateManager);
+
+    var first = await indexer.IndexProject();
+    AssertTrue(first.Success, "Expected first index pass success.");
+    AssertTrue(indexer.CacheHits == 0, "Expected no cache hits on cold index.");
+    AssertTrue(indexer.CacheMisses >= 2, "Expected cache misses for initial indexed files.");
+    var relA = Path.Combine("Core", "AService.cs");
+    var relB = Path.Combine("Core", "BService.cs");
+    var symbolsA1 = indexer.SymbolDirectory.GetSymbols(relA);
+    AssertTrue(symbolsA1.Contains("RunA", StringComparer.Ordinal), "Expected initial symbol extraction for AService.");
+
+    var second = await indexer.IndexProject();
+    AssertTrue(second.Success, "Expected second index pass success.");
+    AssertTrue(indexer.CacheHits >= 2, "Expected cache hits when files are unchanged.");
+    AssertTrue(indexer.CacheMisses == 0, "Expected no cache misses when all files are unchanged.");
+
+    await Task.Delay(1100);
+    await File.WriteAllTextAsync(fileA, "public class AService { public void RunA() {} public void RunA2() {} }");
+    var third = await indexer.IndexProject();
+    AssertTrue(third.Success, "Expected third index pass success after single-file change.");
+    AssertTrue(indexer.CacheHits >= 1, "Expected at least one cache hit for unchanged file.");
+    AssertTrue(indexer.CacheMisses == 1, "Expected exactly one cache miss for changed file.");
+    var symbolsA2 = indexer.SymbolDirectory.GetSymbols(relA);
+    var symbolsB2 = indexer.SymbolDirectory.GetSymbols(relB);
+    AssertTrue(symbolsA2.Contains("RunA2", StringComparer.Ordinal), "Expected updated symbols after changed file reindex.");
+    AssertTrue(symbolsB2.Contains("RunB", StringComparer.Ordinal), "Expected unchanged file symbols to remain available from cache.");
+
+    Console.WriteLine("PASS MtimeAwareIndexingCache");
 }
 
 static async Task<(JsonElement structured, string workspaceRoot, string runtimeRoot)> RunAgentWithAdapter(ILlmProviderAdapter adapter)
