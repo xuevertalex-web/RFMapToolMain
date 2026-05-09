@@ -1,7 +1,8 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-set "ROOT=%~dp0"
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..\..") do set "ROOT=%%~fI\"
 set "EXT_DIR=%ROOT%vscode-extension"
 set "PKG_JSON=%EXT_DIR%\package.json"
 
@@ -11,7 +12,7 @@ if not exist "%PKG_JSON%" (
 )
 
 echo [update] Bumping patch version in vscode-extension\package.json...
-set "BUMP_SCRIPT=%ROOT%Update-VSCodeExtension.ps1"
+set "BUMP_SCRIPT=%SCRIPT_DIR%Update-VSCodeExtension.ps1"
 if not exist "%BUMP_SCRIPT%" (
   echo [update] bump script not found: "%BUMP_SCRIPT%"
   exit /b 1
@@ -55,6 +56,12 @@ if errorlevel 1 (
 
 copy /Y "%VSIX_FILE%" "%ROOT%%VSIX_FILE%" >nul
 popd >nul
+
+echo [update] Keeping only the 2 newest root VSIX files...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$root='%ROOT%';" ^
+  "$files=Get-ChildItem -Path $root -Filter 'local-cursor-agent-*.vsix' -File | Sort-Object LastWriteTime -Descending;" ^
+  "if($files.Count -gt 2){$files | Select-Object -Skip 2 | Remove-Item -Force}"
 
 echo [update] Done. Installed version !NEW_VERSION!.
 echo [update] If UI still shows old state, run: Developer: Reload Window

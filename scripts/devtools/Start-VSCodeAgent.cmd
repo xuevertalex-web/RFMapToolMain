@@ -1,9 +1,10 @@
 @echo off
 setlocal
 
-set "ROOT=%~dp0"
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..\..") do set "ROOT=%%~fI\"
 set "CODE=%LOCALAPPDATA%\Programs\Microsoft VS Code\bin\code.cmd"
-set "UPDATER=%ROOT%Update-VSCodeExtension.cmd"
+set "UPDATER=%SCRIPT_DIR%Update-VSCodeExtension.cmd"
 
 if not exist "%CODE%" (
   echo VS Code launcher not found:
