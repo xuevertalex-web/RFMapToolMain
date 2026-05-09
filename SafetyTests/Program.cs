@@ -62,6 +62,7 @@ await RunRunTaskMalformedToolCallDiagnosticRegression();
 await RunRunTaskTargetResolutionRegression();
 await RunTargetResolutionPathPreservingRegression();
 await RunStructuredActionContractCompatibilityRegression();
+await RunIsolatedExecutionWorkspaceRoutingRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -2007,6 +2008,80 @@ static async Task RunStructuredActionContractCompatibilityRegression()
     AssertTrue(!hasOutsideExecuted, "Outside approval-required action must not be executed.");
 
     Console.WriteLine("PASS StructuredActionContract_Compatibility");
+}
+
+static async Task RunIsolatedExecutionWorkspaceRoutingRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var activeWorkspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    var worktreeRoot = Path.Combine(runtimeRoot, "worktrees", "session");
+    Directory.CreateDirectory(activeWorkspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    Directory.CreateDirectory(worktreeRoot);
+
+    await File.WriteAllTextAsync(Path.Combine(activeWorkspaceRoot, "existing.txt"), "active");
+    await File.WriteAllTextAsync(Path.Combine(worktreeRoot, "existing.txt"), "worktree");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = activeWorkspaceRoot,
+        ExecutionWorkspaceRoot = worktreeRoot,
+        WorktreeRoot = worktreeRoot,
+        ExecutionWorkspaceKind = "worktree",
+        ActiveWorkspaceUsed = false,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    var guard = new PermissionGuard();
+    var patchGate = new PatchSafetyGate(session, guard, tracer);
+    var destructiveGate = new DestructiveOperationSafetyGate(session, guard, tracer);
+    var sandbox = new SandboxManager(worktreeRoot, runtimeRoot);
+    await sandbox.CreateSandbox();
+    var fileTool = new FileTool(session, guard, patchGate, destructiveGate, sandbox, tracer);
+    var writeResult = await fileTool.Execute("write:test.txt:hello");
+    AssertTrue(writeResult.StartsWith("Successfully wrote", StringComparison.Ordinal), "Expected isolated file write success.");
+    AssertTrue(File.Exists(Path.Combine(worktreeRoot, "test.txt")), "Expected write in worktree root.");
+    AssertTrue(!File.Exists(Path.Combine(activeWorkspaceRoot, "test.txt")), "Expected no write in active workspace root.");
+
+    var runner = new SafeProcessRunner(session, guard, tracer);
+    var cmd = await runner.RunAsync(new SafeProcessRequest
+    {
+        Kind = ToolActionKind.RunCommand,
+        Command = "dotnet",
+        Args = new[] { "--version" },
+        WorkingDirectory = ""
+    });
+    AssertTrue(cmd.WorkingDirectory.Equals(worktreeRoot, StringComparison.OrdinalIgnoreCase), "Expected isolated command working directory to be worktree root.");
+
+    var normalSession = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = activeWorkspaceRoot,
+        ExecutionWorkspaceRoot = activeWorkspaceRoot,
+        WorktreeRoot = activeWorkspaceRoot,
+        ExecutionWorkspaceKind = "active-workspace",
+        ActiveWorkspaceUsed = true,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var normalRunner = new SafeProcessRunner(normalSession, guard, tracer);
+    var normalCmd = await normalRunner.RunAsync(new SafeProcessRequest
+    {
+        Kind = ToolActionKind.RunCommand,
+        Command = "dotnet",
+        Args = new[] { "--version" },
+        WorkingDirectory = ""
+    });
+    AssertTrue(normalCmd.WorkingDirectory.Equals(activeWorkspaceRoot, StringComparison.OrdinalIgnoreCase), "Expected normal command working directory to stay active workspace.");
+
+    Console.WriteLine("PASS IsolatedExecutionWorkspace_Routing");
 }
 
 sealed class FakeNoopTool : ITool

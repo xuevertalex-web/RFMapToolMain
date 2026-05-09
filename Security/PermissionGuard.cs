@@ -96,13 +96,13 @@ public sealed class PermissionGuard
             return PermissionDecision.Allow(normalizedTarget ?? normalizedWorkspace, normalizedWorkspace);
         }
 
-        if (normalizedTarget is not null && session.ProtectedPathPolicy.IsProtected(normalizedTarget))
+        if (normalizedTarget is not null && session.ProtectedPathPolicy.IsProtected(normalizedTarget) && !IsWithinExecutionWorkspace(normalizedTarget, session))
             return PermissionDecision.Deny(PermissionReasonCode.ProtectedPathDenied, "Target is protected", normalizedTarget, normalizedWorkspace);
 
-        if (normalizedSource is not null && session.ProtectedPathPolicy.IsProtected(normalizedSource))
+        if (normalizedSource is not null && session.ProtectedPathPolicy.IsProtected(normalizedSource) && !IsWithinExecutionWorkspace(normalizedSource, session))
             return PermissionDecision.Deny(PermissionReasonCode.ProtectedPathDenied, "Source is protected", normalizedSource, normalizedWorkspace);
 
-        if (normalizedDestination is not null && session.ProtectedPathPolicy.IsProtected(normalizedDestination))
+        if (normalizedDestination is not null && session.ProtectedPathPolicy.IsProtected(normalizedDestination) && !IsWithinExecutionWorkspace(normalizedDestination, session))
             return PermissionDecision.Deny(PermissionReasonCode.ProtectedPathDenied, "Destination is protected", normalizedDestination, normalizedWorkspace);
 
         if (normalizedTarget is not null && PathSafetyPolicy.ContainsReparsePoint(normalizedTarget))
@@ -161,6 +161,16 @@ public sealed class PermissionGuard
     private static bool IsWithinWorkspace(string path, string workspaceRoot) =>
         path.Equals(workspaceRoot, StringComparison.OrdinalIgnoreCase) ||
         path.StartsWith(workspaceRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+
+    private bool IsWithinExecutionWorkspace(string path, AgentSessionContext session)
+    {
+        var executionRoot = session.ExecutionWorkspaceRoot ?? session.ActiveWorkspaceRoot;
+        if (string.IsNullOrWhiteSpace(executionRoot))
+            return false;
+
+        var normalizedExecutionRoot = _paths.Normalize(executionRoot);
+        return IsWithinWorkspace(path, normalizedExecutionRoot);
+    }
 
     private static bool IsWriteLike(ToolActionKind kind) =>
         kind is ToolActionKind.WriteFile or ToolActionKind.CreateFile or ToolActionKind.PatchFile;

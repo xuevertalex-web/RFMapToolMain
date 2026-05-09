@@ -259,6 +259,28 @@ function testRunNormalizationContracts() {
   assert.strictEqual(success.worktreeRoot, 'C:/repo/workspace');
   assertNoMojibake(success.summary, 'success summary');
 
+  const isolated = context.normalizeRunResult({
+    ok: true,
+    structuredResult: {
+      ok: true,
+      finalStatus: 'success',
+      message: 'done',
+      executionMode: 'worktree',
+      executionWorkspaceKind: 'worktree',
+      activeWorkspaceUsed: false,
+      sandboxRoot: 'C:/repo/runtime/worktrees/s1',
+      worktreeRoot: 'C:/repo/runtime/worktrees/s1',
+      buildStarted: false,
+      buildSucceeded: false,
+      changedFiles: []
+    }
+  });
+  assert.strictEqual(isolated.executionMode, 'worktree');
+  assert.strictEqual(isolated.executionWorkspaceKind, 'worktree');
+  assert.strictEqual(isolated.activeWorkspaceUsed, false);
+  assert.strictEqual(isolated.sandboxRoot, 'C:/repo/runtime/worktrees/s1');
+  assert.strictEqual(isolated.worktreeRoot, 'C:/repo/runtime/worktrees/s1');
+
   const timeoutFallback = context.normalizeRunResult({
     ok: true,
     structuredResult: {
@@ -672,6 +694,21 @@ function testStatusAndSummaryRendering() {
   assert.ok(context.resultBadge.className.includes('running'));
   assert.ok(context.summary.className.includes('na'));
   assert.ok(String(context.summary.textContent || '').includes('Next actions:'), 'Expected summary to include next actions block.');
+
+  const isolatedRun = {
+    ...successRun,
+    executionMode: 'worktree',
+    executionWorkspaceKind: 'worktree',
+    activeWorkspaceUsed: false,
+    sandboxRoot: 'C:/repo/runtime/worktrees/s1',
+    worktreeRoot: 'C:/repo/runtime/worktrees/s1'
+  };
+  context.renderRunStatus(isolatedRun);
+  const isolatedRows = readStatusRows(context.runStatusGrid);
+  assert.ok(isolatedRows.some(([key, value]) => key === 'execution workspace' && value === 'worktree'));
+  assert.ok(isolatedRows.some(([key, value]) => key === 'active workspace used' && value === 'false'));
+  assert.ok(isolatedRows.some(([key, value]) => key === 'sandbox root' && value === 'C:/repo/runtime/worktrees/s1'));
+  assert.ok(isolatedRows.some(([key, value]) => key === 'worktree root' && value === 'C:/repo/runtime/worktrees/s1'));
 
 }
 
