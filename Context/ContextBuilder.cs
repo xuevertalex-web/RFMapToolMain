@@ -176,38 +176,37 @@ namespace LocalCursorAgent.Context
                 { "Ranking", ranked.Select(x => $"{x.FilePath}:{x.MatchPriority}:{x.SortScore:F3}:{BuildInclusionReason(x, targetToken)}").ToArray() }
             });
 
-            var context = new ContextInformation
-            {
-                BudgetPlan = plan
-            };
-            var diagnosticsItems = new List<ContextDiagnosticsItem>();
+            var rankedWithContent = ranked
+                .Take(effectiveBudget)
+                .Select(file => new
+                {
+                    File = file,
+                    Content = LoadContextContent(file.FilePath)
+                })
+                .Where(x => !string.IsNullOrWhiteSpace(x.Content))
+                .ToList();
 
-            foreach (var file in ranked)
+            var bestPrefixLength = FindBestPrefixLength(rankedWithContent.Select(x => x.Content.Length).ToList(), maxChars);
+            var context = new ContextInformation { BudgetPlan = plan };
+            var diagnosticsItems = new List<ContextDiagnosticsItem>();
+            var selectedPrefix = rankedWithContent.Take(bestPrefixLength);
+
+            foreach (var item in selectedPrefix)
             {
-                if (context.SelectedFiles.Count >= effectiveBudget)
+                if (context.TotalLength > 0 && context.TotalLength + item.Content.Length > maxChars)
                     break;
 
-                var absolutePath = Path.Combine(_projectPath, file.FilePath);
-                var content = File.Exists(absolutePath)
-                    ? _textFileService.Read(absolutePath).NormalizedText
-                    : _vectorStore.GetMetadata(file.FilePath) ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(content))
-                    continue;
-
-                if (context.TotalLength > 0 && context.TotalLength + content.Length > maxChars)
-                    continue;
-
-                context.SelectedFiles.Add(file.FilePath);
-                context.FileStateFlags[file.FilePath] = _fileStateManager.GetStateFlag(file.FilePath) ?? "(Clean)";
-                context.RelevantSymbols[file.FilePath] = _symbolDirectory.GetSymbols(file.FilePath);
-                context.FileContents[file.FilePath] = content;
-                context.TotalLength += content.Length;
+                context.SelectedFiles.Add(item.File.FilePath);
+                context.FileStateFlags[item.File.FilePath] = _fileStateManager.GetStateFlag(item.File.FilePath) ?? "(Clean)";
+                context.RelevantSymbols[item.File.FilePath] = _symbolDirectory.GetSymbols(item.File.FilePath);
+                context.FileContents[item.File.FilePath] = item.Content;
+                context.TotalLength += item.Content.Length;
                 diagnosticsItems.Add(new ContextDiagnosticsItem
                 {
-                    Path = file.FilePath,
-                    Reason = BuildInclusionReason(file, targetToken),
-                    Priority = file.MatchPriority,
-                    CharCount = content.Length
+                    Path = item.File.FilePath,
+                    Reason = BuildInclusionReason(item.File, targetToken),
+                    Priority = item.File.MatchPriority,
+                    CharCount = item.Content.Length
                 });
             }
             lock (DiagnosticsLock)
@@ -535,6 +534,48 @@ namespace LocalCursorAgent.Context
             if (age <= TimeSpan.FromHours(1)) return 0.6;
             if (age <= TimeSpan.FromHours(24)) return 0.3;
             return 0.1;
+        }
+
+        private string LoadContextContent(string filePath)
+        {
+            var absolutePath = Path.Combine(_projectPath, filePath);
+            return File.Exists(absolutePath)
+                ? _textFileService.Read(absolutePath).NormalizedText
+                : _vectorStore.GetMetadata(filePath) ?? string.Empty;
+        }
+
+        private static int FindBestPrefixLength(List<int> lengths, int maxChars)
+        {
+            if (lengths.Count == 0 || maxChars <= 0)
+                return 0;
+
+            var prefixSums = new int[lengths.Count + 1];
+            for (var i = 0; i < lengths.Count; i++)
+            {
+                checked
+                {
+                    prefixSums[i + 1] = prefixSums[i] + Math.Max(0, lengths[i]);
+                }
+            }
+
+            var lo = 0;
+            var hi = lengths.Count;
+            var best = 0;
+            while (lo <= hi)
+            {
+                var mid = lo + ((hi - lo) / 2);
+                if (prefixSums[mid] <= maxChars)
+                {
+                    best = mid;
+                    lo = mid + 1;
+                }
+                else
+                {
+                    hi = mid - 1;
+                }
+            }
+
+            return best;
         }
     }
 

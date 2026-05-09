@@ -70,6 +70,7 @@ await RunTargetResolutionPathPreservingRegression();
 await RunStructuredActionContractCompatibilityRegression();
 await RunIsolatedExecutionWorkspaceRoutingRegression();
 await RunContextSelectionPrecisionRegression();
+await RunContextSelectionAdaptiveBudgetFitRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
 {
@@ -2462,6 +2463,36 @@ static async Task RunContextSelectionPrecisionRegression()
     AssertTrue(!info.SelectedFiles.Contains("Noise/Unrelated.cs", StringComparer.OrdinalIgnoreCase), "Expected unrelated oversized file to be excluded by relevance/budget.");
     AssertTrue(info.TotalLength > 0 && info.TotalLength <= 30000, "Expected context to respect medium complexity size budget.");
     Console.WriteLine("PASS ContextSelection_PrecisionAndBudget");
+}
+
+static async Task RunContextSelectionAdaptiveBudgetFitRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    Directory.CreateDirectory(Path.Combine(workspaceRoot, "Core"));
+
+    var targetFile = Path.Combine(workspaceRoot, "Core", "TargetService.cs");
+    var helperFile = Path.Combine(workspaceRoot, "Core", "TargetServiceHelper.cs");
+    var extraFile = Path.Combine(workspaceRoot, "Core", "TargetServiceNotes.cs");
+    await File.WriteAllTextAsync(targetFile, new string('a', 12000));
+    await File.WriteAllTextAsync(helperFile, new string('b', 8000));
+    await File.WriteAllTextAsync(extraFile, new string('c', 15000));
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    var builder = new ContextBuilder(workspaceRoot, new VectorStore(), new FileStateManager(), new ProjectSymbolDirectory(), tracer);
+    var semantic = new List<string> { "Core/TargetService.cs", "Core/TargetServiceHelper.cs", "Core/TargetServiceNotes.cs" };
+    var symbols = new List<string> { "Core/TargetService.cs", "Core/TargetServiceHelper.cs", "Core/TargetServiceNotes.cs" };
+    var info = builder.BuildContext("Improve target method and helper with focused refactor for reliability", semantic, symbols, 6);
+
+    AssertTrue(info.SelectedFiles.Contains("Core/TargetService.cs", StringComparer.OrdinalIgnoreCase), "Expected target file to remain selected.");
+    AssertTrue(info.SelectedFiles.Contains("Core/TargetServiceHelper.cs", StringComparer.OrdinalIgnoreCase), "Expected ranked helper file to fit into budget.");
+    AssertTrue(!info.SelectedFiles.Contains("Core/TargetServiceNotes.cs", StringComparer.OrdinalIgnoreCase), "Expected lower-priority file to be excluded when prefix budget is full.");
+    AssertTrue(info.TotalLength == 20000, "Expected adaptive fit to use more budget than single-file tail cutoff scenario.");
+    AssertTrue(info.TotalLength <= 30000, "Expected selection to stay within medium complexity budget.");
+    Console.WriteLine("PASS ContextSelection_AdaptiveBudgetFit");
 }
 
 static async Task<(JsonElement structured, string workspaceRoot, string runtimeRoot)> RunAgentWithAdapter(ILlmProviderAdapter adapter)
