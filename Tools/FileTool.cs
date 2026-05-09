@@ -235,6 +235,19 @@ namespace LocalCursorAgent.Tools
             if (!backupCapture.Succeeded)
                 return $"DENIED [{PermissionReasonCodes.BackupCaptureFailed}]: {backupCapture.Message}";
 
+            if (hasApproval)
+            {
+                if (File.Exists(resolvedPath))
+                    File.Delete(resolvedPath);
+                else if (Directory.Exists(resolvedPath))
+                    Directory.Delete(resolvedPath, recursive: true);
+
+                _tracer?.MarkChangedFile(resolvedPath);
+                return File.Exists(resolvedPath)
+                    ? $"Successfully deleted directory {path}"
+                    : $"Successfully deleted file {path}";
+            }
+
             var result = await _destructiveOperationSafetyGate.DeleteAsync(path);
             if (result.DestructiveApplySucceeded)
                 _tracer?.MarkChangedFile(resolvedPath);

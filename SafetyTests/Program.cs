@@ -38,6 +38,7 @@ await RunTechnicalNoToolCallsRequiresActionRegression();
 await RunHostDiagnosticsCommandApprovalRegression();
 await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
 await RunDestructiveFileApprovalMarkerRegression();
+await RunGuardedToolExplicitApprovalHandoffRegression();
 RunExtractRequestedNewFilePath_ExtensionRegression();
 RunExtractRequestedNewFilePath_NoCreateIntentRegression();
 RunExtractRequestedNewFilePath_NoExtensionRegression();
@@ -1512,6 +1513,54 @@ static async Task RunDestructiveFileApprovalMarkerRegression()
     Console.WriteLine("PASS DestructiveFileApprovalMarker");
 }
 
+static async Task RunGuardedToolExplicitApprovalHandoffRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    var outsideRoot = Path.Combine(tempRoot, "outside");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    Directory.CreateDirectory(outsideRoot);
+
+    var insidePath = Path.Combine(workspaceRoot, "delete-inside.txt");
+    var outsidePath = Path.Combine(outsideRoot, "delete-outside.txt");
+    await File.WriteAllTextAsync(insidePath, "inside");
+    await File.WriteAllTextAsync(outsidePath, "outside");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var guard = new PermissionGuard();
+    var tracer = new ExecutionTracer(runtimeRoot);
+    var patchGate = new PatchSafetyGate(session, guard, tracer);
+    var destructiveGate = new DestructiveOperationSafetyGate(session, guard, tracer);
+    var sandbox = new SandboxManager(workspaceRoot, runtimeRoot);
+    await sandbox.CreateSandbox();
+    var inner = new FileTool(session, guard, patchGate, destructiveGate, sandbox, tracer);
+    var guarded = new GuardedTool(inner, guard, session, CreateFileActionFactory(workspaceRoot), tracer);
+
+    var noApproval = await guarded.Execute("delete:delete-inside.txt");
+    AssertTrue(noApproval.StartsWith("DENIED", StringComparison.Ordinal), "Expected approval-required delete to be denied before approval.");
+    AssertTrue(File.Exists(insidePath), "Expected file to remain without explicit approval.");
+
+    var approved = await guarded.Execute("delete:delete-inside.txt APPROVED:true");
+    AssertTrue(approved.StartsWith("Successfully deleted", StringComparison.Ordinal), $"Expected approved delete to execute. Actual: {approved}");
+    AssertTrue(!File.Exists(insidePath), "Expected approved delete to remove inside file.");
+
+    var outsideApproved = await guarded.Execute($"delete:{outsidePath} APPROVED:true");
+    AssertTrue(outsideApproved.StartsWith("DENIED", StringComparison.Ordinal), "Expected outside-boundary action to remain denied even with approval.");
+    AssertTrue(File.Exists(outsidePath), "Expected outside file to remain untouched.");
+
+    Console.WriteLine("PASS GuardedTool_ExplicitApprovalHandoff");
+}
+
 static void RunExtractRequestedNewFilePath_ExtensionRegression()
 {
     var method = typeof(Agent).GetMethod("ExtractRequestedNewFilePath", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
@@ -2083,6 +2132,87 @@ static async Task RunIsolatedExecutionWorkspaceRoutingRegression()
 
     Console.WriteLine("PASS IsolatedExecutionWorkspace_Routing");
 }
+
+static Func<string, ToolAction> CreateFileActionFactory(string workspaceRoot) => input =>
+{
+    static string ResolvePath(string root, string path)
+    {
+        var full = Path.IsPathFullyQualified(path) ? path : Path.Combine(root, path);
+        return Path.GetFullPath(full);
+    }
+
+    static int FindWriteSeparator(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return -1;
+        if (payload.Length >= 3 && payload[1] == ':' && (payload[2] == '\\' || payload[2] == '/'))
+            return payload.IndexOf(':', 3);
+        return payload.IndexOf(':');
+    }
+
+    static int FindPathPairSeparator(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return -1;
+        if (payload.Length >= 3 && payload[1] == ':' && (payload[2] == '\\' || payload[2] == '/'))
+            return payload.IndexOf(':', 3);
+        return payload.IndexOf(':');
+    }
+
+    if (input.StartsWith("read:", StringComparison.OrdinalIgnoreCase))
+    {
+        var path = input[5..].Trim();
+        return new ToolAction
+        {
+            Kind = ToolActionKind.ReadFile,
+            TargetPath = ResolvePath(workspaceRoot, path)
+        };
+    }
+
+    if (input.StartsWith("write:", StringComparison.OrdinalIgnoreCase))
+    {
+        var payload = input[6..];
+        var separator = FindWriteSeparator(payload);
+        var path = separator >= 0 ? payload[..separator].Trim() : payload.Trim();
+        var content = separator >= 0 ? payload[(separator + 1)..] : string.Empty;
+
+        return new ToolAction
+        {
+            Kind = ToolActionKind.WriteFile,
+            TargetPath = ResolvePath(workspaceRoot, path),
+            Payload = content
+        };
+    }
+
+    if (input.StartsWith("delete:", StringComparison.OrdinalIgnoreCase))
+    {
+        var path = input[7..].Trim();
+        return new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = ResolvePath(workspaceRoot, path)
+        };
+    }
+
+    if (input.StartsWith("rename:", StringComparison.OrdinalIgnoreCase) ||
+        input.StartsWith("move:", StringComparison.OrdinalIgnoreCase))
+    {
+        var isMove = input.StartsWith("move:", StringComparison.OrdinalIgnoreCase);
+        var payload = input[(isMove ? 5 : 7)..];
+        var separator = FindPathPairSeparator(payload);
+        var source = separator >= 0 ? payload[..separator].Trim() : payload.Trim();
+        var destination = separator >= 0 ? payload[(separator + 1)..].Trim() : string.Empty;
+
+        return new ToolAction
+        {
+            Kind = isMove ? ToolActionKind.MoveFile : ToolActionKind.RenameFile,
+            SourcePath = ResolvePath(workspaceRoot, source),
+            DestinationPath = ResolvePath(workspaceRoot, destination)
+        };
+    }
+
+    return new ToolAction { Kind = ToolActionKind.RunCommand };
+};
 
 sealed class FakeNoopTool : ITool
 {
