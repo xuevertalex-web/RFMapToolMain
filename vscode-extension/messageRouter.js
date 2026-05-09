@@ -76,6 +76,15 @@ function createPanelMessageHandler(options) {
       return;
     }
 
+    if (type === 'copyToClipboard') {
+      const text = String(message.text || '');
+      if (!text) {
+        return;
+      }
+      await require('vscode').env.clipboard.writeText(text);
+      return;
+    }
+
     if (type === 'stopAgent') {
       panelCommandHandlers.handleStopAgent();
     }

@@ -107,7 +107,7 @@ const webviewClientActions = `function startAgentRunFromInput() {
         }
 
         const text = files.join('\\n');
-        navigator.clipboard.writeText(text).then(() => {
+        copyTextWithFallback(text).then(() => {
           copyChangedFilesButton.textContent = 'Copied';
           resetButtonTextLater(copyChangedFilesButton, 'Copy Changed Files', 1500);
         }).catch(() => {
@@ -177,7 +177,7 @@ const webviewClientActions = `function startAgentRunFromInput() {
         }
 
         try {
-          await navigator.clipboard.writeText(text);
+          await copyTextWithFallback(text);
           updateCopyResultButton('Copied', 1500);
         } catch {
           updateCopyResultButton('Copy failed', 1500);
@@ -191,7 +191,7 @@ const webviewClientActions = `function startAgentRunFromInput() {
 
         try {
           const text = JSON.stringify(lastResultPayload, null, 2);
-          await navigator.clipboard.writeText(text);
+          await copyTextWithFallback(text);
           updateCopyStructuredResultButton('Copied', 1500);
         } catch {
           updateCopyStructuredResultButton('Copy failed', 1500);
@@ -223,7 +223,7 @@ const webviewClientActions = `function startAgentRunFromInput() {
       async function copyLogs() {
         const text = getLogsText();
         try {
-          await navigator.clipboard.writeText(text);
+          await copyTextWithFallback(text);
           copyLogsButton.textContent = 'Copied';
           resetButtonTextLater(copyLogsButton, 'Copy', 1500);
         } catch {
@@ -260,6 +260,27 @@ const webviewClientActions = `function startAgentRunFromInput() {
           .map(line => String(line.textContent || '').trimEnd())
           .filter(Boolean);
         return lines.length > 0 ? lines.join('\\n') : String(logs.textContent || '');
+      }
+
+      async function copyTextWithFallback(text) {
+        const value = String(text || '');
+        if (!value) {
+          throw new Error('empty_copy_text');
+        }
+
+        try {
+          if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            await navigator.clipboard.writeText(value);
+            return;
+          }
+        } catch {
+          // fall through to extension-host clipboard
+        }
+
+        vscode.postMessage({
+          type: 'copyToClipboard',
+          text: value
+        });
       }
 
       function updateCopyStructuredResultButton(text, resetAfterMs) {
