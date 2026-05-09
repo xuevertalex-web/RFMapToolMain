@@ -101,6 +101,8 @@ const webviewClientStatusRenderer = `function renderRunStatus(run) {
         if (normalizeStatusCell(run.targetWorkspacePath, '')) rows.push(['target workspace path', normalizeStatusCell(run.targetWorkspacePath, '')]);
         if (normalizeStatusCell(run.initializedProjectRoot, '')) rows.push(['initialized project root', normalizeStatusCell(run.initializedProjectRoot, '')]);
         if (normalizeStatusCell(run.suggestedProjectFolderName, '')) rows.push(['suggested project folder', normalizeStatusCell(run.suggestedProjectFolderName, '')]);
+        rows.push(['template', normalizeStatusCell(run.templateType, 'none')]);
+        rows.push(['template applied', String(run.projectTemplateApplied === true)]);
         rows.push(['execution workspace', normalizeStatusCell(run.executionWorkspaceKind, 'active workspace')]);
         rows.push(['active workspace used', String(run.activeWorkspaceUsed !== false)]);
         if (normalizeStatusCell(run.sandboxRoot, '')) rows.push(['sandbox root', normalizeStatusCell(run.sandboxRoot, '')]);

@@ -608,6 +608,8 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         const targetWorkspacePath = normalizeOptionalText(structured && structured.targetWorkspacePath);
         const initializedProjectRoot = normalizeOptionalText(structured && structured.initializedProjectRoot);
         const suggestedProjectFolderName = normalizeOptionalText(structured && structured.suggestedProjectFolderName);
+        const projectTemplateApplied = structured && structured.projectTemplateApplied === true;
+        const templateType = normalizeOptionalText(structured && structured.templateType) || 'none';
 
         return {
           ok,
@@ -641,6 +643,8 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           targetWorkspacePath,
           initializedProjectRoot,
           suggestedProjectFolderName,
+          projectTemplateApplied,
+          templateType,
           modelUsed,
           reasonCode,
           continuationHint,

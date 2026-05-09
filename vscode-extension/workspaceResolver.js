@@ -1,6 +1,7 @@
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 function resolveWorkspaceRoot(options = {}) {
   const configuredWorkspaceRoot = String(options.configuredWorkspaceRoot || '').trim();
@@ -73,6 +74,7 @@ function ensureProjectWorkspace(targetRoot, projectNameHint) {
   const projectRoot = path.join(sandboxRoot, folderName);
   if (!fs.existsSync(projectRoot)) {
     fs.mkdirSync(projectRoot, { recursive: true });
+    const template = applyProjectTemplate(projectRoot, projectNameHint);
     return {
       workspaceRoot: projectRoot,
       reason: 'created_from_target_root',
@@ -80,10 +82,13 @@ function ensureProjectWorkspace(targetRoot, projectNameHint) {
       workspaceInitializationMode: 'created_from_target_root',
       targetWorkspacePath: sandboxRoot,
       initializedProjectRoot: projectRoot,
-      suggestedProjectFolderName: folderName
+      suggestedProjectFolderName: folderName,
+      projectTemplateApplied: template.projectTemplateApplied,
+      templateType: template.templateType
     };
   }
 
+  const template = applyProjectTemplate(projectRoot, projectNameHint);
   return {
     workspaceRoot: projectRoot,
     reason: 'configured',
@@ -91,7 +96,9 @@ function ensureProjectWorkspace(targetRoot, projectNameHint) {
     workspaceInitializationMode: 'existing',
     targetWorkspacePath: sandboxRoot,
     initializedProjectRoot: projectRoot,
-    suggestedProjectFolderName: folderName
+    suggestedProjectFolderName: folderName,
+    projectTemplateApplied: template.projectTemplateApplied,
+    templateType: template.templateType
   };
 }
 
@@ -114,6 +121,42 @@ function buildProjectFolderName(hint) {
   const hh = String(now.getHours()).padStart(2, '0');
   const min = String(now.getMinutes()).padStart(2, '0');
   return `NewProject-${yyyy}${mm}${dd}-${hh}${min}`;
+}
+
+function resolveTemplateType(taskHint) {
+  const value = String(taskHint || '').toLowerCase();
+  if (value.includes('c#') || value.includes('dotnet')) {
+    return 'dotnet';
+  }
+  if (value.includes('node') || value.includes('npm') || value.includes('js')) {
+    return 'node';
+  }
+  return 'none';
+}
+
+function applyProjectTemplate(projectRoot, taskHint) {
+  const templateType = resolveTemplateType(taskHint);
+  if (templateType === 'dotnet') {
+    const hasProject = fs.readdirSync(projectRoot).some(name => name.toLowerCase().endsWith('.csproj'));
+    if (!hasProject) {
+      const result = spawnSync('dotnet', ['new', 'console'], { cwd: projectRoot, windowsHide: true, shell: false });
+      if (result.status === 0) {
+        return { projectTemplateApplied: true, templateType };
+      }
+    }
+    return { projectTemplateApplied: false, templateType };
+  }
+  if (templateType === 'node') {
+    const packageJson = path.join(projectRoot, 'package.json');
+    if (!fs.existsSync(packageJson)) {
+      const result = spawnSync('npm', ['init', '-y'], { cwd: projectRoot, windowsHide: true, shell: false });
+      if (result.status === 0 && fs.existsSync(packageJson)) {
+        return { projectTemplateApplied: true, templateType };
+      }
+    }
+    return { projectTemplateApplied: false, templateType };
+  }
+  return { projectTemplateApplied: false, templateType: 'none' };
 }
 
 function enforceBackendWorkspaceGuard(state, backendProjectPath, allowBackendWorkspace) {

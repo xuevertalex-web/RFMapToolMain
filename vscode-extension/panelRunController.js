@@ -53,12 +53,23 @@ function createPanelRunController(options) {
       const selectedModel = String(message.selectedModel || message.model || '').trim();
       const result = await runAgent(panel, workspaceState.workspaceRoot, task, output, extensionRoot, selectedModel);
       const resultText = (result.result && result.result.message) || result.text;
+      const structuredResult = {
+        ...(result.result || {}),
+        workspaceInitializationRequired: false,
+        workspaceInitialized: workspaceState.workspaceInitialized === true,
+        workspaceInitializationMode: String(workspaceState.workspaceInitializationMode || 'existing'),
+        targetWorkspacePath: String(workspaceState.targetWorkspacePath || ''),
+        initializedProjectRoot: String(workspaceState.initializedProjectRoot || workspaceState.workspaceRoot || ''),
+        suggestedProjectFolderName: String(workspaceState.suggestedProjectFolderName || ''),
+        projectTemplateApplied: workspaceState.projectTemplateApplied === true,
+        templateType: String(workspaceState.templateType || 'none')
+      };
       panel.webview.postMessage({ type: 'result', text: resultText });
       panel.webview.postMessage({
         type: 'agentFinished',
         ok: true,
         result: resultText || 'Agent run completed successfully.',
-        structuredResult: result.result || null
+        structuredResult
       });
       vscode.window.setStatusBarMessage('Agent finished', 3000);
     } catch (err) {
@@ -98,7 +109,9 @@ function createPanelRunController(options) {
         workspaceInitializationMode: 'requires_user_selection',
         targetWorkspacePath: String(workspaceState && workspaceState.targetWorkspacePath || ''),
         initializedProjectRoot: String(workspaceState && workspaceState.initializedProjectRoot || ''),
-        suggestedProjectFolderName: String(workspaceState && workspaceState.suggestedProjectFolderName || 'NewProject')
+        suggestedProjectFolderName: String(workspaceState && workspaceState.suggestedProjectFolderName || 'NewProject'),
+        projectTemplateApplied: false,
+        templateType: 'none'
       }
     });
   }
