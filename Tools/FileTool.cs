@@ -289,11 +289,11 @@ namespace LocalCursorAgent.Tools
         private string ResolvePath(string path)
         {
             if (string.IsNullOrWhiteSpace(path))
-                return _session.ActiveWorkspaceRoot;
+                return _session.ExecutionWorkspaceRoot ?? _session.ActiveWorkspaceRoot;
 
             var fullPath = Path.IsPathFullyQualified(path)
                 ? path
-                : Path.Combine(_session.ActiveWorkspaceRoot, path);
+                : Path.Combine(_session.ExecutionWorkspaceRoot ?? _session.ActiveWorkspaceRoot, path);
 
             return Path.GetFullPath(fullPath);
         }

@@ -11,7 +11,7 @@ namespace LocalCursorAgent.Core
             string? lastBuildErrorSignature,
             string? lastBuildFailureCode)
         {
-            var buildPath = _sessionContext?.ActiveWorkspaceRoot;
+            var buildPath = _sessionContext?.ExecutionWorkspaceRoot ?? _sessionContext?.ActiveWorkspaceRoot;
             if (string.IsNullOrWhiteSpace(buildPath) || !Directory.Exists(buildPath))
             {
                 return new MutationBuildVerificationResult

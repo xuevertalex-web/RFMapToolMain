@@ -76,7 +76,7 @@ public sealed class SafeProcessRunner
         }
 
         var workingDirectory = string.IsNullOrWhiteSpace(request.WorkingDirectory)
-            ? _session.ActiveWorkspaceRoot
+            ? (_session.ExecutionWorkspaceRoot ?? _session.ActiveWorkspaceRoot)
             : request.WorkingDirectory!;
 
         if (!Directory.Exists(workingDirectory))

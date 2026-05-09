@@ -58,7 +58,8 @@ namespace LocalCursorAgent.Core
                 timeline,
                 _contextBuilder.Tracer.GetApprovalRequiredActions(),
                 _contextBuilder.Tracer.GetDeniedPermissionDecisionCount(),
-                _contextBuilder.Tracer.GetActionLedger());
+                _contextBuilder.Tracer.GetActionLedger(),
+                _sessionContext);
         }
 
         private static string? ExtractRequestedNewFilePath(string task)
@@ -95,7 +96,8 @@ namespace LocalCursorAgent.Core
                 timeline: null,
                 approvalRequiredActions: Array.Empty<ActionApprovalProposal>(),
                 tracerDeniedActions: 0,
-                actionLifecycleEntries: Array.Empty<ActionLifecycleEntry>());
+                actionLifecycleEntries: Array.Empty<ActionLifecycleEntry>(),
+                sessionContext: _sessionContext);
         }
 
         private static string BuildStructuredDiagnosticMessage(StructuredDiagnostic diagnostic)

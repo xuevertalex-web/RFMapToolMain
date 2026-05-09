@@ -29,7 +29,8 @@ namespace LocalCursorAgent.Core
             TimelinePayload[]? timeline,
             IReadOnlyList<ActionApprovalProposal> approvalRequiredActions,
             int tracerDeniedActions,
-            IReadOnlyList<ActionLifecycleEntry> actionLifecycleEntries)
+            IReadOnlyList<ActionLifecycleEntry> actionLifecycleEntries,
+            AgentSessionContext? sessionContext)
         {
             var effectiveReasonCode = EffectiveReasonCodeResolver.Resolve(failure?.ReasonCode, reasonCode);
             var continuation = ContinuationPayloadBuilder.Build(effectiveReasonCode, failure);
@@ -63,7 +64,8 @@ namespace LocalCursorAgent.Core
                 actionLifecycleEntries,
                 continuation,
                 runtimeTuning,
-                actionCounters);
+                actionCounters,
+                sessionContext);
 
             Console.WriteLine(JsonSerializer.Serialize(payload));
             return message;

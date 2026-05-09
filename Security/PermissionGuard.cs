@@ -6,11 +6,12 @@ public sealed class PermissionGuard
 
     public PermissionDecision Evaluate(AgentSessionContext session, ToolAction action)
     {
-        if (string.IsNullOrWhiteSpace(session.RuntimeRoot) || string.IsNullOrWhiteSpace(session.ActiveWorkspaceRoot))
+        var workspaceRoot = session.ExecutionWorkspaceRoot ?? session.ActiveWorkspaceRoot;
+        if (string.IsNullOrWhiteSpace(session.RuntimeRoot) || string.IsNullOrWhiteSpace(workspaceRoot))
             return PermissionDecision.Deny(PermissionReasonCode.WorkspaceNotResolved, "Workspace root not resolved");
 
         if (PathSafetyPolicy.HasExtendedLengthPrefix(action.TargetPath))
-            return PermissionDecision.Deny(PermissionReasonCode.ExtendedLengthPathDenied, "Target uses extended-length path prefix", action.TargetPath, session.ActiveWorkspaceRoot);
+            return PermissionDecision.Deny(PermissionReasonCode.ExtendedLengthPathDenied, "Target uses extended-length path prefix", action.TargetPath, workspaceRoot);
 
         if (PathSafetyPolicy.HasExtendedLengthPrefix(action.SourcePath))
             return PermissionDecision.Deny(PermissionReasonCode.ExtendedLengthPathDenied, "Source uses extended-length path prefix", action.SourcePath, session.ActiveWorkspaceRoot);
@@ -52,7 +53,7 @@ public sealed class PermissionGuard
 
         try
         {
-            normalizedWorkspace = _paths.Normalize(session.ActiveWorkspaceRoot);
+            normalizedWorkspace = _paths.Normalize(workspaceRoot);
 
             if (!string.IsNullOrWhiteSpace(action.TargetPath))
                 normalizedTarget = _paths.Normalize(action.TargetPath);
