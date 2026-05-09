@@ -274,6 +274,24 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         };
       }
 
+      function normalizeRetryDiagnostics(structured) {
+        if (!structured || typeof structured !== 'object' || !structured.retryDiagnostics || typeof structured.retryDiagnostics !== 'object') {
+          return { attempts: [] };
+        }
+        const attempts = Array.isArray(structured.retryDiagnostics.attempts)
+          ? structured.retryDiagnostics.attempts
+              .filter(item => item && typeof item === 'object')
+              .map(item => ({
+                attempt: Number.isFinite(item.attempt) ? Math.max(0, Math.floor(item.attempt)) : 0,
+                reason: normalizeText(item.reason, 'not available'),
+                delayMs: Number.isFinite(item.delayMs) ? Math.max(0, Math.floor(item.delayMs)) : 0,
+                willRetry: item.willRetry === true,
+                finalAttempt: item.finalAttempt === true
+              }))
+          : [];
+        return { attempts };
+      }
+
       function buildActionLifecycleCounts(entries) {
         const counts = {
           requested: 0,
@@ -467,6 +485,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
         const actionLifecycleCounts = buildActionLifecycleCounts(actionLifecycle);
         const approvalStatusSummary = normalizeApprovalStatusSummary(structured, actionLifecycle);
         const contextDiagnostics = normalizeContextDiagnostics(structured);
+        const retryDiagnostics = normalizeRetryDiagnostics(structured);
         const externalAttempts = Number.isFinite(structured && structured.externalAttempts)
           ? Math.max(0, Math.floor(structured.externalAttempts))
           : approvalRequiredActions.length;
@@ -632,6 +651,7 @@ const webviewClientRunNormalization = `function normalizeText(value, fallback) {
           actionLifecycleCounts,
           approvalStatusSummary,
           contextDiagnostics,
+          retryDiagnostics,
           changedHints,
           changedRanges,
           changedKinds,

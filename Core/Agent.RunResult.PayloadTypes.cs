@@ -124,6 +124,9 @@ namespace LocalCursorAgent.Core
             [JsonPropertyName("retryCount")]
             public int RetryCount { get; init; }
 
+            [JsonPropertyName("retryDiagnostics")]
+            public RetryDiagnosticsPayload RetryDiagnostics { get; init; } = new();
+
             [JsonPropertyName("buildSucceeded")]
             public bool BuildSucceeded { get; init; }
 
@@ -276,6 +279,30 @@ namespace LocalCursorAgent.Core
 
             [JsonPropertyName("charCount")]
             public int CharCount { get; init; }
+        }
+
+        private sealed class RetryDiagnosticsPayload
+        {
+            [JsonPropertyName("attempts")]
+            public RetryAttemptPayload[] Attempts { get; init; } = Array.Empty<RetryAttemptPayload>();
+        }
+
+        private sealed class RetryAttemptPayload
+        {
+            [JsonPropertyName("attempt")]
+            public int Attempt { get; init; }
+
+            [JsonPropertyName("reason")]
+            public string Reason { get; init; } = string.Empty;
+
+            [JsonPropertyName("delayMs")]
+            public int DelayMs { get; init; }
+
+            [JsonPropertyName("willRetry")]
+            public bool WillRetry { get; init; }
+
+            [JsonPropertyName("finalAttempt")]
+            public bool FinalAttempt { get; init; }
         }
 
     }

@@ -59,6 +59,7 @@ namespace LocalCursorAgent.Core
                 _contextBuilder.Tracer.GetApprovalRequiredActions(),
                 _contextBuilder.Tracer.GetDeniedPermissionDecisionCount(),
                 _contextBuilder.Tracer.GetActionLedger(),
+                _contextBuilder.Tracer.GetModelRetryAttemptDiagnostics(),
                 _sessionContext,
                 _lastLlmRetryCount,
                 _lastLlmErrorType);
@@ -99,6 +100,7 @@ namespace LocalCursorAgent.Core
                 approvalRequiredActions: Array.Empty<ActionApprovalProposal>(),
                 tracerDeniedActions: 0,
                 actionLifecycleEntries: Array.Empty<ActionLifecycleEntry>(),
+                retryAttemptDiagnostics: Array.Empty<ExecutionTracer.ModelRetryAttemptDiagnostics>(),
                 sessionContext: _sessionContext,
                 llmRetryCount: _lastLlmRetryCount,
                 llmErrorType: _lastLlmErrorType);

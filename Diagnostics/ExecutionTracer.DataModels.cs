@@ -209,6 +209,15 @@ namespace LocalCursorAgent.Diagnostics
             public Dictionary<string, object?> Metadata { get; set; } = new();
         }
 
+        public sealed class ModelRetryAttemptDiagnostics
+        {
+            public int Attempt { get; set; }
+            public string Reason { get; set; } = string.Empty;
+            public int DelayMs { get; set; }
+            public bool WillRetry { get; set; }
+            public bool FinalAttempt { get; set; }
+        }
+
         public sealed class RunState
         {
             public string RunId { get; set; } = string.Empty;

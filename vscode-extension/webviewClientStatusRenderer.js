@@ -62,6 +62,19 @@ const webviewClientStatusRenderer = `function renderRunStatus(run) {
             rows.push(['context file', normalizeStatusCell(itemText, 'not available')]);
           }
         }
+        const retryDiagnostics = run.retryDiagnostics && typeof run.retryDiagnostics === 'object' ? run.retryDiagnostics : null;
+        const retryAttempts = retryDiagnostics && Array.isArray(retryDiagnostics.attempts) ? retryDiagnostics.attempts : [];
+        rows.push(['retries', String(Math.max(0, Number.isFinite(run.retryCount) ? run.retryCount : retryAttempts.length))]);
+        if (retryAttempts.length > 0) {
+          for (const item of retryAttempts.slice(0, 3)) {
+            const retryText = [
+              'attempt ' + String(Math.max(0, Number(item.attempt) || 0)),
+              normalizeStatusCell(item.reason, 'not available'),
+              String(Math.max(0, Number(item.delayMs) || 0)) + ' ms'
+            ].join(' | ');
+            rows.push(['retry attempt', retryText]);
+          }
+        }
         const firstApproval = Array.isArray(run.approvalRequiredActions) && run.approvalRequiredActions.length > 0 ? run.approvalRequiredActions[0] : null;
         if (firstApproval) {
           rows.push(['approval proposal id', normalizeStatusCell(firstApproval.proposalId, 'not available')]);

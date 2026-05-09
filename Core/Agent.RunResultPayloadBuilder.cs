@@ -29,6 +29,7 @@ namespace LocalCursorAgent.Core
             ContinuationPayloadValues continuation,
             RuntimeTuningPayloadValues runtimeTuning,
             ActionOutcomeCounters actionCounters,
+            IReadOnlyList<ExecutionTracer.ModelRetryAttemptDiagnostics> retryAttemptDiagnostics,
             AgentSessionContext? sessionContext,
             int llmRetryCount = 0,
             string? llmErrorType = null)
@@ -68,6 +69,19 @@ namespace LocalCursorAgent.Core
                 FinalStatus = finalStatus ?? string.Empty,
                 ErrorType = llmErrorType ?? string.Empty,
                 RetryCount = Math.Max(0, llmRetryCount),
+                RetryDiagnostics = new RetryDiagnosticsPayload
+                {
+                    Attempts = (retryAttemptDiagnostics ?? Array.Empty<ExecutionTracer.ModelRetryAttemptDiagnostics>())
+                        .Select(x => new RetryAttemptPayload
+                        {
+                            Attempt = Math.Max(0, x.Attempt),
+                            Reason = x.Reason ?? string.Empty,
+                            DelayMs = Math.Max(0, x.DelayMs),
+                            WillRetry = x.WillRetry,
+                            FinalAttempt = x.FinalAttempt
+                        })
+                        .ToArray()
+                },
                 BuildSucceeded = buildSucceeded,
                 BuildStarted = buildStarted,
                 Verification = BuildVerificationOutcomePayload(

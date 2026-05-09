@@ -377,6 +377,9 @@ static async Task RunLlmRetrySuccessRegression()
     var (structured, _, runtimeRoot) = await RunAgentWithAdapter(new FailOnceThenSuccessAdapter("Error: request timed out"));
     AssertTrue(structured.GetProperty("ok").GetBoolean(), "Expected success after retry.");
     AssertTrue(structured.GetProperty("retryCount").GetInt32() > 0, "Expected retryCount > 0.");
+    var retryDiagnostics = structured.GetProperty("retryDiagnostics");
+    var retryAttemptsPayload = retryDiagnostics.GetProperty("attempts");
+    AssertTrue(retryAttemptsPayload.ValueKind == JsonValueKind.Array && retryAttemptsPayload.GetArrayLength() >= 1, "Expected retryDiagnostics.attempts for success-after-retry.");
     var retryEvents = LoadRetryAttemptEvents(runtimeRoot);
     AssertTrue(retryEvents.Count >= 1, "Expected retry attempt diagnostics events.");
     var first = retryEvents[0];
@@ -395,6 +398,9 @@ static async Task RunLlmRetryFailRegression()
     AssertTrue(structured.GetProperty("retryCount").GetInt32() > 0, "Expected retryCount > 0 for fail path.");
     var errorType = structured.GetProperty("errorType").GetString() ?? string.Empty;
     AssertTrue(string.Equals(errorType, "provider_rate_limit", StringComparison.Ordinal), $"Expected provider_rate_limit, got {errorType}.");
+    var retryDiagnostics = structured.GetProperty("retryDiagnostics");
+    var retryAttemptsPayload = retryDiagnostics.GetProperty("attempts");
+    AssertTrue(retryAttemptsPayload.ValueKind == JsonValueKind.Array && retryAttemptsPayload.GetArrayLength() == 3, "Expected three retryDiagnostics attempts for fail-after-retries.");
     var retryEvents = LoadRetryAttemptEvents(runtimeRoot);
     AssertTrue(retryEvents.Count == 3, "Expected retry diagnostics for all 3 failed attempts.");
     var last = retryEvents[^1];
@@ -409,6 +415,9 @@ static async Task RunLlmRetryNoRetryRegression()
     var (structured, _, runtimeRoot) = await RunAgentWithAdapter(new StaticSuccessAdapter("analysis success"));
     AssertTrue(structured.GetProperty("ok").GetBoolean(), "Expected first-attempt success.");
     AssertTrue(structured.GetProperty("retryCount").GetInt32() == 0, "Expected retryCount=0 without retries.");
+    var retryDiagnostics = structured.GetProperty("retryDiagnostics");
+    var retryAttemptsPayload = retryDiagnostics.GetProperty("attempts");
+    AssertTrue(retryAttemptsPayload.ValueKind == JsonValueKind.Array && retryAttemptsPayload.GetArrayLength() == 0, "Expected no retryDiagnostics attempts on no-retry success.");
     var retryEvents = LoadRetryAttemptEvents(runtimeRoot);
     AssertTrue(retryEvents.Count == 0, "Expected no retry attempt diagnostics for no-retry success.");
     Console.WriteLine("PASS LlmRetry_NoRetryOnFirstSuccess");

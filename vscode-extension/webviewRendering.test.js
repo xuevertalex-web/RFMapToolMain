@@ -240,6 +240,8 @@ function testRunNormalizationContracts() {
   assert.strictEqual(Array.isArray(success.nextActionCandidates), true);
   assert.strictEqual(success.nextActionCandidates.length, 0);
   assert.strictEqual(success.hostBoundaryPreserved, true);
+  assert.strictEqual(Array.isArray(success.retryDiagnostics.attempts), true);
+  assert.strictEqual(success.retryDiagnostics.attempts.length, 0);
   assert.strictEqual(success.buildText, 'not started');
   assert.strictEqual(success.embeddingsSummary, 'not available');
   assert.strictEqual(success.embeddingsWarning, false);
@@ -560,6 +562,24 @@ function testRunNormalizationContracts() {
   assert.strictEqual(approvalShapeRun.contextDiagnostics.items[0].path, 'Core/TargetService.cs');
   assert.strictEqual(approvalShapeRun.contextDiagnostics.items[0].reason, 'exact_path_match');
   assert.strictEqual(approvalShapeRun.contextDiagnostics.totalChars, 1200);
+
+  const retryRun = context.normalizeRunResult({
+    ok: false,
+    structuredResult: {
+      ok: false,
+      finalStatus: 'error',
+      retryCount: 2,
+      retryDiagnostics: {
+        attempts: [
+          { attempt: 1, reason: 'timeout', delayMs: 200, willRetry: true, finalAttempt: false },
+          { attempt: 2, reason: 'rate', delayMs: 400, willRetry: false, finalAttempt: true }
+        ]
+      }
+    }
+  });
+  assert.strictEqual(retryRun.retryDiagnostics.attempts.length, 2);
+  assert.strictEqual(retryRun.retryDiagnostics.attempts[0].attempt, 1);
+  assert.strictEqual(retryRun.retryDiagnostics.attempts[0].delayMs, 200);
 }
 
 function readStatusRows(grid) {
@@ -700,6 +720,13 @@ function testStatusAndSummaryRendering() {
       totalChars: 1200,
       budgetUsed: 1,
       budgetLimit: 6
+    },
+    retryCount: 2,
+    retryDiagnostics: {
+      attempts: [
+        { attempt: 1, reason: 'timeout', delayMs: 200, willRetry: true, finalAttempt: false },
+        { attempt: 2, reason: 'rate limit', delayMs: 400, willRetry: false, finalAttempt: true }
+      ]
     }
   };
 
@@ -729,6 +756,8 @@ function testStatusAndSummaryRendering() {
   assert.ok(fallbackRows.some(([key, value]) => key === 'context files' && value === '1'));
   assert.ok(fallbackRows.some(([key, value]) => key === 'context chars' && value === '1200'));
   assert.ok(fallbackRows.some(([key]) => key === 'context file'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'retries' && value === '2'));
+  assert.ok(fallbackRows.some(([key, value]) => key === 'retry attempt' && value.includes('attempt 1') && value.includes('200 ms')));
 
   context.renderRunSummary(fallbackRun);
   assert.strictEqual(context.resultBadge.textContent, 'fallback-success');

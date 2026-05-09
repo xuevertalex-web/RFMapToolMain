@@ -30,6 +30,7 @@ namespace LocalCursorAgent.Core
             IReadOnlyList<ActionApprovalProposal> approvalRequiredActions,
             int tracerDeniedActions,
             IReadOnlyList<ActionLifecycleEntry> actionLifecycleEntries,
+            IReadOnlyList<ExecutionTracer.ModelRetryAttemptDiagnostics> retryAttemptDiagnostics,
             AgentSessionContext? sessionContext,
             int llmRetryCount = 0,
             string? llmErrorType = null)
@@ -67,6 +68,7 @@ namespace LocalCursorAgent.Core
                 continuation,
                 runtimeTuning,
                 actionCounters,
+                retryAttemptDiagnostics,
                 sessionContext,
                 llmRetryCount,
                 llmErrorType);
