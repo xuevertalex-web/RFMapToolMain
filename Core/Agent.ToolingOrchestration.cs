@@ -155,22 +155,19 @@ namespace LocalCursorAgent.Core
                 changedFiles.Count,
                 requestedNewFile,
                 currentResponse);
-            return new IterationToolingResult
-            {
-                NextResponse = nextResponse,
-                ShouldContinue = false,
-                PatchStarted = patchStarted,
-                BuildStarted = buildStarted,
-                LastDeniedToolResult = lastDeniedToolResult,
-                LastBuildErrorSignature = lastBuildErrorSignature,
-                LastBuildFailureCode = lastBuildFailureCode,
-                LastBuildExitCode = lastBuildExitCode,
-                LastBuildTimedOut = lastBuildTimedOut,
-                LastBuildErrorMessageTruncated = lastBuildErrorMessageTruncated,
-                LastBuildErrorMessageLength = lastBuildErrorMessageLength,
-                LastSuccessfulStep = lastSuccessfulStep,
-                LastKnownAction = lastKnownAction
-            };
+            return BuildToolingContinuationResult(
+                nextResponse,
+                patchStarted,
+                buildStarted,
+                lastDeniedToolResult,
+                lastBuildErrorSignature,
+                lastBuildFailureCode,
+                lastBuildExitCode,
+                lastBuildTimedOut,
+                lastBuildErrorMessageTruncated,
+                lastBuildErrorMessageLength,
+                lastSuccessfulStep,
+                lastKnownAction);
         }
     }
 }
