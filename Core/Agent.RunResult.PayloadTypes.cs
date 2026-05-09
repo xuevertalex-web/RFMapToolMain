@@ -117,6 +117,12 @@ namespace LocalCursorAgent.Core
             [JsonPropertyName("finalStatus")]
             public string FinalStatus { get; init; } = string.Empty;
 
+            [JsonPropertyName("errorType")]
+            public string ErrorType { get; init; } = string.Empty;
+
+            [JsonPropertyName("retryCount")]
+            public int RetryCount { get; init; }
+
             [JsonPropertyName("buildSucceeded")]
             public bool BuildSucceeded { get; init; }
 

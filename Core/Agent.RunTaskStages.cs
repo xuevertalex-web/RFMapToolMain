@@ -64,6 +64,8 @@ namespace LocalCursorAgent.Core
             var modelRequest = await ExecuteModelRequestAsync(prompt, promptKind, iteration, context.RuntimeClient, context.Tracer!);
             context.RuntimeResult = modelRequest.RuntimeResult;
             context.RunState.CurrentResponse = modelRequest.Response;
+            context.RunState.LlmRetryCount = _lastLlmRetryCount;
+            context.RunState.LlmErrorType = _lastLlmErrorType;
             context.RunState.LastSuccessfulStep = "ModelRequestCompleted";
             context.RunState.LastKnownAction = "Model response received";
 

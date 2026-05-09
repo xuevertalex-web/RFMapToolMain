@@ -62,16 +62,52 @@ namespace LocalCursorAgent.Core
                 { "iteration", iteration }
             });
 
+            const int maxAttempts = 3;
+            var retryCount = 0;
+            LlmRuntimeResult? runtimeResult = null;
+            string response = string.Empty;
+            string errorType = string.Empty;
             var modelStart = DateTime.UtcNow;
-            var runtimeResult = runtimeClient is null
-                ? null
-                : await runtimeClient.GenerateNormalized(prompt, CancellationToken.None);
-            var response = runtimeResult?.Completion ?? await _llmClient.Generate(prompt, CancellationToken.None);
+            for (var attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                try
+                {
+                    runtimeResult = runtimeClient is null
+                        ? null
+                        : await runtimeClient.GenerateNormalized(prompt, CancellationToken.None);
+                    response = runtimeResult?.Completion ?? await _llmClient.Generate(prompt, CancellationToken.None);
+                    errorType = MapRuntimeStatusToErrorType(runtimeResult?.Status);
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    errorType = ClassifyProviderError(ex.Message);
+                    if (attempt >= maxAttempts)
+                    {
+                        _lastLlmRetryCount = retryCount;
+                        _lastLlmErrorType = errorType;
+                        throw;
+                    }
+
+                    retryCount++;
+                    tracer.LogActionEvent("ModelRequestRetry", "Agent", ExecutionTracer.ActionLogLevel.Warning, "retrying", errorType, metadata: new Dictionary<string, object?>
+                    {
+                        { "attempt", attempt },
+                        { "max_attempts", maxAttempts },
+                        { "error", ex.Message }
+                    });
+                    await Task.Delay(TimeSpan.FromMilliseconds(200 * attempt), CancellationToken.None);
+                }
+            }
+            _lastLlmRetryCount = retryCount;
+            _lastLlmErrorType = errorType;
             tracer.LogActionEvent("ModelRequest", "Agent", ExecutionTracer.ActionLogLevel.Info, "completed", metadata: new Dictionary<string, object?>
             {
                 { "operation_kind", "task_iteration" },
                 { "response_preview", response.Length > 200 ? response[..200] : response },
-                { "iteration", iteration }
+                { "iteration", iteration },
+                { "retry_count", retryCount },
+                { "error_type", errorType }
             }, durationMs: (long)(DateTime.UtcNow - modelStart).TotalMilliseconds);
             _memory.Add("llm_response", response.Length > 100 ? response.Substring(0, 100) + "..." : response);
 
@@ -80,6 +116,27 @@ namespace LocalCursorAgent.Core
                 Response = response,
                 RuntimeResult = runtimeResult
             };
+        }
+
+        private static string MapRuntimeStatusToErrorType(LlmRuntimeStatus? status) => status switch
+        {
+            LlmRuntimeStatus.ModelTimeout => "provider_timeout",
+            LlmRuntimeStatus.ProviderUnavailable => "provider_unavailable",
+            LlmRuntimeStatus.ModelOutputEmpty or LlmRuntimeStatus.ModelOutputParseFailed => "invalid_response",
+            LlmRuntimeStatus.LlmRequestFailed => "provider_unavailable",
+            _ => string.Empty
+        };
+
+        private static string ClassifyProviderError(string message)
+        {
+            var text = message ?? string.Empty;
+            if (text.Contains("429", StringComparison.OrdinalIgnoreCase) || text.Contains("rate", StringComparison.OrdinalIgnoreCase))
+                return "provider_rate_limit";
+            if (text.Contains("timeout", StringComparison.OrdinalIgnoreCase) || text.Contains("timed out", StringComparison.OrdinalIgnoreCase))
+                return "provider_timeout";
+            if (text.Contains("unavailable", StringComparison.OrdinalIgnoreCase) || text.Contains("connection", StringComparison.OrdinalIgnoreCase) || text.Contains("refused", StringComparison.OrdinalIgnoreCase))
+                return "provider_unavailable";
+            return "invalid_response";
         }
     }
 }

@@ -19,6 +19,9 @@ await RunAnalysisFallbackLlmRequestFailedRegression();
 await RunAnalysisFallback_ProviderUnavailable_IndexedContextSummary_Regression();
 await RunAnalysisNormalResponseRegression();
 await RunAnalysisUsableErrorPrefixedResponse_NoFallbackRegression();
+await RunLlmRetrySuccessRegression();
+await RunLlmRetryFailRegression();
+await RunLlmRetryNoRetryRegression();
 await RunEmbeddingNotFound_DisablesTruthfullyRegression();
 await RunRuntimeProfileSelectionRegression();
 await RunRuntimeNormalizedClassificationRegression();
@@ -351,6 +354,32 @@ static async Task RunAnalysisFallbackLlmRequestFailedRegression()
     AssertTrue(stages.All(s => !s.Contains("Destructive", StringComparison.OrdinalIgnoreCase)), "Expected no destructive stages.");
 
     Console.WriteLine("PASS AnalysisFallback_LlmRequestFailed_IndexedContextSummary_StructuredObservability");
+}
+
+static async Task RunLlmRetrySuccessRegression()
+{
+    var (structured, _, _) = await RunAgentWithAdapter(new FailOnceThenSuccessAdapter("Error: request timed out"));
+    AssertTrue(structured.GetProperty("ok").GetBoolean(), "Expected success after retry.");
+    AssertTrue(structured.GetProperty("retryCount").GetInt32() > 0, "Expected retryCount > 0.");
+    Console.WriteLine("PASS LlmRetry_SuccessAfterRetry");
+}
+
+static async Task RunLlmRetryFailRegression()
+{
+    var (structured, _, _) = await RunAgentWithAdapter(new AlwaysThrowAdapter("429 rate limit"));
+    AssertTrue(!structured.GetProperty("ok").GetBoolean(), "Expected failure after retry exhaustion.");
+    AssertTrue(structured.GetProperty("retryCount").GetInt32() > 0, "Expected retryCount > 0 for fail path.");
+    var errorType = structured.GetProperty("errorType").GetString() ?? string.Empty;
+    AssertTrue(string.Equals(errorType, "provider_rate_limit", StringComparison.Ordinal), $"Expected provider_rate_limit, got {errorType}.");
+    Console.WriteLine("PASS LlmRetry_FailAfterRetries");
+}
+
+static async Task RunLlmRetryNoRetryRegression()
+{
+    var (structured, _, _) = await RunAgentWithAdapter(new StaticSuccessAdapter("analysis success"));
+    AssertTrue(structured.GetProperty("ok").GetBoolean(), "Expected first-attempt success.");
+    AssertTrue(structured.GetProperty("retryCount").GetInt32() == 0, "Expected retryCount=0 without retries.");
+    Console.WriteLine("PASS LlmRetry_NoRetryOnFirstSuccess");
 }
 
 static async Task RunAnalysisFallback_ProviderUnavailable_IndexedContextSummary_Regression()
@@ -2324,6 +2353,50 @@ static async Task RunIsolatedExecutionWorkspaceRoutingRegression()
     Console.WriteLine("PASS IsolatedExecutionWorkspace_Routing");
 }
 
+static async Task<(JsonElement structured, string workspaceRoot, string runtimeRoot)> RunAgentWithAdapter(ILlmProviderAdapter adapter)
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    File.WriteAllText(Path.Combine(workspaceRoot, "Program.cs"), "namespace SampleApp; public static class Entry { public static void Hello() { } }");
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    tracer.StartRun("retry-check", "retry-check", workspaceRoot, runtimeRoot, AgentAccessMode.WorkspaceWrite.ToString(), "ollama", "model");
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+    var toolRegistry = new ToolRegistry();
+    var memory = new MemoryStore();
+    var permissionGuard = new PermissionGuard();
+    var safeProcessRunner = new SafeProcessRunner(session, permissionGuard, tracer);
+    var buildVerifier = new BuildVerifier(safeProcessRunner, tracer);
+    var sandboxManager = new SandboxManager(workspaceRoot, runtimeRoot);
+    var embeddingService = new EmbeddingService(disabled: true);
+    var vectorStore = new VectorStore();
+    var fileStateManager = new FileStateManager();
+    var projectIndexer = new ProjectIndexer(workspaceRoot, embeddingService, vectorStore, new AgentConfig(workspaceRoot), fileStateManager);
+    var contextBuilder = new ContextBuilder(workspaceRoot, vectorStore, fileStateManager, new ProjectSymbolDirectory(), tracer);
+    var profile = LlmProfiles.Resolve("ollama", "qwen2.5-coder:7b-instruct-q4_K_M");
+    var policy = LlmProfiles.ResolvePolicy("ollama", "qwen2.5-coder:7b-instruct-q4_K_M");
+    var llmClient = new LlmRuntimeClient(adapter, profile, policy);
+    var agent = new Agent(llmClient, toolRegistry, memory, buildVerifier, sandboxManager, projectIndexer, contextBuilder, fileStateManager, session, workspaceResolution: null);
+
+    var oldOut = Console.Out;
+    var capture = new StringWriter();
+    Console.SetOut(capture);
+    try { _ = await agent.RunTask("Опиши проект кратко на русском"); }
+    finally { Console.SetOut(oldOut); }
+
+    return (ExtractStructuredPayload(capture.ToString()), workspaceRoot, runtimeRoot);
+}
+
 static Func<string, ToolAction> CreateFileActionFactory(string workspaceRoot) => input =>
 {
     static string ResolvePath(string root, string path)
@@ -2499,4 +2572,37 @@ sealed class FakeHttpMessageHandler : HttpMessageHandler
         CallCount++;
         return Task.FromResult(_responseFactory());
     }
+}
+
+sealed class FailOnceThenSuccessAdapter : ILlmProviderAdapter
+{
+    private int _calls;
+    private readonly string _error;
+    public FailOnceThenSuccessAdapter(string error) { _error = error; }
+    public LlmProviderMetadata Metadata => new("ollama", "test-model", nameof(FailOnceThenSuccessAdapter));
+    public Task<string> Generate(string prompt, CancellationToken cancellationToken = default)
+    {
+        _calls++;
+        if (_calls == 1) throw new InvalidOperationException(_error);
+        return Task.FromResult("Project analysis completed.");
+    }
+    public Task<bool> IsAvailable(CancellationToken cancellationToken = default) => Task.FromResult(true);
+}
+
+sealed class AlwaysThrowAdapter : ILlmProviderAdapter
+{
+    private readonly string _error;
+    public AlwaysThrowAdapter(string error) { _error = error; }
+    public LlmProviderMetadata Metadata => new("ollama", "test-model", nameof(AlwaysThrowAdapter));
+    public Task<string> Generate(string prompt, CancellationToken cancellationToken = default) => throw new InvalidOperationException(_error);
+    public Task<bool> IsAvailable(CancellationToken cancellationToken = default) => Task.FromResult(true);
+}
+
+sealed class StaticSuccessAdapter : ILlmProviderAdapter
+{
+    private readonly string _response;
+    public StaticSuccessAdapter(string response) { _response = response; }
+    public LlmProviderMetadata Metadata => new("ollama", "test-model", nameof(StaticSuccessAdapter));
+    public Task<string> Generate(string prompt, CancellationToken cancellationToken = default) => Task.FromResult(_response);
+    public Task<bool> IsAvailable(CancellationToken cancellationToken = default) => Task.FromResult(true);
 }

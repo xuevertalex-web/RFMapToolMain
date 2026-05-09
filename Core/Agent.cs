@@ -30,6 +30,8 @@ namespace LocalCursorAgent.Core
         private readonly RunRegressionAdvisor? _regressionAdvisor;
         private readonly AgentSessionContext? _sessionContext;
         private readonly WorkspaceResolutionResult? _workspaceResolution;
+        private int _lastLlmRetryCount;
+        private string _lastLlmErrorType = string.Empty;
 
         private const int MAX_ITERATIONS = 3;
         private const int CONTEXT_WINDOW = 15;

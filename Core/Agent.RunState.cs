@@ -18,6 +18,8 @@ namespace LocalCursorAgent.Core
             public bool ModelCallStarted { get; set; }
             public bool PatchStarted { get; set; }
             public bool BuildStarted { get; set; }
+            public int LlmRetryCount { get; set; }
+            public string LlmErrorType { get; set; } = string.Empty;
         }
     }
 }

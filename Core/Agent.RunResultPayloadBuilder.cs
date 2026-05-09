@@ -29,7 +29,9 @@ namespace LocalCursorAgent.Core
             ContinuationPayloadValues continuation,
             RuntimeTuningPayloadValues runtimeTuning,
             ActionOutcomeCounters actionCounters,
-            AgentSessionContext? sessionContext)
+            AgentSessionContext? sessionContext,
+            int llmRetryCount = 0,
+            string? llmErrorType = null)
         {
             return new AgentRunResultPayload
             {
@@ -64,6 +66,8 @@ namespace LocalCursorAgent.Core
                 FallbackReason = fallbackReason ?? string.Empty,
                 FallbackMode = fallbackMode ?? string.Empty,
                 FinalStatus = finalStatus ?? string.Empty,
+                ErrorType = llmErrorType ?? string.Empty,
+                RetryCount = Math.Max(0, llmRetryCount),
                 BuildSucceeded = buildSucceeded,
                 BuildStarted = buildStarted,
                 Verification = BuildVerificationOutcomePayload(

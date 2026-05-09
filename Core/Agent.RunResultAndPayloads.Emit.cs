@@ -30,7 +30,9 @@ namespace LocalCursorAgent.Core
             IReadOnlyList<ActionApprovalProposal> approvalRequiredActions,
             int tracerDeniedActions,
             IReadOnlyList<ActionLifecycleEntry> actionLifecycleEntries,
-            AgentSessionContext? sessionContext)
+            AgentSessionContext? sessionContext,
+            int llmRetryCount = 0,
+            string? llmErrorType = null)
         {
             var effectiveReasonCode = EffectiveReasonCodeResolver.Resolve(failure?.ReasonCode, reasonCode);
             var continuation = ContinuationPayloadBuilder.Build(effectiveReasonCode, failure);
@@ -65,7 +67,9 @@ namespace LocalCursorAgent.Core
                 continuation,
                 runtimeTuning,
                 actionCounters,
-                sessionContext);
+                sessionContext,
+                llmRetryCount,
+                llmErrorType);
 
             Console.WriteLine(JsonSerializer.Serialize(payload));
             return message;
