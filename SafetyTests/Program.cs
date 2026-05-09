@@ -71,6 +71,7 @@ await RunStructuredActionContractCompatibilityRegression();
 await RunIsolatedExecutionWorkspaceRoutingRegression();
 await RunContextSelectionPrecisionRegression();
 await RunContextSelectionAdaptiveBudgetFitRegression();
+await RunContextSelectionEntryPointAwarenessRegression();
 await RunMtimeAwareIndexingCacheRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
@@ -2570,6 +2571,44 @@ static async Task RunContextSelectionAdaptiveBudgetFitRegression()
     AssertTrue(info.TotalLength == 20000, "Expected adaptive fit to use more budget than single-file tail cutoff scenario.");
     AssertTrue(info.TotalLength <= 30000, "Expected selection to stay within medium complexity budget.");
     Console.WriteLine("PASS ContextSelection_AdaptiveBudgetFit");
+}
+
+static async Task RunContextSelectionEntryPointAwarenessRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+
+    // dotnet entry points
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "Program.cs"), new string('p', 1200));
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "Sample.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>");
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "Service.cs"), new string('s', 50000));
+
+    // node entry point
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "package.json"), "{ \"name\": \"sample\" }");
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "index.js"), "console.log('x');");
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    var builder = new ContextBuilder(workspaceRoot, new VectorStore(), new FileStateManager(), new ProjectSymbolDirectory(), tracer);
+    var semantic = new List<string> { "Service.cs", "Program.cs", "Sample.csproj", "package.json", "index.js" };
+    var symbols = new List<string> { "Service.cs" };
+
+    var info = builder.BuildContext("create dotnet console from scratch", semantic, symbols, 3);
+    AssertTrue(info.SelectedFiles.Contains("Program.cs", StringComparer.OrdinalIgnoreCase), "Expected Program.cs entry point in context.");
+    AssertTrue(info.SelectedFiles.Any(x => x.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)), "Expected .csproj entry point in context.");
+    AssertTrue(info.SelectedFiles.Contains("package.json", StringComparer.OrdinalIgnoreCase), "Expected package.json entry point in context.");
+
+    var diagnostics = ContextBuilder.GetLatestDiagnostics();
+    AssertTrue(diagnostics.Items.Any(x => x.Path.Equals("Program.cs", StringComparison.OrdinalIgnoreCase) && x.Reason == "entry-point"), "Expected Program.cs entry-point reason.");
+    AssertTrue(diagnostics.Items.Any(x => x.Path.Equals("Sample.csproj", StringComparison.OrdinalIgnoreCase) && x.Reason == "entry-point"), "Expected .csproj entry-point reason.");
+    AssertTrue(diagnostics.Items.Any(x => x.Path.Equals("package.json", StringComparison.OrdinalIgnoreCase) && x.Reason == "entry-point"), "Expected package.json entry-point reason.");
+
+    var nodeInfo = builder.BuildContext("create node app", semantic, symbols, 2);
+    AssertTrue(nodeInfo.SelectedFiles.Contains("package.json", StringComparer.OrdinalIgnoreCase), "Expected package.json retained under tight budget.");
+
+    Console.WriteLine("PASS ContextSelection_EntryPointAwareness");
 }
 
 static async Task RunMtimeAwareIndexingCacheRegression()

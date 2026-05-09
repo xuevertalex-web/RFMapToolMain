@@ -469,6 +469,9 @@ namespace LocalCursorAgent.Context
 
         private static int GetTargetMatchPriority(string filePath, string targetToken)
         {
+            if (IsEntryPointFile(filePath))
+                return 4;
+
             if (string.IsNullOrWhiteSpace(targetToken))
                 return 0;
 
@@ -489,10 +492,33 @@ namespace LocalCursorAgent.Context
 
         private static string BuildInclusionReason(RankedFileScore score, string targetToken)
         {
+            if (IsEntryPointFile(score.FilePath)) return "entry-point";
             if (!string.IsNullOrWhiteSpace(targetToken) && score.MatchPriority >= 3) return "exact_path_match";
             if (!string.IsNullOrWhiteSpace(targetToken) && score.MatchPriority == 2) return "same_directory_or_prefix";
             if (score.SymbolMatches > 0) return "symbol_match";
             return "fallback";
+        }
+
+        private static bool IsEntryPointFile(string filePath)
+        {
+            var name = Path.GetFileName(filePath);
+            if (string.IsNullOrWhiteSpace(name))
+                return false;
+
+            if (name.Equals("Program.cs", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (name.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (name.Equals("package.json", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (name.Equals("index.js", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (name.Equals("app.js", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (name.Equals("main.js", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return false;
         }
 
         private ContextSelectionStrategy DetermineSelectionStrategy(TaskTypeProfile? taskProfile)
