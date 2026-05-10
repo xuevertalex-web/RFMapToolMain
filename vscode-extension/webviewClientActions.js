@@ -86,31 +86,7 @@
       }
 
       function buildDispatchTask(task) {
-        const raw = String(task || '').trim();
-        return isLikelyExecutionTask(raw) ? raw : buildChatOnlyTask(raw);
-      }
-
-      function buildChatOnlyTask(task) {
-        const value = String(task || '').trim();
-        return [
-          'Chat-only request. Do not execute tools. Do not create or modify files.',
-          'Answer conversationally and helpfully in the user language.',
-          'User message:',
-          value
-        ].join('\\n\\n');
-      }
-
-      function isLikelyExecutionTask(task) {
-        const value = String(task || '').trim().toLowerCase();
-        if (!value) {
-          return false;
-        }
-        const executionPatterns = [
-          /\\b(сделай|исправь|добавь|обнови|запусти|создай|удали|проверь|реализуй|пофикси)\\b/u,
-          /\\b(make|fix|add|update|run|create|delete|implement|refactor|test|build)\\b/u,
-          /\\b(git|npm|dotnet|cmd|скрипт|script|commit|diff|patch)\\b/u
-        ];
-        return executionPatterns.some(pattern => pattern.test(value));
+        return String(task || '').trim();
       }
 
       function showLocalChatReply(task, replyText, badgeText, dialogId) {
