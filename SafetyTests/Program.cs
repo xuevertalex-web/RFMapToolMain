@@ -43,6 +43,10 @@ await RunConversationalTask_MutationToolCallBlockedRegression();
 await RunAmbiguousGibberishTask_RequiresClarificationRegression();
 await RunChatIntentConversationalResponsesRegression();
 await RunClarifyIntentRequiresClarificationRegression();
+await RunChatOnlyRoutingMatrix_ChatCasesRegression();
+await RunChatOnlyRoutingMatrix_ClarifyCasesRegression();
+await RunChatOnlyRoutingMatrix_ExecuteCasesRegression();
+await RunChatOnlyRoutingMatrix_AnalysisOnlyCasesRegression();
 await RunHostDiagnosticsCommandApprovalRegression();
 await RunProcessExecutionHardeningRegression();
 await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
@@ -1861,6 +1865,162 @@ static async Task RunClarifyIntentRequiresClarificationRegression()
     }
 
     Console.WriteLine("PASS ClarifyIntent_RequiresClarification");
+}
+
+static async Task RunChatOnlyRoutingMatrix_ChatCasesRegression()
+{
+    var inputs = new[]
+    {
+        "привет",
+        "как дела?",
+        "что ты умеешь?",
+        "объясни что делает этот проект",
+        "расскажи как работает ContextBuilder",
+        "какие риски у текущей архитектуры?",
+        "что дальше лучше сделать?"
+    };
+
+    foreach (var input in inputs)
+    {
+        var structured = await RunIntentMatrixTask(input, new FakeNoToolAnalysisClient(), registerFileTool: true);
+        AssertTrue(structured.GetProperty("changedFiles").GetArrayLength() == 0, $"Expected no file changes for chat phrase '{input}'.");
+        var reasonCode = structured.GetProperty("reasonCode").GetString() ?? string.Empty;
+        AssertTrue(
+            string.Equals(reasonCode, "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(reasonCode, "SUCCESS_ANALYSIS_RESPONSE", StringComparison.OrdinalIgnoreCase),
+            $"Expected chat-safe reason for '{input}', got '{reasonCode}'.");
+    }
+
+    Console.WriteLine("PASS ChatOnlyRoutingMatrix_ChatCases");
+}
+
+static async Task RunChatOnlyRoutingMatrix_ClarifyCasesRegression()
+{
+    var inputs = new[]
+    {
+        "сделай нормально",
+        "почини",
+        "оно не работает",
+        "разберись",
+        "улучши всё"
+    };
+
+    foreach (var input in inputs)
+    {
+        var structured = await RunIntentMatrixTask(input, new FakeNoToolAnalysisClient(), registerFileTool: true);
+        AssertTrue(!structured.GetProperty("ok").GetBoolean(), $"Expected clarify outcome for '{input}'.");
+        AssertTrue(string.Equals(structured.GetProperty("reasonCode").GetString(), "CLARIFICATION_REQUIRED", StringComparison.OrdinalIgnoreCase), $"Expected CLARIFICATION_REQUIRED for '{input}'.");
+        AssertTrue(structured.GetProperty("changedFiles").GetArrayLength() == 0, $"Expected no file changes for ambiguous phrase '{input}'.");
+    }
+
+    Console.WriteLine("PASS ChatOnlyRoutingMatrix_ClarifyCases");
+}
+
+static async Task RunChatOnlyRoutingMatrix_ExecuteCasesRegression()
+{
+    var inputs = new[]
+    {
+        "создай файл README_TEST.md с текстом hello",
+        "добавь тест для PermissionGuard",
+        "исправь ошибку в ContextBuilder.cs",
+        "обнови package.json script test",
+        "удали временный файл temp.txt"
+    };
+
+    foreach (var input in inputs)
+    {
+        var structured = await RunIntentMatrixTask(input, new FakeNoToolAnalysisClient(), registerFileTool: true);
+        var reasonCode = structured.GetProperty("reasonCode").GetString() ?? string.Empty;
+        AssertTrue(!string.Equals(reasonCode, "CLARIFICATION_REQUIRED", StringComparison.OrdinalIgnoreCase), $"Execute phrase '{input}' was incorrectly routed to clarification.");
+        AssertTrue(!string.Equals(reasonCode, "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase), $"Execute phrase '{input}' was incorrectly routed to chat.");
+    }
+
+    Console.WriteLine("PASS ChatOnlyRoutingMatrix_ExecuteCases");
+}
+
+static async Task RunChatOnlyRoutingMatrix_AnalysisOnlyCasesRegression()
+{
+    var inputs = new[]
+    {
+        "проанализируй ContextBuilder.cs и скажи что не так, не меняй файлы",
+        "сделай code review без правок",
+        "объясни diff без изменений"
+    };
+
+    foreach (var input in inputs)
+    {
+        var structured = await RunIntentMatrixTask(input, new FakeNoToolAnalysisClient(), registerFileTool: true);
+        AssertTrue(structured.GetProperty("changedFiles").GetArrayLength() == 0, $"Expected no file changes for analysis-only phrase '{input}'.");
+        var reasonCode = structured.GetProperty("reasonCode").GetString() ?? string.Empty;
+        AssertTrue(
+            string.Equals(reasonCode, "SUCCESS_ANALYSIS_RESPONSE", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(reasonCode, "ANALYSIS_FALLBACK_USED", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(reasonCode, "NO_ACTIONABLE_STEPS", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(reasonCode, "MAX_ITERATIONS_REACHED", StringComparison.OrdinalIgnoreCase),
+            $"Expected analysis-safe reason for '{input}', got '{reasonCode}'.");
+    }
+
+    Console.WriteLine("PASS ChatOnlyRoutingMatrix_AnalysisOnlyCases");
+}
+
+static async Task<JsonElement> RunIntentMatrixTask(string task, ILLMClient llmClient, bool registerFileTool)
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    File.WriteAllText(Path.Combine(workspaceRoot, "seed.txt"), "seed");
+    File.WriteAllText(Path.Combine(workspaceRoot, "ContextBuilder.cs"), "public static class ContextBuilder { }");
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    tracer.StartRun(task, task, workspaceRoot, runtimeRoot, AgentAccessMode.WorkspaceWrite.ToString(), "IntentMatrixClient", "intent-matrix-model");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var toolRegistry = new ToolRegistry();
+    var permissionGuard = new PermissionGuard();
+    var sandboxManager = new SandboxManager(workspaceRoot, runtimeRoot);
+    if (registerFileTool)
+    {
+        var patchGate = new PatchSafetyGate(session, permissionGuard, tracer);
+        var destructiveGate = new DestructiveOperationSafetyGate(session, permissionGuard, tracer);
+        toolRegistry.Register(new FileTool(session, permissionGuard, patchGate, destructiveGate, sandboxManager, tracer));
+    }
+
+    var memory = new MemoryStore();
+    var safeProcessRunner = new SafeProcessRunner(session, permissionGuard, tracer);
+    var buildVerifier = new BuildVerifier(safeProcessRunner, tracer);
+    var embeddingService = new EmbeddingService(disabled: true);
+    var vectorStore = new VectorStore();
+    var fileStateManager = new FileStateManager();
+    var projectIndexer = new ProjectIndexer(workspaceRoot, embeddingService, vectorStore, new AgentConfig(workspaceRoot), fileStateManager);
+    var contextBuilder = new ContextBuilder(workspaceRoot, vectorStore, fileStateManager, new ProjectSymbolDirectory(), tracer);
+
+    var agent = new Agent(
+        llmClient,
+        toolRegistry,
+        memory,
+        buildVerifier,
+        sandboxManager,
+        projectIndexer,
+        contextBuilder,
+        fileStateManager,
+        session,
+        workspaceResolution: null);
+
+    var oldOut = Console.Out;
+    var capture = new StringWriter();
+    Console.SetOut(capture);
+    try { _ = await agent.RunTask(task); } finally { Console.SetOut(oldOut); }
+    return ExtractStructuredPayload(capture.ToString());
 }
 
 static Agent CreateSimpleAgentForIntentTests(string workspaceRoot, string runtimeRoot, AgentSessionContext session, ExecutionTracer tracer, ILLMClient llmClient)
