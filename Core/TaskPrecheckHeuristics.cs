@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 
 namespace LocalCursorAgent.Core
 {
@@ -10,19 +10,6 @@ namespace LocalCursorAgent.Core
                 return false;
 
             var normalized = task.ToLowerInvariant();
-            if (normalized.Contains("опиши") ||
-                normalized.Contains("описать") ||
-                normalized.Contains("объясни") ||
-                normalized.Contains("объяснить") ||
-                normalized.Contains("обзор") ||
-                normalized.Contains("структуру") ||
-                normalized.Contains("структура") ||
-                normalized.Contains("ключевые файлы") ||
-                normalized.Contains("расскажи"))
-            {
-                return true;
-            }
-
             return normalized.Contains("analyze") ||
                    normalized.Contains("analyse") ||
                    normalized.Contains("summarize") ||
@@ -72,7 +59,8 @@ namespace LocalCursorAgent.Core
                     return true;
             }
 
-            return false;
+            var intent = TaskIntentScorer.Classify(normalized);
+            return intent == TaskIntentKind.Clarify && signalChars < 8;
         }
     }
 }

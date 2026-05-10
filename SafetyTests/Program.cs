@@ -40,6 +40,7 @@ await RunEndToEndExecutionPipelineRegression();
 await RunBroadIntentNoToolCallsRequiresActionRegression();
 await RunTechnicalNoToolCallsRequiresActionRegression();
 await RunConversationalTask_MutationToolCallBlockedRegression();
+await RunAmbiguousGibberishTask_RequiresClarificationRegression();
 await RunHostDiagnosticsCommandApprovalRegression();
 await RunProcessExecutionHardeningRegression();
 await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
@@ -1722,6 +1723,63 @@ static async Task RunConversationalTask_MutationToolCallBlockedRegression()
     AssertTrue(structured.GetProperty("changedFiles").GetArrayLength() == 0, "Expected no changed files.");
     AssertTrue(!File.Exists(Path.Combine(workspaceRoot, "Calculator.cs")), "Expected Calculator.cs to not be created.");
     Console.WriteLine("PASS ConversationalTask_MutationToolCallBlocked");
+}
+
+static async Task RunAmbiguousGibberishTask_RequiresClarificationRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    tracer.StartRun("кйцуйцщутщ", "кйцуйцщутщ", workspaceRoot, runtimeRoot, AgentAccessMode.WorkspaceWrite.ToString(), "FakeNoToolAnalysisClient", "fake-no-tool-model");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var toolRegistry = new ToolRegistry();
+    var memory = new MemoryStore();
+    var permissionGuard = new PermissionGuard();
+    var safeProcessRunner = new SafeProcessRunner(session, permissionGuard, tracer);
+    var buildVerifier = new BuildVerifier(safeProcessRunner, tracer);
+    var sandboxManager = new SandboxManager(workspaceRoot, runtimeRoot);
+    var embeddingService = new EmbeddingService(disabled: true);
+    var vectorStore = new VectorStore();
+    var fileStateManager = new FileStateManager();
+    var projectIndexer = new ProjectIndexer(workspaceRoot, embeddingService, vectorStore, new AgentConfig(workspaceRoot), fileStateManager);
+    var contextBuilder = new ContextBuilder(workspaceRoot, vectorStore, fileStateManager, new ProjectSymbolDirectory(), tracer);
+
+    var agent = new Agent(
+        new FakeNoToolAnalysisClient(),
+        toolRegistry,
+        memory,
+        buildVerifier,
+        sandboxManager,
+        projectIndexer,
+        contextBuilder,
+        fileStateManager,
+        session,
+        workspaceResolution: null);
+
+    var oldOut = Console.Out;
+    var capture = new StringWriter();
+    Console.SetOut(capture);
+    try { _ = await agent.RunTask("кйцуйцщутщ"); }
+    finally { Console.SetOut(oldOut); }
+
+    var structured = ExtractStructuredPayload(capture.ToString());
+    AssertTrue(structured.GetProperty("ok").GetBoolean(), "Expected ambiguous gibberish to stay in safe chat/no-tool flow.");
+    AssertTrue(string.Equals(structured.GetProperty("reasonCode").GetString(), "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase), "Expected SUCCESS_NO_TOOL_CALLS.");
+    AssertTrue(structured.GetProperty("changedFiles").GetArrayLength() == 0, "Expected no changed files.");
+    Console.WriteLine("PASS AmbiguousGibberishTask_RequiresClarification");
 }
 
 static async Task RunHostDiagnosticsCommandApprovalRegression()
