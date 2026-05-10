@@ -13,7 +13,8 @@
         {
             "fix", "create", "generate", "write", "make", "change", "update", "add", "implement", "modify", "refactor",
             "создай", "создать", "добавь", "добавить", "измени", "исправь", "почини", "напиши", "сделай", "файл", "класс",
-            "удали", "обнови", "пофикси", "ошибк", "сломано", "тест", "script", "package.json", ".cs", ".md", ".txt", "почини проект"
+            "удали", "обнови", "пофикси", "ошибк", "сломано", "тест", "script", "package.json", ".cs", ".md", ".txt", "почини проект",
+            "найди ошиб", "устрани", "разберись", "исследуй и исправь", "исправь и проверь", "исправь проблему"
         };
 
         private static readonly string[] ChatMarkers = new[]
@@ -33,6 +34,9 @@
             var chatScore = ScoreByMarkers(value, ChatMarkers);
 
             if (executeScore >= 2)
+                return TaskIntentKind.Execute;
+
+            if (executeScore >= 1 && (value.Contains("проект", StringComparison.Ordinal) || value.Contains("project", StringComparison.Ordinal)))
                 return TaskIntentKind.Execute;
 
             if (executeScore == 0 && (value.Contains('?') || value.Contains('？')))
