@@ -1,0 +1,12 @@
+**/.git/**
+**/.github/**
+**/.vscode/**
+**/node_modules/**
+
+*.vsix
+*.log
+
+agentRunner.test.js
+webviewRendering.test.js
+README.md
+tsconfig.json

@@ -3,7 +3,7 @@
     "displayName":  "Local Cursor Agent",
     "description":  "A local VS Code agent UI that runs the .NET backend.",
     "icon":  "assets/icon.png",
-    "version": "0.1.74",
+    "version": "0.1.82",
     "publisher":  "local",
     "engines":  {
                     "vscode":  "^1.85.0"

@@ -18,7 +18,12 @@ if not exist "%BUMP_SCRIPT%" (
   exit /b 1
 )
 
-for /f "usebackq delims=" %%V in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%BUMP_SCRIPT%" -PackageJson "%PKG_JSON%"`) do (
+echo [update] Unblocking local scripts/VSIX files to avoid security prompts...
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
+  "$root='%ROOT%';" ^
+  "Get-ChildItem -Path $root -Recurse -File -Include *.cmd,*.ps1,*.vsix | ForEach-Object { Unblock-File -LiteralPath $_.FullName -ErrorAction SilentlyContinue }" >nul 2>nul
+
+for /f "usebackq delims=" %%V in (`powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%BUMP_SCRIPT%" -PackageJson "%PKG_JSON%"`) do (
   set "NEW_VERSION=%%V"
 )
 
@@ -32,7 +37,7 @@ echo [update] New version: !NEW_VERSION!
 pushd "%EXT_DIR%" >nul
 
 echo [update] Packaging VSIX...
-call npx @vscode/vsce package
+call npx @vscode/vsce package --allow-missing-repository
 if errorlevel 1 (
   popd >nul
   echo [update] VSIX packaging failed.
