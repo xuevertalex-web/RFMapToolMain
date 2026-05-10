@@ -12,8 +12,8 @@
         private static readonly string[] ExecuteMarkers = new[]
         {
             "fix", "create", "generate", "write", "make", "change", "update", "add", "implement", "modify", "refactor",
-            "создай", "создать", "добавь", "добавить", "измени", "исправь", "напиши", "сделай", "файл", "класс",
-            "удали", "обнови", "пофикси", "ошибк", "тест", "script", "package.json", ".cs", ".md", ".txt"
+            "создай", "создать", "добавь", "добавить", "измени", "исправь", "почини", "напиши", "сделай", "файл", "класс",
+            "удали", "обнови", "пофикси", "ошибк", "сломано", "тест", "script", "package.json", ".cs", ".md", ".txt", "почини проект"
         };
 
         private static readonly string[] ChatMarkers = new[]

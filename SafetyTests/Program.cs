@@ -47,6 +47,7 @@ await RunChatOnlyRoutingMatrix_ChatCasesRegression();
 await RunChatOnlyRoutingMatrix_ClarifyCasesRegression();
 await RunChatOnlyRoutingMatrix_ExecuteCasesRegression();
 await RunChatOnlyRoutingMatrix_AnalysisOnlyCasesRegression();
+await RunBroadExecuteIntent_ProjectWideFixRegression();
 await RunHostDiagnosticsCommandApprovalRegression();
 await RunProcessExecutionHardeningRegression();
 await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
@@ -1961,6 +1962,27 @@ static async Task RunChatOnlyRoutingMatrix_AnalysisOnlyCasesRegression()
     }
 
     Console.WriteLine("PASS ChatOnlyRoutingMatrix_AnalysisOnlyCases");
+}
+
+static async Task RunBroadExecuteIntent_ProjectWideFixRegression()
+{
+    var inputs = new[]
+    {
+        "найди ошибку в проекте и исправь",
+        "почини проект",
+        "исправь что сломано в проекте"
+    };
+
+    foreach (var input in inputs)
+    {
+        var structured = await RunIntentMatrixTask(input, new FakeNoToolAnalysisClient(), registerFileTool: true);
+        var reasonCode = structured.GetProperty("reasonCode").GetString() ?? string.Empty;
+        AssertTrue(!string.Equals(reasonCode, "CLARIFICATION_REQUIRED", StringComparison.OrdinalIgnoreCase), $"Broad execute phrase '{input}' was incorrectly routed to clarification.");
+        AssertTrue(!string.Equals(reasonCode, "NON_ACTIONABLE_TASK", StringComparison.OrdinalIgnoreCase), $"Broad execute phrase '{input}' was incorrectly routed to non-actionable.");
+        AssertTrue(!string.Equals(reasonCode, "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase), $"Broad execute phrase '{input}' was incorrectly routed to chat.");
+    }
+
+    Console.WriteLine("PASS BroadExecuteIntent_ProjectWideFix");
 }
 
 static async Task<JsonElement> RunIntentMatrixTask(string task, ILLMClient llmClient, bool registerFileTool)
