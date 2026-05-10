@@ -1,9 +1,9 @@
-const webviewClientActions = `function startAgentRunFromInput() {
+﻿const webviewClientActions = `function startAgentRunFromInput() {
         if (uiRunning) {
           return;
         }
 
-        const task = String(taskInput.value || '').trim();
+        const task = normalizeUserTaskInput(String(taskInput.value || '').trim());
         if (!task) {
           taskInput.value = '';
           autoResizeTaskInput();
@@ -11,6 +11,14 @@ const webviewClientActions = `function startAgentRunFromInput() {
           taskInput.focus();
           return;
         }
+        const dialog = ensureActiveDialogForTask(task);
+        activeRunDialogId = String(dialog.id || '');
+        appendDialogMessage(activeRunDialogId, 'user', task);
+        openDialogView(dialog);
+        renderRecentRuns();
+        saveWebviewState();
+
+        const dispatchTask = buildDispatchTask(task);
 
         logs.textContent = '';
         suppressPlainResultLog = false;
@@ -18,6 +26,9 @@ const webviewClientActions = `function startAgentRunFromInput() {
         logsCollapsed = false;
         updateLogsVisibility();
         status.textContent = 'Running...';
+        if (resultSection) {
+          resultSection.style.display = '';
+        }
         result.textContent = '';
         resultBadge.textContent = '';
         resultBadge.className = 'result-badge running';
@@ -51,11 +62,133 @@ const webviewClientActions = `function startAgentRunFromInput() {
         updateExportLogsButtonState();
         lastDispatchedRunModel = selectedOllamaModel;
         renderModelSelectionStatusLine();
+        const sessionContext = buildSessionMemoryContext(activeRunDialogId, task);
         vscode.postMessage({
           type: 'sendTask',
-          task,
-          selectedModel: selectedOllamaModel
+          task: dispatchTask,
+          selectedModel: selectedOllamaModel,
+          sessionContext
         });
+      }
+
+      function normalizeUserTaskInput(raw) {
+        const task = String(raw || '').trim();
+        if (!task) {
+          return '';
+        }
+        const repaired = tryRepairMistypedKeyboardLayout(task);
+        if (repaired.wasRepaired) {
+          appendLogLine('system', 'Input normalized: keyboard layout mismatch auto-corrected.');
+          status.textContent = 'Input corrected';
+          return repaired.value;
+        }
+        return task;
+      }
+
+      function buildDispatchTask(task) {
+        const raw = String(task || '').trim();
+        return isLikelyExecutionTask(raw) ? raw : buildChatOnlyTask(raw);
+      }
+
+      function buildChatOnlyTask(task) {
+        const value = String(task || '').trim();
+        return [
+          'Chat-only request. Do not execute tools. Do not create or modify files.',
+          'Answer conversationally and helpfully in the user language.',
+          'User message:',
+          value
+        ].join('\\n\\n');
+      }
+
+      function isLikelyExecutionTask(task) {
+        const value = String(task || '').trim().toLowerCase();
+        if (!value) {
+          return false;
+        }
+        const executionPatterns = [
+          /\\b(сделай|исправь|добавь|обнови|запусти|создай|удали|проверь|реализуй|пофикси)\\b/u,
+          /\\b(make|fix|add|update|run|create|delete|implement|refactor|test|build)\\b/u,
+          /\\b(git|npm|dotnet|cmd|скрипт|script|commit|diff|patch)\\b/u
+        ];
+        return executionPatterns.some(pattern => pattern.test(value));
+      }
+
+      function showLocalChatReply(task, replyText, badgeText, dialogId) {
+        setRunningState(true);
+        status.textContent = 'Thinking...';
+        window.setTimeout(() => {
+          setRunningState(false);
+          currentRunTask = String(task || '').trim();
+          status.textContent = 'Ready';
+          result.textContent = String(replyText || '');
+          resultBadge.textContent = String(badgeText || 'chat');
+          resultBadge.className = 'result-badge running';
+          if (resultSection) {
+            resultSection.style.display = 'none';
+          }
+          updateCopyResultButton('Copy Result');
+          lastResultPayload = { resultText: result.textContent, summaryText: '', buildText: '', changedFiles: [] };
+          clearOutputButton.disabled = false;
+          taskInput.value = '';
+          autoResizeTaskInput();
+          const activeId = String(dialogId || activeRunDialogId || '');
+          const run = appendDialogMessage(activeId, 'assistant', result.textContent);
+          if (run) {
+            run.ok = true;
+            run.resultText = result.textContent;
+            run.summaryText = '';
+            run.buildText = '';
+            run.changedCount = 0;
+            run.lastNormalizedRun = null;
+            run.lastResultPayload = lastResultPayload;
+            renderDialogThread(run);
+          }
+          renderRecentRuns();
+          saveWebviewState();
+          updateExportRunReportButtonState();
+          updateExportLogsButtonState();
+          activeRunDialogId = '';
+        }, 350);
+      }
+
+      function tryRepairMistypedKeyboardLayout(input) {
+        const value = String(input || '');
+        const letters = (value.match(/[a-zA-Z\u0430-\u044f\u0410-\u042f\u0451\u0401]/g) || []);
+        if (letters.length < 8) {
+          return { wasRepaired: false, value };
+        }
+
+        const latinCount = (value.match(/[a-zA-Z]/g) || []).length;
+        const cyrillicCount = (value.match(/[\u0430-\u044f\u0410-\u042f\u0451\u0401]/g) || []).length;
+        if (cyrillicCount > 0 || latinCount < 6) {
+          return { wasRepaired: false, value };
+        }
+
+        const keyboardMap = {
+          q: '\\u0439', w: '\\u0446', e: '\\u0443', r: '\\u043a', t: '\\u0435', y: '\\u043d', u: '\\u0433', i: '\\u0448', o: '\\u0449', p: '\\u0437',
+          '[': '\\u0445', ']': '\\u044a', a: '\\u0444', s: '\\u044b', d: '\\u0432', f: '\\u0430', g: '\\u043f', h: '\\u0440', j: '\\u043e', k: '\\u043b', l: '\\u0434',
+          ';': '\\u0436', \"'\": '\\u044d', z: '\\u044f', x: '\\u0447', c: '\\u0441', v: '\\u043c', b: '\\u0438', n: '\\u0442', m: '\\u044c', ',': '\\u0431', '.': '\\u044e',
+          '/': '.'
+        };
+
+        let converted = '';
+        let convertedCount = 0;
+        for (const ch of value) {
+          const lower = ch.toLowerCase();
+          const mapped = keyboardMap[lower];
+          if (mapped) {
+            converted += ch === lower ? mapped : mapped.toUpperCase();
+            convertedCount++;
+          } else {
+            converted += ch;
+          }
+        }
+
+        const ratio = convertedCount / Math.max(1, letters.length);
+        if (ratio < 0.6) {
+          return { wasRepaired: false, value };
+        }
+        return { wasRepaired: true, value: converted };
       }
 
       function rerunLast() {
@@ -274,12 +407,73 @@ const webviewClientActions = `function startAgentRunFromInput() {
             return;
           }
         } catch {
-          // fall through to extension-host clipboard
+          // continue with next fallback
         }
 
-        vscode.postMessage({
-          type: 'copyToClipboard',
-          text: value
+        try {
+          const textarea = document.createElement('textarea');
+          textarea.value = value;
+          textarea.setAttribute('readonly', 'readonly');
+          textarea.style.position = 'fixed';
+          textarea.style.left = '-9999px';
+          textarea.style.top = '-9999px';
+          document.body.appendChild(textarea);
+          textarea.focus();
+          textarea.select();
+          const copied = document.execCommand('copy');
+          document.body.removeChild(textarea);
+          if (copied) {
+            return;
+          }
+        } catch {
+          // continue with extension-host clipboard
+        }
+
+        await copyViaHostClipboard(value);
+      }
+
+      const pendingClipboardRequests = new Map();
+      let clipboardRequestCounter = 0;
+
+      function handleCopyToClipboardResult(message) {
+        const requestId = String(message && message.requestId || '');
+        if (!requestId) {
+          return false;
+        }
+
+        const pending = pendingClipboardRequests.get(requestId);
+        if (!pending) {
+          return false;
+        }
+
+        pendingClipboardRequests.delete(requestId);
+        if (pending.timeoutId) {
+          clearTimeout(pending.timeoutId);
+        }
+
+        if (message.ok) {
+          pending.resolve();
+        } else {
+          pending.reject(new Error(String(message.error || 'clipboard_write_failed')));
+        }
+
+        return true;
+      }
+
+      async function copyViaHostClipboard(value) {
+        const requestId = 'copy-' + String(++clipboardRequestCounter);
+        await new Promise((resolve, reject) => {
+          const timeoutId = window.setTimeout(() => {
+            pendingClipboardRequests.delete(requestId);
+            reject(new Error('clipboard_host_timeout'));
+          }, 2500);
+
+          pendingClipboardRequests.set(requestId, { resolve, reject, timeoutId });
+          vscode.postMessage({
+            type: 'copyToClipboard',
+            text: value,
+            requestId
+          });
         });
       }
 
@@ -312,4 +506,7 @@ function getWebviewClientActions() {
 }
 
 module.exports = { getWebviewClientActions };
+
+
+
 

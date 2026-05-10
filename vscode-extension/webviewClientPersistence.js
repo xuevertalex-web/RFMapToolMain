@@ -55,7 +55,6 @@ const webviewClientPersistence = `
         structuredResultSection.style.display = 'none';
         updateCopyResultButton('Copy Result');
         updateCopyStructuredResultButton('Copy Structured Result');
-        copyLogsButton.textContent = 'Копировать';
         saveWebviewState();
         updateRerunLastButton();
         updateCopyChangedFilesButton();
@@ -65,6 +64,9 @@ const webviewClientPersistence = `
         updateCopyStructuredResultButtonState();
         updateExportRunReportButtonState();
         updateExportLogsButtonState();
+        if (typeof renderDialogThread === 'function') {
+          renderDialogThread(getSelectedDialogRun());
+        }
       }
 
       function autoResizeTaskInput() {
@@ -81,7 +83,12 @@ const webviewClientPersistence = `
           version: webviewStateVersion,
           taskInputValue: taskInput.value,
           changedKindFilterValue: currentChangedKindFilter,
-          logsCollapsed: logsCollapsed
+          logsCollapsed: logsCollapsed,
+          recentRuns: Array.isArray(recentRuns) ? recentRuns.slice(0, 20) : [],
+          archivedRuns: Array.isArray(archivedRuns) ? archivedRuns.slice(0, 50) : [],
+          sessionsViewMode: sessionsViewMode,
+          dialogViewMode: dialogViewMode,
+          selectedDialogId: String(selectedDialogId || '')
         });
       }
 
@@ -94,3 +101,4 @@ function getWebviewClientPersistence() {
 }
 
 module.exports = { getWebviewClientPersistence };
+

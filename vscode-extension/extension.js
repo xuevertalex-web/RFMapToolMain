@@ -51,9 +51,9 @@ function activate(context) {
       resolveWorkspaceRoot: resolveConfiguredWorkspaceRoot
     });
     let selectedModelState = getSelectedOllamaModelSync(context.globalState);
-    const runConfiguredAgent = (panel, workspaceRoot, task, runOutput, runExtensionRoot, selectedModelOverride) => {
+    const runConfiguredAgent = (panel, workspaceRoot, task, runOutput, runExtensionRoot, selectedModelOverride, sessionContext) => {
       const runModel = String(selectedModelOverride || '').trim() || selectedModelState.model;
-      return runAgent(panel, workspaceRoot, task, runOutput, runExtensionRoot, getBackendProjectPath(), runModel);
+      return runAgent(panel, workspaceRoot, task, runOutput, runExtensionRoot, getBackendProjectPath(), runModel, sessionContext);
     };
     const commandHandlers = createExtensionCommandHandlers({
       output,

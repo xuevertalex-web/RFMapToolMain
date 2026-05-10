@@ -78,10 +78,31 @@ function createPanelMessageHandler(options) {
 
     if (type === 'copyToClipboard') {
       const text = String(message.text || '');
+      const requestId = String(message.requestId || '');
       if (!text) {
+        panel.webview.postMessage({
+          type: 'copyToClipboardResult',
+          requestId,
+          ok: false,
+          error: 'empty_copy_text'
+        });
         return;
       }
-      await require('vscode').env.clipboard.writeText(text);
+      try {
+        await require('vscode').env.clipboard.writeText(text);
+        panel.webview.postMessage({
+          type: 'copyToClipboardResult',
+          requestId,
+          ok: true
+        });
+      } catch (error) {
+        panel.webview.postMessage({
+          type: 'copyToClipboardResult',
+          requestId,
+          ok: false,
+          error: String(error && error.message || error || 'clipboard_write_failed')
+        });
+      }
       return;
     }
 

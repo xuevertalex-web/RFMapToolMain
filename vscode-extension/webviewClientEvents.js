@@ -1,9 +1,9 @@
 const { getWebviewClientResultHandlers } = require('./webviewClientResultHandlers');
 
-const webviewClientEvents = `copyLogsButton.addEventListener('click', copyLogs);
+const webviewClientEvents = `
       if (helpButton) {
         helpButton.addEventListener('click', () => {
-          appendLogLine('system', 'Help: Enter sends task, Shift+Enter adds a new line. + clears current output. R reruns last task. E exports run report.');
+          appendLogLine('system', 'Help: Enter sends task, Shift+Enter adds a new line. Use New to start a new dialog.');
           logs.scrollTop = logs.scrollHeight;
         });
       }
@@ -12,13 +12,35 @@ const webviewClientEvents = `copyLogsButton.addEventListener('click', copyLogs);
       if (exportRunReportButton) {
         exportRunReportButton.addEventListener('click', exportRunReport);
       }
-      clearOutputButton.addEventListener('click', clearOutput);
+      clearOutputButton.addEventListener('click', () => {
+        openEmptyDialogView();
+        clearOutput();
+      });
+      if (backToDialogsButton) {
+        backToDialogsButton.addEventListener('click', () => openDialogsListView());
+      }
+      if (sessionsTabActive) {
+        sessionsTabActive.addEventListener('click', () => {
+          sessionsViewMode = 'active';
+          saveWebviewState();
+          renderRecentRuns();
+        });
+      }
+      if (sessionsTabArchived) {
+        sessionsTabArchived.addEventListener('click', () => {
+          sessionsViewMode = 'archived';
+          saveWebviewState();
+          renderRecentRuns();
+        });
+      }
       copyChangedFilesButton.addEventListener('click', copyChangedFiles);
       if (exportChangedFilesButton) {
         exportChangedFilesButton.addEventListener('click', exportChangedFiles);
       }
       openAllChangedFilesButton.addEventListener('click', openAllChangedFiles);
-      rerunLastButton.addEventListener('click', rerunLast);
+      if (rerunLastButton) {
+        rerunLastButton.addEventListener('click', rerunLast);
+      }
       updateLogsVisibility();
       updateRerunLastButton();
       updateOpenAllChangedFilesButton();
@@ -45,7 +67,11 @@ const webviewClientEvents = `copyLogsButton.addEventListener('click', copyLogs);
       });
 
       taskInput.addEventListener('keydown', event => {
-        if (event.key === 'Enter' && !event.shiftKey) {
+        const isEnter = event.key === 'Enter' || event.code === 'Enter' || event.keyCode === 13;
+        if (event.isComposing) {
+          return;
+        }
+        if (isEnter && !event.shiftKey) {
           event.preventDefault();
           startAgentRunFromInput();
           return;
@@ -82,6 +108,8 @@ const webviewClientEvents = `copyLogsButton.addEventListener('click', copyLogs);
           setRunningState(!!message.running);
         } else if (message.type === 'modelSelectionState') {
           applyModelSelectionState(message.payload);
+        } else if (message.type === 'copyToClipboardResult') {
+          handleCopyToClipboardResult(message);
         }
       });`;
 

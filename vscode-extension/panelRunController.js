@@ -51,7 +51,15 @@ function createPanelRunController(options) {
       output.appendLine('Agent run started');
 
       const selectedModel = String(message.selectedModel || message.model || '').trim();
-      const result = await runAgent(panel, workspaceState.workspaceRoot, task, output, extensionRoot, selectedModel);
+      const result = await runAgent(
+        panel,
+        workspaceState.workspaceRoot,
+        task,
+        output,
+        extensionRoot,
+        selectedModel,
+        message && typeof message.sessionContext === 'object' ? message.sessionContext : null
+      );
       const resultText = (result.result && result.result.message) || result.text;
       const structuredResult = {
         ...(result.result || {}),

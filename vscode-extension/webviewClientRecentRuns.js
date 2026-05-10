@@ -1,43 +1,92 @@
-const webviewClientRecentRuns = `function renderRecentRuns() {
-        if (!recentRunsContainer) {
+﻿const webviewClientRecentRuns = `function openDialogsListView() {
+        dialogViewMode = 'list';
+        selectedDialogId = '';
+        if (sessionsStrip) sessionsStrip.style.display = 'block';
+        if (chatScroll) chatScroll.style.display = 'none';
+        if (composer) composer.style.display = 'none';
+        if (backToDialogsButton) backToDialogsButton.style.display = 'none';
+        if (dialogTitle) dialogTitle.textContent = 'Dialogs';
+        saveWebviewState();
+      }
+
+      function openDialogView(run) {
+        if (!run) return;
+        dialogViewMode = 'detail';
+        selectedDialogId = String(run.id || '');
+        restoreRecentRunSession(run);
+        if (sessionsStrip) sessionsStrip.style.display = 'none';
+        if (chatScroll) chatScroll.style.display = 'block';
+        if (composer) composer.style.display = 'block';
+        if (backToDialogsButton) backToDialogsButton.style.display = 'inline-block';
+        if (dialogTitle) dialogTitle.textContent = truncateRecentRunTask(run.task);
+        saveWebviewState();
+      }
+
+      function openEmptyDialogView() {
+        const run = createDialogSession('');
+        openDialogView(run);
+      }
+
+      function syncDialogViewFromState() {
+        if (dialogViewMode !== 'detail') {
+          openDialogsListView();
           return;
         }
 
-        recentRunsContainer.replaceChildren();
+        const allRuns = ([]).concat(Array.isArray(recentRuns) ? recentRuns : [], Array.isArray(archivedRuns) ? archivedRuns : []);
+        const target = allRuns.find(run => String(run.id || '') === String(selectedDialogId || ''));
+        if (!target) {
+          openDialogsListView();
+          return;
+        }
+        openDialogView(target);
+      }
 
-        if (!Array.isArray(recentRuns) || recentRuns.length === 0) {
+      function getRunPreviewText(run) {
+        const messages = Array.isArray(run && run.messages) ? run.messages : [];
+        for (let i = messages.length - 1; i >= 0; i--) {
+          const message = messages[i];
+          if (message && message.role === 'assistant') {
+            const text = String(message.text || '').trim();
+            if (!text) {
+              continue;
+            }
+            if (text.length <= 72) {
+              return text;
+            }
+            return text.slice(0, 69).trimEnd() + '...';
+          }
+        }
+        return 'No agent response yet';
+      }
+
+      function renderRecentRuns() {
+        if (!recentRunsContainer) return;
+        if (sessionsTabActive) sessionsTabActive.classList.toggle('active', sessionsViewMode !== 'archived');
+        if (sessionsTabArchived) sessionsTabArchived.classList.toggle('active', sessionsViewMode === 'archived');
+
+        recentRunsContainer.replaceChildren();
+        const source = sessionsViewMode === 'archived' ? archivedRuns : recentRuns;
+        if (!Array.isArray(source) || source.length === 0) {
           const empty = document.createElement('div');
           empty.style.opacity = '0.75';
-          empty.textContent = 'No recent runs';
+          empty.textContent = sessionsViewMode === 'archived' ? 'No archived dialogs' : 'No dialogs yet';
           recentRunsContainer.appendChild(empty);
           return;
         }
 
-        for (const run of recentRuns) {
+        for (const run of source) {
           const item = document.createElement('div');
-          item.style.padding = '6px 8px';
-          item.style.marginBottom = '6px';
-          item.style.border = '1px solid var(--vscode-input-border, transparent)';
-          item.style.borderRadius = '6px';
-          item.style.cursor = 'pointer';
-          item.style.background = 'var(--vscode-input-background)';
+          item.className = 'recent-run-card';
 
           const topRow = document.createElement('div');
-          topRow.style.display = 'flex';
-          topRow.style.alignItems = 'center';
-          topRow.style.gap = '6px';
-          topRow.style.flexWrap = 'wrap';
-          topRow.style.fontSize = '0.9em';
-          topRow.style.justifyContent = 'space-between';
+          topRow.className = 'recent-run-top';
 
           const leftRow = document.createElement('div');
-          leftRow.style.display = 'flex';
-          leftRow.style.alignItems = 'center';
-          leftRow.style.gap = '6px';
-          leftRow.style.flexWrap = 'wrap';
+          leftRow.className = 'recent-run-left';
 
           const time = document.createElement('span');
-          time.style.opacity = '0.75';
+          time.className = 'recent-run-time';
           time.textContent = run.timestamp;
           leftRow.appendChild(time);
 
@@ -45,63 +94,63 @@ const webviewClientRecentRuns = `function renderRecentRuns() {
           badge.className = 'result-badge ' + getRecentRunBadgeClass(run.ok);
           badge.textContent = run.ok ? 'OK' : 'Error';
           leftRow.appendChild(badge);
-
           topRow.appendChild(leftRow);
 
-          const rerunButton = document.createElement('button');
-          rerunButton.type = 'button';
-          rerunButton.style.width = 'auto';
-          rerunButton.style.padding = '2px 6px';
-          rerunButton.style.fontSize = '0.8em';
-          rerunButton.textContent = 'Rerun';
-          const canRerun = canRerunRecentTask(run);
-          rerunButton.disabled = !canRerun;
-          rerunButton.style.opacity = canRerun ? '1' : '0.55';
-          rerunButton.style.cursor = canRerun ? 'pointer' : 'not-allowed';
-          rerunButton.addEventListener('click', event => {
+          const actions = document.createElement('div');
+          actions.className = 'recent-run-actions';
+
+          if (sessionsViewMode !== 'archived') {
+            const archiveButton = document.createElement('button');
+            archiveButton.type = 'button';
+            archiveButton.textContent = 'Archive';
+            archiveButton.className = 'recent-run-action';
+            archiveButton.onclick = event => {
+              event.stopPropagation();
+              archiveRecentRunById(run.id, run.task, run.timestamp);
+            };
+            actions.appendChild(archiveButton);
+          } else {
+            const restoreButton = document.createElement('button');
+            restoreButton.type = 'button';
+            restoreButton.textContent = 'Restore';
+            restoreButton.className = 'recent-run-action';
+            restoreButton.onclick = event => {
+              event.stopPropagation();
+              restoreArchivedRunById(run.id, run.task, run.timestamp);
+            };
+            actions.appendChild(restoreButton);
+          }
+
+          const deleteButton = document.createElement('button');
+          deleteButton.type = 'button';
+          deleteButton.textContent = 'Delete';
+          deleteButton.className = 'recent-run-action';
+          deleteButton.onclick = event => {
             event.stopPropagation();
-            const rerunTask = String(run.task || '').trim();
-            if (!canRerunRecentTask(run) || !rerunTask || rerunTask === '(no task)') {
-              return;
-            }
+            deleteRunById(run.id, run.task, run.timestamp);
+          };
+          actions.appendChild(deleteButton);
 
-            taskInput.value = rerunTask;
-            autoResizeTaskInput();
-            saveWebviewState();
-            taskInput.focus();
-            startAgentRunFromInput();
-          });
-          topRow.appendChild(rerunButton);
-
+          topRow.appendChild(actions);
           item.appendChild(topRow);
 
           const task = document.createElement('div');
-          task.style.marginTop = '3px';
-          task.style.fontWeight = '600';
-          task.style.fontSize = '0.92em';
-          task.style.lineHeight = '1.3';
+          task.className = 'recent-run-task';
           task.textContent = truncateRecentRunTask(run.task);
           item.appendChild(task);
 
-          const metaLine = document.createElement('div');
-          metaLine.style.marginTop = '2px';
-          metaLine.style.fontSize = '0.82em';
-          metaLine.style.opacity = '0.75';
-          metaLine.textContent = 'changed: ' + (Number.isFinite(run.changedCount) ? run.changedCount : 0);
-          item.appendChild(metaLine);
+          const preview = document.createElement('div');
+          preview.className = 'recent-run-preview';
+          preview.textContent = getRunPreviewText(run);
+          item.appendChild(preview);
 
-          item.addEventListener('click', () => {
-            taskInput.value = run.task;
-            autoResizeTaskInput();
-            saveWebviewState();
-            taskInput.focus();
-          });
-
+          item.addEventListener('click', () => openDialogView(run));
           recentRunsContainer.appendChild(item);
         }
       }
 
-      renderRecentRuns();`;
+      renderRecentRuns();
+      syncDialogViewFromState();`;
 
 function getWebviewClientRecentRuns() {
   return webviewClientRecentRuns;

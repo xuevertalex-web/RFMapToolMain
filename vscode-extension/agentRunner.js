@@ -25,7 +25,7 @@ function resolveAgentProjectPath(workspaceRoot, extensionRoot, configuredProject
   return '';
 }
 
-function runAgent(panel, workspaceRoot, task, output, extensionRoot, configuredProjectPath, selectedModel) {
+function runAgent(panel, workspaceRoot, task, output, extensionRoot, configuredProjectPath, selectedModel, sessionContext) {
   return new Promise((resolve, reject) => {
     const projectPath = resolveAgentProjectPath(workspaceRoot, extensionRoot, configuredProjectPath);
     if (!projectPath) {
@@ -35,7 +35,8 @@ function runAgent(panel, workspaceRoot, task, output, extensionRoot, configuredP
 
     stopRequested = false;
     console.log('WorkspaceRoot:', workspaceRoot);
-    const composedTask = composeTaskWithContinuation(task, lastStructuredResult);
+    const taskWithSessionMemory = composeTaskWithSessionMemory(task, sessionContext);
+    const composedTask = clampTaskForProcessArg(composeTaskWithContinuation(taskWithSessionMemory, lastStructuredResult));
     const args = ['run', '--project', projectPath, '--', '--workspace', workspaceRoot, '--task', composedTask];
     const normalizedModel = String(selectedModel || '').trim();
     if (normalizedModel) {
@@ -45,6 +46,9 @@ function runAgent(panel, workspaceRoot, task, output, extensionRoot, configuredP
     const commandLine = `dotnet ${args.join(' ')}`;
 
     output.appendLine(`Task: ${task}`);
+    if (taskWithSessionMemory !== task) {
+      output.appendLine('TaskComposedWithSessionMemory: yes');
+    }
     if (composedTask !== task) {
       output.appendLine(`TaskComposedWithContinuation: yes`);
     }
@@ -170,6 +174,123 @@ function runAgent(panel, workspaceRoot, task, output, extensionRoot, configuredP
       })
       .catch(reject);
   });
+}
+
+function clampTaskForProcessArg(task) {
+  const value = String(task || '').trim();
+  if (!value) {
+    return value;
+  }
+
+  // Keep enough space for other args and paths on Windows CreateProcess.
+  const maxChars = 12000;
+  if (value.length <= maxChars) {
+    return value;
+  }
+
+  const head = value.slice(0, maxChars - 160).trimEnd();
+  const tail = '\n\n[session-memory trimmed to keep command length safe]';
+  return head + tail;
+}
+
+function composeTaskWithSessionMemory(task, sessionContext) {
+  const rawTask = String(task || '').trim();
+  if (!rawTask) {
+    return rawTask;
+  }
+  if (!sessionContext || typeof sessionContext !== 'object' || sessionContext.enabled !== true) {
+    return rawTask;
+  }
+
+  const profile = sessionContext.profile && typeof sessionContext.profile === 'object'
+    ? sessionContext.profile
+    : {};
+  const maxChars = Number.isFinite(profile.maxPromptCharsFromHistory)
+    ? Math.max(2000, Math.min(8000, Math.floor(profile.maxPromptCharsFromHistory)))
+    : 6000;
+
+  const parts = [];
+
+  const historySummary = String(sessionContext.historySummary || '').trim();
+  if (historySummary) {
+    parts.push(`History summary: ${historySummary}`);
+  }
+
+  const sessionState = sessionContext.sessionState && typeof sessionContext.sessionState === 'object'
+    ? sessionContext.sessionState
+    : null;
+  if (sessionState) {
+    const stateLines = [];
+    const lastTask = String(sessionState.lastTask || '').trim();
+    const lastStatus = String(sessionState.lastStatus || '').trim();
+    const changedFilesCount = Number.isFinite(sessionState.changedFilesCount)
+      ? Math.max(0, Math.floor(sessionState.changedFilesCount))
+      : 0;
+    const nextActions = Array.isArray(sessionState.nextActions)
+      ? sessionState.nextActions.map(x => String(x || '').trim()).filter(Boolean).slice(0, 3)
+      : [];
+    if (lastTask) stateLines.push(`lastTask=${lastTask}`);
+    if (lastStatus) stateLines.push(`lastStatus=${lastStatus}`);
+    stateLines.push(`changedFiles=${changedFilesCount}`);
+    if (nextActions.length > 0) stateLines.push(`nextActions=${nextActions.join(' | ')}`);
+    if (stateLines.length > 0) {
+      parts.push(`Session state: ${stateLines.join('; ')}`);
+    }
+  }
+
+  const lastStructured = sessionContext.lastStructuredResultSummary && typeof sessionContext.lastStructuredResultSummary === 'object'
+    ? sessionContext.lastStructuredResultSummary
+    : null;
+  if (lastStructured) {
+    const statusText = String(lastStructured.statusText || '').trim();
+    const summaryText = String(lastStructured.summaryText || '').trim();
+    const resultText = String(lastStructured.resultText || '').trim();
+    const changedFilesCount = Number.isFinite(lastStructured.changedFilesCount)
+      ? Math.max(0, Math.floor(lastStructured.changedFilesCount))
+      : 0;
+    const srLines = [];
+    if (statusText) srLines.push(`status=${statusText}`);
+    if (summaryText) srLines.push(`summary=${summaryText}`);
+    if (resultText) srLines.push(`result=${resultText}`);
+    srLines.push(`changedFiles=${changedFilesCount}`);
+    parts.push(`Last structured result: ${srLines.join('; ')}`);
+  }
+
+  const recentMessages = Array.isArray(sessionContext.recentMessages)
+    ? sessionContext.recentMessages
+    : [];
+  const recentLines = [];
+  let usedChars = 0;
+  for (let i = recentMessages.length - 1; i >= 0; i--) {
+    const item = recentMessages[i];
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+    const role = String(item.role || '').trim().toLowerCase() === 'assistant' ? 'assistant' : 'user';
+    const text = String(item.text || '').trim();
+    if (!text) {
+      continue;
+    }
+    const line = `${role}: ${text}`;
+    if (usedChars + line.length > maxChars) {
+      break;
+    }
+    usedChars += line.length;
+    recentLines.unshift(line);
+  }
+  if (recentLines.length > 0) {
+    parts.push(`Recent dialog:\n${recentLines.join('\n')}`);
+  }
+
+  if (parts.length === 0) {
+    return rawTask;
+  }
+
+  return [
+    'Use the session memory below to stay consistent with previous steps.',
+    parts.join('\n\n'),
+    `Current user request: ${rawTask}`
+  ].join('\n\n');
 }
 
 function composeTaskWithContinuation(task, previousResult) {

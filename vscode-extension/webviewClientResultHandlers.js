@@ -1,4 +1,8 @@
-const webviewClientResultHandlers = `function applyNormalizedRunResult(run) {
+﻿const webviewClientResultHandlers = `function applyNormalizedRunResult(run, options) {
+        const opts = options && typeof options === 'object' ? options : {};
+        if (resultSection) {
+          resultSection.style.display = '';
+        }
         structuredResultSection.style.display = 'block';
         status.textContent = run.status === 'error'
           ? 'Error'
@@ -37,17 +41,27 @@ const webviewClientResultHandlers = `function applyNormalizedRunResult(run) {
           statusText: status.textContent
         };
 
-        addRecentRun({
-          timestamp: new Date().toLocaleString(),
-          task: run.task,
-          ok: run.ok,
-          resultText: lastResultPayload.resultText,
-          buildText: lastResultPayload.buildText,
-          changedCount: currentChangedFiles.length
-        });
+        const dialogId = String(opts.dialogId || activeRunDialogId || selectedDialogId || '');
+        if (dialogId) {
+          recordDialogResult(dialogId, run, lastResultPayload);
+          const selectedRun = getSelectedDialogRun();
+          if (selectedRun) {
+            renderDialogThread(selectedRun);
+          }
+        } else if (!opts.skipHistory) {
+          addRecentRun({
+            timestamp: new Date().toLocaleString(),
+            task: run.task,
+            ok: run.ok,
+            resultText: lastResultPayload.resultText,
+            summaryText: lastResultPayload.summaryText,
+            buildText: lastResultPayload.buildText,
+            changedCount: currentChangedFiles.length
+          });
+        }
 
         const visibleFiles = getFilteredChangedFiles();
-        if (run.ok && visibleFiles.length === 1) {
+        if (!opts.skipAutoOpen && run.ok && visibleFiles.length === 1) {
           const autoOpenPath = String(visibleFiles[0].path);
           const autoRange = currentChangedRangeMap.get(normalizeFileKey(autoOpenPath)) || null;
           vscode.postMessage({
@@ -66,6 +80,8 @@ const webviewClientResultHandlers = `function applyNormalizedRunResult(run) {
         renderRunActions(run);
         updateRunStats();
         currentRunTask = '';
+        activeRunDialogId = '';
+        renderRecentRuns();
       }
 
       function handleAgentFinishedMessage(message) {
@@ -79,3 +95,4 @@ function getWebviewClientResultHandlers() {
 }
 
 module.exports = { getWebviewClientResultHandlers };
+

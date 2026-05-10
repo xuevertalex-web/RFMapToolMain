@@ -47,15 +47,17 @@ const webviewStyles = `
         min-width: 0;
       }
 
-      .agent-tab {
-        display: inline-block;
-        padding-bottom: 4px;
-        border-bottom: 1px solid var(--vscode-focusBorder);
-        font-size: 11px;
-        letter-spacing: 0;
+      .agent-tab { display:none; }
+
+      .agent-title {
+        margin-top: 0;
+        font-weight: 600;
+        font-size: 16px;
+        text-transform: none;
+        color: var(--vscode-sideBarTitle-foreground, var(--vscode-foreground));
       }
 
-      .agent-title, .sessions-title, .details-title {
+      .sessions-title, .details-title {
         margin-top: 8px;
         font-weight: 700;
         font-size: 11px;
@@ -102,12 +104,13 @@ const webviewStyles = `
       }
 
       .sessions-strip {
-        display: none;
+        display: block;
         padding: 8px 12px;
         border-bottom: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border));
         min-width: 0;
         overflow-x: hidden;
       }
+      .dialog-header-left { display:flex; align-items:center; gap:8px; min-width:0; }
 
       #helpButton {
         display: none;
@@ -117,6 +120,68 @@ const webviewStyles = `
         margin-top: 6px;
         min-width: 0;
         overflow-x: hidden;
+      }
+
+      .recent-run-card {
+        padding: 6px 8px;
+        margin-bottom: 6px;
+        border: 1px solid var(--vscode-input-border, transparent);
+        border-radius: 6px;
+        cursor: pointer;
+        background: var(--vscode-input-background);
+      }
+
+      .recent-run-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .recent-run-left {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .recent-run-time {
+        opacity: 0.72;
+        font-size: 0.78em;
+      }
+
+      .recent-run-actions {
+        display: flex;
+        gap: 4px;
+      }
+
+      .recent-run-action {
+        padding: 1px 6px;
+        font-size: 0.76em;
+      }
+
+      .recent-run-task {
+        margin-top: 4px;
+        font-weight: 600;
+        font-size: 0.9em;
+      }
+
+      .recent-run-preview {
+        margin-top: 2px;
+        opacity: 0.85;
+        font-size: 0.82em;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow: hidden;
+      }
+      .sessions-tabs {
+        display: flex;
+        gap: 6px;
+        margin-top: 6px;
+      }
+      .sessions-tabs .icon-button.active {
+        background: var(--vscode-toolbar-hoverBackground);
+        border-color: var(--vscode-focusBorder);
       }
 
       .chat-scroll {
@@ -189,6 +254,47 @@ const webviewStyles = `
       .message-role {
         font-weight: 600;
         margin-bottom: 8px;
+      }
+
+      .dialog-thread {
+        display: block;
+        margin-bottom: 10px;
+      }
+
+      .thread-empty {
+        color: var(--vscode-descriptionForeground);
+        font-size: 0.9em;
+        padding: 8px 0;
+      }
+
+      .thread-message {
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 8px;
+        padding: 8px 10px;
+        margin-bottom: 8px;
+        background: var(--vscode-editor-background);
+      }
+
+      .thread-message-user {
+        border-color: rgba(9, 105, 218, 0.35);
+        background: rgba(9, 105, 218, 0.08);
+      }
+
+      .thread-message-assistant {
+        border-color: rgba(46, 160, 67, 0.35);
+        background: rgba(46, 160, 67, 0.08);
+      }
+
+      .thread-message-meta {
+        opacity: 0.75;
+        font-size: 0.78em;
+        margin-bottom: 4px;
+      }
+
+      .thread-message-body {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        line-height: 1.4;
       }
 
       .message-content, #logs, .summary-box {

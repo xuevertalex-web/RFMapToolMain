@@ -1,22 +1,24 @@
-const { version } = require('./package.json');
+﻿const { version } = require('./package.json');
 
 const webviewBody = `
     <div class="agent-shell">
       <header class="agent-topbar">
-        <div>
-          <div class="agent-tab">CHAT</div>
-          <div class="agent-title">Local Agent</div>
+        <div class="dialog-header-left">
+          <button id="backToDialogs" class="icon-button" type="button" title="Back to dialogs" style="display:none;">←</button>
+          <div id="dialogTitle" class="agent-title">Dialogs</div>
         </div>
         <div class="agent-toolbar" aria-label="Actions">
           <button id="helpButton" class="icon-button" type="button" title="Help">?</button>
-          <button id="clearOutput" class="icon-button" type="button" title="New Session">+</button>
-          <button id="rerunLast" class="icon-button" type="button" title="Rerun Last">R</button>
-          <button id="exportRunReport" class="icon-button" type="button" title="Export Run Report">E</button>
         </div>
       </header>
 
       <section class="sessions-strip">
-        <div class="sessions-title">SESSIONS</div>
+        <div class="sessions-title">Sessions</div>
+        <div class="sessions-tabs">
+          <button id="clearOutput" class="icon-button" type="button" title="New Session">New</button>
+          <button id="sessionsTabActive" class="icon-button" type="button">Active</button>
+          <button id="sessionsTabArchived" class="icon-button" type="button">Archived</button>
+        </div>
         <div id="recentRuns" class="recent-runs"></div>
       </section>
 
@@ -26,7 +28,8 @@ const webviewBody = `
           <span class="thinking-dot"></span>
           <span class="thinking-text">Agent is thinking</span>
         </div>
-        <section class="message agent-message">
+        <section id="dialogThread" class="dialog-thread"></section>
+        <section id="resultSection" class="message agent-message">
           <div class="message-role">Result <span id="resultBadge" class="result-badge"></span></div>
           <div id="result" class="message-content muted">Agent response will appear here.</div>
         </section>
@@ -42,7 +45,7 @@ const webviewBody = `
             <div class="details-title">Failure</div>
             <div id="failureSummary" class="failure-grid"></div>
           </section>
-          <section id="timelineSection" class="run-section">
+          <section id="timelineSection" class="run-section" style="display: none;">
             <div class="details-title">Timeline</div>
             <ol id="timelineList" class="timeline-list"></ol>
             <div id="timelineEmpty" class="empty-state">No timeline events available</div>
@@ -86,10 +89,9 @@ const webviewBody = `
           </section>
         </section>
 
-        <section class="logs-section">
+        <section class="logs-section" style="display: none;">
           <div class="logs-header-row">
             <h3 id="logsHeader">Logs (agent + app)</h3>
-            <button id="copyLogs" type="button">Copy</button>
           </div>
           <div id="logs"></div>
         </section>
@@ -120,3 +122,4 @@ function getWebviewBody() {
 }
 
 module.exports = { getWebviewBody };
+

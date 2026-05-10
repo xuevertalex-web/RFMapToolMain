@@ -2,9 +2,12 @@ const webviewClientBootstrap = `const vscode = acquireVsCodeApi();
       const taskInput = document.getElementById('task');
       const logs = document.getElementById('logs');
       const result = document.getElementById('result');
+      const resultSection = document.getElementById('resultSection');
       const resultBadge = document.getElementById('resultBadge');
       const copyResultButton = document.getElementById('copyResult');
       const clearOutputButton = document.getElementById('clearOutput');
+      const backToDialogsButton = document.getElementById('backToDialogs');
+      const dialogTitle = document.getElementById('dialogTitle');
       const rerunLastButton = document.getElementById('rerunLast');
       const exportRunReportButton = document.getElementById('exportRunReport');
       const structuredResultSection = document.getElementById('structuredResultSection');
@@ -29,7 +32,6 @@ const webviewClientBootstrap = `const vscode = acquireVsCodeApi();
       const buildStatus = document.getElementById('buildStatus');
       const logsHeader = document.getElementById('logsHeader');
       const logsToggle = document.getElementById('logsToggle');
-      const copyLogsButton = document.getElementById('copyLogs');
       const exportLogsButton = document.getElementById('exportLogs');
       const helpButton = document.getElementById('helpButton');
       const modelSelector = document.getElementById('modelSelector');
@@ -37,6 +39,12 @@ const webviewClientBootstrap = `const vscode = acquireVsCodeApi();
       const modelSelectionStatus = document.getElementById('modelSelectionStatus');
       const modelPing = document.getElementById('modelPing');
       const recentRunsContainer = document.getElementById('recentRuns');
+      const sessionsTabActive = document.getElementById('sessionsTabActive');
+      const sessionsTabArchived = document.getElementById('sessionsTabArchived');
+      const sessionsStrip = document.querySelector('.sessions-strip');
+      const chatScroll = document.querySelector('.chat-scroll');
+      const dialogThread = document.getElementById('dialogThread');
+      const composer = document.querySelector('.composer');
       const status = document.getElementById('status');
       const thinkingIndicator = document.getElementById('thinkingIndicator');
       const sendButton = document.getElementById('send');
@@ -51,6 +59,11 @@ const webviewClientBootstrap = `const vscode = acquireVsCodeApi();
       let currentChangedRangeMap = new Map();
       let currentChangedHintMap = new Map();
       let recentRuns = [];
+      let archivedRuns = [];
+      let sessionsViewMode = 'active';
+      let selectedDialogId = '';
+      let dialogViewMode = 'list';
+      let activeRunDialogId = '';
       let suppressPlainResultLog = false;
       let currentRunTask = '';
       let availableOllamaModels = [];
@@ -65,7 +78,7 @@ const webviewClientBootstrap = `const vscode = acquireVsCodeApi();
         buildText: '',
         changedFiles: []
       };
-      const webviewStateVersion = 3;
+      const webviewStateVersion = 4;
       const webviewState = vscode.getState() || {};
       if (webviewState && typeof webviewState.taskInputValue === 'string') {
         taskInput.value = webviewState.taskInputValue;
@@ -77,9 +90,27 @@ const webviewClientBootstrap = `const vscode = acquireVsCodeApi();
       if (webviewState && typeof webviewState.logsCollapsed === 'boolean') {
         logsCollapsed = !!webviewState.logsCollapsed;
       }
-      // Do not restore prior run output from VS Code webview state. Old results can
-      // survive extension reinstalls and look like a fresh agent response.
-      recentRuns = [];`;
+      if (webviewState && Array.isArray(webviewState.recentRuns)) {
+        recentRuns = webviewState.recentRuns;
+      }
+      if (webviewState && Array.isArray(webviewState.archivedRuns)) {
+        archivedRuns = webviewState.archivedRuns;
+      }
+      if (webviewState && typeof webviewState.sessionsViewMode === 'string') {
+        sessionsViewMode = webviewState.sessionsViewMode === 'archived' ? 'archived' : 'active';
+      }
+      if (webviewState && typeof webviewState.dialogViewMode === 'string') {
+        dialogViewMode = webviewState.dialogViewMode === 'detail' ? 'detail' : 'list';
+      }
+      if (webviewState && typeof webviewState.selectedDialogId === 'string') {
+        selectedDialogId = webviewState.selectedDialogId;
+      }
+      if (typeof migrateRecentRunCollections === 'function') {
+        migrateRecentRunCollections();
+      }
+      if (sessionsStrip) {
+        sessionsStrip.style.display = 'block';
+      }`;
 
 function getWebviewClientBootstrap() {
   return webviewClientBootstrap;
