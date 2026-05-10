@@ -62,7 +62,7 @@ namespace LocalCursorAgent.Core
             var (promptKind, prompt) = BuildIterationPrompt(context.Task, context.AnalysisOnlyTask, iteration, context.RunState.CurrentResponse, preparedContext.ContextString, context.Tracer!);
             context.RunState.ModelCallStarted = true;
             var modelRequest = await ExecuteModelRequestAsync(prompt, promptKind, iteration, context.RuntimeClient, context.Tracer!);
-            context.RuntimeResult = modelRequest.RuntimeResult;
+            context.RuntimeResult = modelRequest.RuntimeResult ?? default;
             context.RunState.CurrentResponse = modelRequest.Response;
             context.RunState.LlmRetryCount = _lastLlmRetryCount;
             context.RunState.LlmErrorType = _lastLlmErrorType;
@@ -76,7 +76,7 @@ namespace LocalCursorAgent.Core
                 iteration,
                 context.RunState.CurrentResponse,
                 context.ContextInfo!,
-                context.RunStartedUtc!.Value,
+                context.RunStartedUtc ?? DateTime.UtcNow,
                 context.RuntimeMetadata,
                 context.ChangedFiles,
                 context.ChangedHints,
