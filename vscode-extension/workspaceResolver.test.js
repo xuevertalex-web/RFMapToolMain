@@ -27,29 +27,22 @@ function run() {
   const backendProjectPath = path.join(backendRoot, 'LocalCursorAgent.csproj');
   fs.writeFileSync(backendProjectPath, '<Project />', 'utf8');
 
-  const chat = resolveWorkspaceRoot({
+  const analysisOnly = resolveWorkspaceRoot({
     configuredWorkspaceRoot: backendRoot,
     backendProjectPath,
     allowBackendWorkspace: false,
     analysisOnlyTask: true
   });
-  assert.ok(chat.workspaceRoot, 'chat/analysis task should not be blocked in backend workspace');
+  assert.ok(analysisOnly.workspaceRoot, 'analysis-only task should not be blocked in backend workspace');
+  assert.strictEqual(path.resolve(analysisOnly.workspaceRoot).toLowerCase(), path.resolve(backendRoot).toLowerCase(), 'resolver should return backend workspace root for analysis-only');
 
-  const analysis = resolveWorkspaceRoot({
+  const clarifyLike = resolveWorkspaceRoot({
     configuredWorkspaceRoot: backendRoot,
     backendProjectPath,
     allowBackendWorkspace: false,
     analysisOnlyTask: true
   });
-  assert.ok(analysis.workspaceRoot, 'analysis-only task should not be blocked in backend workspace');
-
-  const clarify = resolveWorkspaceRoot({
-    configuredWorkspaceRoot: backendRoot,
-    backendProjectPath,
-    allowBackendWorkspace: false,
-    analysisOnlyTask: true
-  });
-  assert.ok(clarify.workspaceRoot, 'clarify-like non-mutation task should not be blocked in backend workspace');
+  assert.ok(clarifyLike.workspaceRoot, 'clarify-like non-mutation task should not be blocked in backend workspace');
 
   const execute = resolveWorkspaceRoot({
     configuredWorkspaceRoot: backendRoot,
@@ -59,6 +52,7 @@ function run() {
   });
   assert.strictEqual(execute.workspaceRoot, '', 'execute/mutation task should be blocked in backend workspace');
   assert.strictEqual(execute.reason, 'backend_workspace_blocked');
+  assert.ok(String(execute.backendProjectPath || '').toLowerCase().endsWith('localcursoragent.csproj'), 'blocked outcome should include backend project path for clear user guidance');
 }
 
 run();
