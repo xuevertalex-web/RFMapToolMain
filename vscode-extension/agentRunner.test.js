@@ -1,5 +1,7 @@
 const assert = require('assert');
-const { extractStructuredResult, composeTaskWithContinuation } = require('./agentRunner');
+const { extractStructuredResult, composeTaskWithContinuation, preflightBackendProjectPath } = require('./agentRunner');
+const path = require('path');
+const { getWebviewClientResultHandlers } = require('./webviewClientResultHandlers');
 
 function testMarkedStructuredResult() {
   const result = extractStructuredResult([
@@ -76,10 +78,34 @@ function testComposeTaskWithContinuation() {
   assert.ok(composed.includes('Next action candidates:'));
 }
 
+function testPreflightBackendProjectPath() {
+  const missing = preflightBackendProjectPath('', process.cwd(), process.cwd());
+  assert.strictEqual(missing.ok, false);
+  assert.strictEqual(missing.code, 'backend_path_empty');
+
+  const notAbsolute = preflightBackendProjectPath('LocalCursorAgent.csproj', process.cwd(), process.cwd());
+  assert.strictEqual(notAbsolute.ok, false);
+  assert.strictEqual(notAbsolute.code, 'backend_path_not_absolute');
+
+  const absentAbsolute = preflightBackendProjectPath(path.join(process.cwd(), 'missing.csproj'), process.cwd(), process.cwd());
+  assert.strictEqual(absentAbsolute.ok, false);
+  assert.strictEqual(absentAbsolute.code, 'backend_path_not_found');
+}
+
+function testClarificationExamplesWiredInResultHandlers() {
+  const src = getWebviewClientResultHandlers();
+  assert.ok(src.includes('CLARIFICATION_REQUIRED'));
+  assert.ok(src.includes('Нужно уточнить задачу.'));
+  assert.ok(src.includes('Пример: Исправь ошибку сборки'));
+  assert.ok(src.includes('Пример: Добавь проверку пути backendProjectPath'));
+}
+
 testMarkedStructuredResult();
 testLegacyStructuredResultFallback();
 testMalformedMarkedResultFallsBack();
 testFullBufferStructuredResultFallback();
 testComposeTaskWithContinuation();
+testPreflightBackendProjectPath();
+testClarificationExamplesWiredInResultHandlers();
 
 console.log('agentRunner tests passed');

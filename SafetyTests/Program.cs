@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Net;
 using System.Net.Http;
 using LocalCursorAgent.Configuration;
@@ -47,6 +47,7 @@ await RunChatOnlyRoutingMatrix_ChatCasesRegression();
 await RunChatOnlyRoutingMatrix_ClarifyCasesRegression();
 await RunChatOnlyRoutingMatrix_ExecuteCasesRegression();
 await RunChatOnlyRoutingMatrix_AnalysisOnlyCasesRegression();
+await RunSessionFlow_ChatClarifyExecute_Regression();
 await RunBroadExecuteIntent_ProjectWideFixRegression();
 await RunHostDiagnosticsCommandApprovalRegression();
 await RunProcessExecutionHardeningRegression();
@@ -1973,7 +1974,17 @@ static async Task RunBroadExecuteIntent_ProjectWideFixRegression()
         "исправь что сломано в проекте",
         "устрани проблему в проекте",
         "разберись и исправь баг",
-        "найди ошибку и сделай фикс"
+        "найди ошибку и сделай фикс",
+        "запусти doctor и почини что упадет",
+        "добавь preflight перед run в extension",
+        "проверь health-check и исправь проблему",
+        "добавь regression для intent classifier",
+        "расшири intent словарь новыми командами",
+        "сними тупик clarification required в ui",
+        "добавь примеры как формулировать задачу",
+        "перед run проверь backendProjectPath",
+        "добавь repository в package.json extension",
+        "прогони smoke и npm test и поправь ошибки"
     };
 
     foreach (var input in inputs)
@@ -1986,6 +1997,29 @@ static async Task RunBroadExecuteIntent_ProjectWideFixRegression()
     }
 
     Console.WriteLine("PASS BroadExecuteIntent_ProjectWideFix");
+}
+
+static async Task RunSessionFlow_ChatClarifyExecute_Regression()
+{
+    var chat = await RunIntentMatrixTask("привет, что ты умеешь?", new FakeNoToolAnalysisClient(), registerFileTool: true);
+    AssertTrue(chat.GetProperty("changedFiles").GetArrayLength() == 0, "Chat step must not change files.");
+    var chatReason = chat.GetProperty("reasonCode").GetString() ?? string.Empty;
+    AssertTrue(
+        string.Equals(chatReason, "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(chatReason, "SUCCESS_ANALYSIS_RESPONSE", StringComparison.OrdinalIgnoreCase),
+        "Chat step must stay conversational.");
+
+    var clarify = await RunIntentMatrixTask("сделай нормально", new FakeNoToolAnalysisClient(), registerFileTool: true);
+    AssertTrue(!clarify.GetProperty("ok").GetBoolean(), "Clarify step must be non-success.");
+    AssertTrue(string.Equals(clarify.GetProperty("reasonCode").GetString(), "CLARIFICATION_REQUIRED", StringComparison.OrdinalIgnoreCase), "Clarify step must require clarification.");
+    AssertTrue(clarify.GetProperty("changedFiles").GetArrayLength() == 0, "Clarify step must not change files.");
+
+    var execute = await RunIntentMatrixTask("создай файл AGENT_SESSION_E2E.md с текстом hello", new FakeNoToolAnalysisClient(), registerFileTool: true);
+    var executeReason = execute.GetProperty("reasonCode").GetString() ?? string.Empty;
+    AssertTrue(!string.Equals(executeReason, "CLARIFICATION_REQUIRED", StringComparison.OrdinalIgnoreCase), "Execute step must not fallback to clarification.");
+    AssertTrue(!string.Equals(executeReason, "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase), "Execute step must not fallback to chat.");
+
+    Console.WriteLine("PASS SessionFlow_ChatClarifyExecute");
 }
 
 static async Task<JsonElement> RunIntentMatrixTask(string task, ILLMClient llmClient, bool registerFileTool)
@@ -3332,3 +3366,4 @@ sealed class StaticSuccessAdapter : ILlmProviderAdapter
     public Task<string> Generate(string prompt, CancellationToken cancellationToken = default) => Task.FromResult(_response);
     public Task<bool> IsAvailable(CancellationToken cancellationToken = default) => Task.FromResult(true);
 }
+
