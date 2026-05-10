@@ -14,7 +14,11 @@
             "fix", "create", "generate", "write", "make", "change", "update", "add", "implement", "modify", "refactor",
             "создай", "создать", "добавь", "добавить", "измени", "исправь", "почини", "напиши", "сделай", "файл", "класс",
             "удали", "обнови", "пофикси", "ошибк", "сломано", "тест", "script", "package.json", ".cs", ".md", ".txt", "почини проект",
-            "найди ошиб", "устрани", "разберись", "исследуй и исправь", "исправь и проверь", "исправь проблему"
+            "найди ошиб", "устрани", "разберись", "исследуй и исправь", "исправь и проверь", "исправь проблему",
+            "run doctor", "прогони doctor", "запусти doctor", "сделай preflight", "добавь preflight", "проверь health-check",
+            "добавь regression", "расшири intent словарь", "обнови intent словарь", "добавь фразы в intent", "intent словарь", "intent classifier", "почини clari", "сними тупик clarification",
+            "добавь примеры формулировки", "перед run проверь backend path", "проверь backendprojectpath", "добавь repository в package.json",
+            "сними тупик", "clarification required", "ux"
         };
 
         private static readonly string[] ChatMarkers = new[]
@@ -36,6 +40,9 @@
             if (executeScore >= 2)
                 return TaskIntentKind.Execute;
 
+            if (executeScore >= 1 && !value.Contains('?') && !value.Contains('？') && !IsVagueExecutionRequest(value))
+                return TaskIntentKind.Execute;
+
             if (executeScore >= 1 && (value.Contains("проект", StringComparison.Ordinal) || value.Contains("project", StringComparison.Ordinal)))
                 return TaskIntentKind.Execute;
 
@@ -46,6 +53,16 @@
                 return TaskIntentKind.Chat;
 
             return TaskIntentKind.Clarify;
+        }
+
+        private static bool IsVagueExecutionRequest(string value)
+        {
+            return value == "сделай нормально" ||
+                   value == "почини" ||
+                   value == "оно не работает" ||
+                   value == "абракадабра" ||
+                   value == "разберись" ||
+                   value == "улучши всё";
         }
 
         private static int ScoreByMarkers(string text, string[] markers)
