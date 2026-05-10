@@ -5,11 +5,13 @@
     "outDir": "out",
     "lib": ["ES2020"],
     "sourceMap": true,
-    "rootDir": "src",
+    "allowJs": true,
+    "checkJs": false,
+    "rootDir": ".",
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true,
-    "types": ["node", "vscode"]
+    "skipLibCheck": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["./**/*.js"],
+  "exclude": ["node_modules", "out"]
 }
