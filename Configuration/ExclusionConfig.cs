@@ -37,8 +37,6 @@ namespace LocalCursorAgent.Configuration
         {
             if (!File.Exists(_configPath))
             {
-                Console.WriteLine($"Warning: agent.config.json not found at {_configPath}");
-                Console.WriteLine("Using default exclusions: bin/, obj/, .git/, .vs/, node_modules/, packages/");
                 _excludePatterns = new List<string> 
                 { 
                     "bin/", "obj/", ".git/", ".vs/", "node_modules/", "packages/"

@@ -26,7 +26,7 @@ namespace LocalCursorAgent.Core
             public Dictionary<string, ChangedKind> ChangedKinds { get; } = new(StringComparer.OrdinalIgnoreCase);
             public List<string>? ResolvedFiles { get; set; }
             public ContextInformation? ContextInfo { get; set; }
-            public LlmRuntimeResult RuntimeResult { get; set; }
+            public LlmRuntimeResult RuntimeResult { get; set; } = default!;
             public ToolingStateApplyResult? ToolingApply { get; set; }
         }
 
