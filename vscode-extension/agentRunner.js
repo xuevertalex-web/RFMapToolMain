@@ -7,6 +7,23 @@ let currentAgentProcess = null;
 let stopRequested = false;
 let lastStructuredResult = null;
 
+function preflightBackendProjectPath(configuredProjectPath, extensionRoot, workspaceRoot) {
+  const configured = String(configuredProjectPath || '').trim();
+  if (!configured) {
+    return { ok: false, code: 'backend_path_empty', message: 'localCursorAgent.backendProjectPath is empty. Set an absolute path to LocalCursorAgent.csproj in VS Code settings.' };
+  }
+  if (!path.isAbsolute(configured)) {
+    return { ok: false, code: 'backend_path_not_absolute', message: 'localCursorAgent.backendProjectPath must be an absolute path to LocalCursorAgent.csproj.' };
+  }
+  if (!fs.existsSync(configured)) {
+    return { ok: false, code: 'backend_path_not_found', message: `Configured backend project not found: ${configured}` };
+  }
+  if (!configured.toLowerCase().endsWith('.csproj')) {
+    return { ok: false, code: 'backend_path_not_csproj', message: 'localCursorAgent.backendProjectPath must point to a .csproj file.' };
+  }
+  return { ok: true };
+}
+
 function resolveAgentProjectPath(workspaceRoot, extensionRoot, configuredProjectPath) {
   const candidates = [
     configuredProjectPath,
@@ -27,6 +44,19 @@ function resolveAgentProjectPath(workspaceRoot, extensionRoot, configuredProject
 
 function runAgent(panel, workspaceRoot, task, output, extensionRoot, configuredProjectPath, selectedModel, sessionContext) {
   return new Promise((resolve, reject) => {
+    const preflight = preflightBackendProjectPath(configuredProjectPath, extensionRoot, workspaceRoot);
+    if (!preflight.ok) {
+      const preflightError = new Error(preflight.message);
+      preflightError.result = {
+        ok: false,
+        finalStatus: 'error',
+        reasonCode: preflight.code,
+        message: preflight.message,
+        summary: 'Backend preflight failed before agent run.'
+      };
+      reject(preflightError);
+      return;
+    }
     const projectPath = resolveAgentProjectPath(workspaceRoot, extensionRoot, configuredProjectPath);
     if (!projectPath) {
       reject(new Error('LocalCursorAgent.csproj not found.'));
@@ -757,4 +787,4 @@ function stopCurrentAgent(output) {
   return true;
 }
 
-module.exports = { runAgent, hasRunningProcess, stopCurrentAgent, extractStructuredResult, composeTaskWithContinuation };
+module.exports = { runAgent, hasRunningProcess, stopCurrentAgent, extractStructuredResult, composeTaskWithContinuation, preflightBackendProjectPath };
