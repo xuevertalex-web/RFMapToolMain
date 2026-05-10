@@ -47,6 +47,15 @@
           const selectedRun = getSelectedDialogRun();
           if (selectedRun) {
             renderDialogThread(selectedRun);
+            const messages = Array.isArray(selectedRun.messages) ? selectedRun.messages : [];
+            const lastAssistantMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+            const assistantText = lastAssistantMessage && String(lastAssistantMessage.role || '') === 'assistant'
+              ? String(lastAssistantMessage.text || '').trim()
+              : '';
+            const normalizedResultText = String(run.messageText || '').trim();
+            if (resultSection) {
+              resultSection.style.display = assistantText && normalizedResultText && assistantText === normalizedResultText ? 'none' : '';
+            }
           }
         } else if (!opts.skipHistory) {
           addRecentRun({
