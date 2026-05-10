@@ -96,6 +96,15 @@
       function handleAgentFinishedMessage(message) {
         setRunningState(false);
         const run = normalizeRunResult(message || {});
+        if (String(run.reasonCode || '').toUpperCase() === 'CLARIFICATION_REQUIRED') {
+          const examples = [
+            'Пример: Исправь ошибку сборки в Core/TaskIntentScorer.cs и запусти тесты.',
+            'Пример: Добавь проверку пути backendProjectPath в extension перед run.',
+            'Пример: Обнови package.json в vscode-extension, добавь поле repository.'
+          ];
+          const hint = 'Нужно уточнить задачу. ' + examples.join(' ');
+          run.messageText = (String(run.messageText || '').trim() + '\\n\\n' + hint).trim();
+        }
         applyNormalizedRunResult(run);
       }`;
 
