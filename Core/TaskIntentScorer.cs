@@ -17,7 +17,9 @@ namespace LocalCursorAgent.Core
 
         private static readonly string[] ChatMarkers = new[]
         {
-            "hi", "hello", "hey", "thanks", "thank you", "привет", "спасибо", "ты тут", "тут", "а щас", "щас", "ок"
+            "hi", "hello", "hey", "thanks", "thank you",
+            "привет", "спасибо", "ты тут", "тут", "а щас", "щас", "ок",
+            "что ты умеешь", "объясни", "опиши проект", "что делает проект"
         };
 
         public static TaskIntentKind Classify(string? task)

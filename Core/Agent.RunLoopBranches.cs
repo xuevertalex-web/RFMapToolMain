@@ -9,6 +9,48 @@ namespace LocalCursorAgent.Core
     {
         private bool TryRejectTaskBeforeExecution(string task, ExecutionTracer tracer, out string finalResult)
         {
+            var intent = TaskIntentScorer.Classify(task);
+            var analysisOnlyTask = TaskPrecheckHeuristics.IsAnalysisOnlyTask(task);
+            if (!analysisOnlyTask && intent == TaskIntentKind.Chat)
+            {
+                var message = BuildChatResponse(task);
+                tracer.MarkStopPoint("Agent", "SUCCESS_NO_TOOL_CALLS", "Conversational response without execution", new[] { "Indexing", "ModelRequest", "PatchApply", "BuildVerification" });
+                finalResult = FinalizeRunResult(
+                    true,
+                    message,
+                    "Conversational response generated",
+                    "SUCCESS_NO_TOOL_CALLS",
+                    Array.Empty<string>(),
+                    Array.Empty<ChangedHint>(),
+                    Array.Empty<ChangedRange>(),
+                    Array.Empty<ChangedKind>(),
+                    false,
+                    runStartedUtc: DateTime.UtcNow,
+                    workspace: _sessionContext?.ActiveWorkspaceRoot,
+                    payloadFinalStatus: "success");
+                return true;
+            }
+
+            if (!analysisOnlyTask && intent == TaskIntentKind.Clarify)
+            {
+                var message = "Уточни, что именно нужно сделать: создать файл, изменить код или проверить ошибку? Напиши цель и файл/путь, если он известен.";
+                tracer.MarkStopPoint("Agent", "CLARIFICATION_REQUIRED", message, new[] { "Indexing", "ModelRequest", "PatchApply", "BuildVerification" });
+                finalResult = FinalizeRunResult(
+                    false,
+                    message,
+                    "Clarification required before execution",
+                    "CLARIFICATION_REQUIRED",
+                    Array.Empty<string>(),
+                    Array.Empty<ChangedHint>(),
+                    Array.Empty<ChangedRange>(),
+                    Array.Empty<ChangedKind>(),
+                    false,
+                    runStartedUtc: DateTime.UtcNow,
+                    workspace: _sessionContext?.ActiveWorkspaceRoot,
+                    payloadFinalStatus: "clarification-required");
+                return true;
+            }
+
             if (TaskPrecheckHeuristics.IsSuspiciousInjectedToolTask(task))
             {
                 var message = "Task contains raw tool syntax. Provide a normal natural-language task instead.";
@@ -27,6 +69,16 @@ namespace LocalCursorAgent.Core
 
             finalResult = string.Empty;
             return false;
+        }
+
+        private static string BuildChatResponse(string task)
+        {
+            var value = (task ?? string.Empty).Trim().ToLowerInvariant();
+            if (value.Contains("что ты умеешь") || value.Contains("что умеешь"))
+                return "Я могу: объяснить проект и код, предложить план, а по явной задаче — изменить файлы и проверить результат.";
+            if (value.Contains("объясни") || value.Contains("опиши проект"))
+                return "Это локальный coding-агент: он анализирует проект, выполняет явные инженерные задачи и возвращает structured результат с проверками.";
+            return "Я на связи. Сформулируй задачу: что создать, изменить или проверить.";
         }
 
         private bool TryHandleHardModelFailure(

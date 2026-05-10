@@ -41,6 +41,8 @@ await RunBroadIntentNoToolCallsRequiresActionRegression();
 await RunTechnicalNoToolCallsRequiresActionRegression();
 await RunConversationalTask_MutationToolCallBlockedRegression();
 await RunAmbiguousGibberishTask_RequiresClarificationRegression();
+await RunChatIntentConversationalResponsesRegression();
+await RunClarifyIntentRequiresClarificationRegression();
 await RunHostDiagnosticsCommandApprovalRegression();
 await RunProcessExecutionHardeningRegression();
 await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
@@ -1776,10 +1778,116 @@ static async Task RunAmbiguousGibberishTask_RequiresClarificationRegression()
     finally { Console.SetOut(oldOut); }
 
     var structured = ExtractStructuredPayload(capture.ToString());
-    AssertTrue(structured.GetProperty("ok").GetBoolean(), "Expected ambiguous gibberish to stay in safe chat/no-tool flow.");
-    AssertTrue(string.Equals(structured.GetProperty("reasonCode").GetString(), "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase), "Expected SUCCESS_NO_TOOL_CALLS.");
+    AssertTrue(!structured.GetProperty("ok").GetBoolean(), "Expected ambiguous gibberish to require clarification.");
+    AssertTrue(string.Equals(structured.GetProperty("reasonCode").GetString(), "CLARIFICATION_REQUIRED", StringComparison.OrdinalIgnoreCase), "Expected CLARIFICATION_REQUIRED.");
     AssertTrue(structured.GetProperty("changedFiles").GetArrayLength() == 0, "Expected no changed files.");
     Console.WriteLine("PASS AmbiguousGibberishTask_RequiresClarification");
+}
+
+static async Task RunChatIntentConversationalResponsesRegression()
+{
+    foreach (var input in new[] { "привет", "что ты умеешь?", "объясни что делает проект" })
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+        var workspaceRoot = Path.Combine(tempRoot, "workspace");
+        var runtimeRoot = Path.Combine(tempRoot, "runtime");
+        Directory.CreateDirectory(workspaceRoot);
+        Directory.CreateDirectory(runtimeRoot);
+
+        var tracer = new ExecutionTracer(runtimeRoot);
+        tracer.StartRun(input, input, workspaceRoot, runtimeRoot, AgentAccessMode.WorkspaceWrite.ToString(), "FakeNoToolAnalysisClient", "fake-chat-model");
+        var session = new AgentSessionContext
+        {
+            SessionId = Guid.NewGuid().ToString("N"),
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+        };
+
+        var agent = CreateSimpleAgentForIntentTests(workspaceRoot, runtimeRoot, session, tracer, new FakeNoToolAnalysisClient());
+        var oldOut = Console.Out;
+        var capture = new StringWriter();
+        Console.SetOut(capture);
+        try { _ = await agent.RunTask(input); } finally { Console.SetOut(oldOut); }
+
+        var structured = ExtractStructuredPayload(capture.ToString());
+        AssertTrue(structured.GetProperty("ok").GetBoolean(), "Expected chat intent success.");
+        var reasonCode = structured.GetProperty("reasonCode").GetString() ?? string.Empty;
+        AssertTrue(
+            string.Equals(reasonCode, "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(reasonCode, "SUCCESS_ANALYSIS_RESPONSE", StringComparison.OrdinalIgnoreCase),
+            "Expected safe no-tool chat/analysis outcome for chat intent.");
+        AssertTrue(structured.GetProperty("changedFiles").GetArrayLength() == 0, "Expected no file changes for chat.");
+        AssertTrue(!string.IsNullOrWhiteSpace(structured.GetProperty("message").GetString()), "Expected assistant response message.");
+    }
+
+    Console.WriteLine("PASS ChatIntent_ConversationalResponses");
+}
+
+static async Task RunClarifyIntentRequiresClarificationRegression()
+{
+    foreach (var input in new[] { "сделай нормально", "оно не работает", "абракадабра" })
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+        var workspaceRoot = Path.Combine(tempRoot, "workspace");
+        var runtimeRoot = Path.Combine(tempRoot, "runtime");
+        Directory.CreateDirectory(workspaceRoot);
+        Directory.CreateDirectory(runtimeRoot);
+
+        var tracer = new ExecutionTracer(runtimeRoot);
+        tracer.StartRun(input, input, workspaceRoot, runtimeRoot, AgentAccessMode.WorkspaceWrite.ToString(), "FakeNoToolAnalysisClient", "fake-clarify-model");
+        var session = new AgentSessionContext
+        {
+            SessionId = Guid.NewGuid().ToString("N"),
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+        };
+
+        var agent = CreateSimpleAgentForIntentTests(workspaceRoot, runtimeRoot, session, tracer, new FakeNoToolAnalysisClient());
+        var oldOut = Console.Out;
+        var capture = new StringWriter();
+        Console.SetOut(capture);
+        try { _ = await agent.RunTask(input); } finally { Console.SetOut(oldOut); }
+
+        var structured = ExtractStructuredPayload(capture.ToString());
+        AssertTrue(!structured.GetProperty("ok").GetBoolean(), "Expected clarify intent to require clarification.");
+        AssertTrue(string.Equals(structured.GetProperty("reasonCode").GetString(), "CLARIFICATION_REQUIRED", StringComparison.OrdinalIgnoreCase), "Expected CLARIFICATION_REQUIRED.");
+        AssertTrue(structured.GetProperty("changedFiles").GetArrayLength() == 0, "Expected no file changes for clarify.");
+        var message = structured.GetProperty("message").GetString() ?? string.Empty;
+        AssertTrue(message.Contains("Уточни", StringComparison.OrdinalIgnoreCase), "Expected clarification message.");
+    }
+
+    Console.WriteLine("PASS ClarifyIntent_RequiresClarification");
+}
+
+static Agent CreateSimpleAgentForIntentTests(string workspaceRoot, string runtimeRoot, AgentSessionContext session, ExecutionTracer tracer, ILLMClient llmClient)
+{
+    var toolRegistry = new ToolRegistry();
+    var memory = new MemoryStore();
+    var permissionGuard = new PermissionGuard();
+    var safeProcessRunner = new SafeProcessRunner(session, permissionGuard, tracer);
+    var buildVerifier = new BuildVerifier(safeProcessRunner, tracer);
+    var sandboxManager = new SandboxManager(workspaceRoot, runtimeRoot);
+    var embeddingService = new EmbeddingService(disabled: true);
+    var vectorStore = new VectorStore();
+    var fileStateManager = new FileStateManager();
+    var projectIndexer = new ProjectIndexer(workspaceRoot, embeddingService, vectorStore, new AgentConfig(workspaceRoot), fileStateManager);
+    var contextBuilder = new ContextBuilder(workspaceRoot, vectorStore, fileStateManager, new ProjectSymbolDirectory(), tracer);
+
+    return new Agent(
+        llmClient,
+        toolRegistry,
+        memory,
+        buildVerifier,
+        sandboxManager,
+        projectIndexer,
+        contextBuilder,
+        fileStateManager,
+        session,
+        workspaceResolution: null);
 }
 
 static async Task RunHostDiagnosticsCommandApprovalRegression()
