@@ -44,6 +44,44 @@ namespace LocalCursorAgent.Core
             }
 
             var mutationCall = toolCalls.FirstOrDefault(ToolCallMutationHeuristics.IsMutationLikeToolCall);
+            var mutationIntentTask = MutationIntentDetector.IsMutationIntentTask(task) || requestedNewFile != null;
+            if (mutationCall != null && !mutationIntentTask)
+            {
+                tracer.LogActionEvent("MutationToolCallRejected", "Agent", ExecutionTracer.ActionLogLevel.Warning, "blocked", "NON_ACTIONABLE_TASK", new Dictionary<string, object?>
+                {
+                    { "task", task },
+                    { "tool", mutationCall.ToolName },
+                    { "reason", "Task is conversational or non-actionable; mutation tool call ignored." }
+                });
+
+                var noToolMessage = "Понял. Я на связи и готов помочь. Сформулируй конкретное действие (что создать/изменить/проверить), и я выполню его.";
+                return new ToolingPrecheckResult(
+                    new IterationToolingResult
+                    {
+                        NextResponse = currentResponse,
+                        ShouldContinue = false,
+                        FinalResult = FinalizeRunResult(
+                            true,
+                            noToolMessage,
+                            "Agent completed without tool calls",
+                            "SUCCESS_NO_TOOL_CALLS",
+                            Array.Empty<string>(),
+                            Array.Empty<ChangedHint>(),
+                            Array.Empty<ChangedRange>(),
+                            Array.Empty<ChangedKind>(),
+                            false),
+                        PatchStarted = false,
+                        BuildStarted = false,
+                        LastDeniedToolResult = lastDeniedToolResult,
+                        LastBuildErrorSignature = lastBuildErrorSignature,
+                        LastBuildFailureCode = lastBuildFailureCode,
+                        LastSuccessfulStep = "ToolCallsParsed",
+                        LastKnownAction = "Rejected mutation tool call for non-actionable task"
+                    },
+                    toolCalls,
+                    mutationCall);
+            }
+
             if (mutationCall != null &&
                 TryValidateMutationToolCalls(task, toolCalls, mutationCall, targetResolution, tracer, out var gateFailureResult))
             {
