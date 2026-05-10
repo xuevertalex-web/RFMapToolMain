@@ -1,4 +1,23 @@
 const vscode = require('vscode');
+function isAnalysisOnlyTask(task) {
+  const value = String(task || '').toLowerCase();
+  return value.includes('analyze') ||
+    value.includes('analyse') ||
+    value.includes('summarize') ||
+    value.includes('summarise') ||
+    value.includes('explain') ||
+    value.includes('review') ||
+    value.includes('diagnose') ||
+    value.includes('опиши') ||
+    value.includes('описать') ||
+    value.includes('объясни') ||
+    value.includes('объяснить') ||
+    value.includes('обзор') ||
+    value.includes('структуру') ||
+    value.includes('структура') ||
+    value.includes('ключевые файлы') ||
+    value.includes('расскажи');
+}
 
 function createExtensionCommandHandlers(options) {
   const output = options.output;
@@ -13,7 +32,7 @@ function createExtensionCommandHandlers(options) {
       return 'Configured target workspace path not found';
     }
     if (reason === 'backend_workspace_blocked') {
-      return 'Configured workspace is blocked (backend workspace). Enable allowBackendWorkspace to permit this.';
+      return 'Backend workspace is blocked for execute/mutation tasks. Options: 1) Run as analysis-only, 2) Allow backend workspace for this run, 3) Open/choose target workspace.';
     }
     if (reason === 'not_found') {
       return 'Workspace not found. Set localCursorAgent.targetWorkspacePath in settings for empty VS Code windows.';
@@ -23,14 +42,6 @@ function createExtensionCommandHandlers(options) {
 
   return {
     async handleRunTask() {
-      const workspaceState = resolveWorkspaceRoot({
-        initializeIfMissing: true
-      });
-      if (!workspaceState.workspaceRoot) {
-        vscode.window.showErrorMessage(workspaceErrorText(workspaceState));
-        return;
-      }
-
       const task = await vscode.window.showInputBox({
         prompt: 'Describe the task for the local agent',
         placeHolder: 'Add validation to AuthService'
@@ -38,6 +49,14 @@ function createExtensionCommandHandlers(options) {
 
       if (!task || !task.trim()) {
         vscode.window.showErrorMessage('Task is empty');
+        return;
+      }
+      const workspaceState = resolveWorkspaceRoot({
+        initializeIfMissing: true,
+        analysisOnlyTask: isAnalysisOnlyTask(task.trim())
+      });
+      if (!workspaceState.workspaceRoot) {
+        vscode.window.showErrorMessage(workspaceErrorText(workspaceState));
         return;
       }
 

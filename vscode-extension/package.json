@@ -3,8 +3,12 @@
     "displayName":  "Local Cursor Agent",
     "description":  "A local VS Code agent UI that runs the .NET backend.",
     "icon":  "assets/icon.png",
-    "version": "0.1.82",
+    "version": "0.1.87",
     "publisher":  "local",
+    "repository": {
+                    "type": "git",
+                    "url": "https://github.com/local/local-cursor-agent.git"
+                  },
     "engines":  {
                     "vscode":  "^1.85.0"
                 },
@@ -68,7 +72,7 @@
                     },
     "scripts":  {
                     "compile":  "node -e \"console.log(\u0027No build step required\u0027)\"",
-                    "test":  "node agentRunner.test.js \u0026\u0026 node webviewRendering.test.js"
+                    "test":  "node agentRunner.test.js \u0026\u0026 node webviewRendering.test.js \u0026\u0026 node workspaceResolver.test.js"
                 },
     "devDependencies":  {
 

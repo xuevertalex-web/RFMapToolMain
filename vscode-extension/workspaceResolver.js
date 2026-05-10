@@ -7,6 +7,7 @@ function resolveWorkspaceRoot(options = {}) {
   const configuredWorkspaceRoot = String(options.configuredWorkspaceRoot || '').trim();
   const backendProjectPath = String(options.backendProjectPath || '').trim();
   const allowBackendWorkspace = options.allowBackendWorkspace === true;
+  const analysisOnlyTask = options.analysisOnlyTask === true;
 
   if (configuredWorkspaceRoot) {
     if (!fs.existsSync(configuredWorkspaceRoot) || !fs.statSync(configuredWorkspaceRoot).isDirectory()) {
@@ -20,7 +21,8 @@ function resolveWorkspaceRoot(options = {}) {
     const guardedConfigured = enforceBackendWorkspaceGuard(
       { workspaceRoot: configuredWorkspaceRoot, reason: 'configured', targetWorkspacePath: configuredWorkspaceRoot },
       backendProjectPath,
-      allowBackendWorkspace
+      allowBackendWorkspace,
+      analysisOnlyTask
     );
     if (!guardedConfigured.workspaceRoot) {
       return guardedConfigured;
@@ -40,7 +42,8 @@ function resolveWorkspaceRoot(options = {}) {
     return enforceBackendWorkspaceGuard(
       { workspaceRoot: folders[0].uri.fsPath, reason: 'single' },
       backendProjectPath,
-      allowBackendWorkspace
+      allowBackendWorkspace,
+      analysisOnlyTask
     );
   }
 
@@ -52,7 +55,8 @@ function resolveWorkspaceRoot(options = {}) {
       return enforceBackendWorkspaceGuard(
         { workspaceRoot: workspaceFolder.uri.fsPath, reason: 'active_file' },
         backendProjectPath,
-        allowBackendWorkspace
+        allowBackendWorkspace,
+        analysisOnlyTask
       );
     }
   }
@@ -159,8 +163,8 @@ function applyProjectTemplate(projectRoot, taskHint) {
   return { projectTemplateApplied: false, templateType: 'none' };
 }
 
-function enforceBackendWorkspaceGuard(state, backendProjectPath, allowBackendWorkspace) {
-  if (allowBackendWorkspace || !state.workspaceRoot || !backendProjectPath) {
+function enforceBackendWorkspaceGuard(state, backendProjectPath, allowBackendWorkspace, analysisOnlyTask) {
+  if (allowBackendWorkspace || analysisOnlyTask || !state.workspaceRoot || !backendProjectPath) {
     return state;
   }
 

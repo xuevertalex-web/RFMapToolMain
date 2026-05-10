@@ -1,4 +1,23 @@
 const vscode = require('vscode');
+function isAnalysisOnlyTask(task) {
+  const value = String(task || '').toLowerCase();
+  return value.includes('analyze') ||
+    value.includes('analyse') ||
+    value.includes('summarize') ||
+    value.includes('summarise') ||
+    value.includes('explain') ||
+    value.includes('review') ||
+    value.includes('diagnose') ||
+    value.includes('опиши') ||
+    value.includes('описать') ||
+    value.includes('объясни') ||
+    value.includes('объяснить') ||
+    value.includes('обзор') ||
+    value.includes('структуру') ||
+    value.includes('структура') ||
+    value.includes('ключевые файлы') ||
+    value.includes('расскажи');
+}
 
 function createPanelRunController(options) {
   const panel = options.panel;
@@ -15,7 +34,7 @@ function createPanelRunController(options) {
       return 'Configured target workspace path not found';
     }
     if (reason === 'backend_workspace_blocked') {
-      return 'Configured workspace is blocked (backend workspace). Enable allowBackendWorkspace to permit this.';
+      return 'Backend workspace is blocked for execute/mutation tasks. Options: 1) Run as analysis-only, 2) Allow backend workspace for this run, 3) Open/choose target workspace.';
     }
     if (reason === 'not_found') {
       return 'Workspace not found. Set localCursorAgent.targetWorkspacePath in settings for empty VS Code windows.';
@@ -38,7 +57,8 @@ function createPanelRunController(options) {
     try {
       const workspaceState = resolveWorkspaceRoot({
         initializeIfMissing: true,
-        projectNameHint: task
+        projectNameHint: task,
+        analysisOnlyTask: isAnalysisOnlyTask(task)
       });
       if (!workspaceState.workspaceRoot) {
         postWorkspaceFailure(workspaceErrorText(workspaceState), workspaceState);
