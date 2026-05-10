@@ -8,6 +8,7 @@ bin/ export-ignore
 obj/ export-ignore
 TestResults/ export-ignore
 coverage/ export-ignore
+release/ export-ignore
 
 *.log export-ignore
 *.tmp export-ignore

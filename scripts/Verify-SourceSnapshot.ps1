@@ -23,6 +23,7 @@ try {
         'vscode-extension/.vscode/',
         'TestResults/',
         'coverage/',
+        'release/',
         'vscode-extension/*.vsix',
         '*.vsix',
         'localcursoragent.secrets.json',
