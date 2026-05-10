@@ -1,19 +1,29 @@
-# Local Cursor Agent VS Code Extension
+﻿# Local Cursor Agent VS Code Extension
 
-Minimal UI-only extension.
+VS Code frontend for LocalCursorAgent backend.
 
 ## Run
 
-1. Open the `vscode-extension` folder in VS Code.
-2. Press `F5`.
-3. Run command: `Local Cursor Agent: Open Panel`.
+1. From repository root, build/install extension:
+   - `.\scripts\devtools\Update-VSCodeExtension.cmd`
+2. In VS Code run `Developer: Reload Window`.
+3. Open `LOCAL AGENT` view.
 
 ## What it does
 
-- workspace picker
-- task textbox
-- send button
-- logs
-- result area
+- Sends tasks from webview to backend agent runner.
+- Resolves workspace mode:
+  - existing workspace (default path)
+  - empty/no workspace bootstrap via `targetWorkspacePath`.
+- Shows structured run result payload:
+  - status/summary/failure/timeline
+  - changed files
+  - diagnostics/build state
+  - workspace initialization fields
+  - approval/context/indexing/retry diagnostics when present.
 
-Backend agent connection is not wired yet.
+## Notes
+
+- Backend connection is wired and active.
+- Frontend tests:
+  - `cd vscode-extension && npm test`
