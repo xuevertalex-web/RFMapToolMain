@@ -43,7 +43,6 @@ namespace LocalCursorAgent.Context
             }
 
             var selectedZones = zones
-                .Where(z => snapshot.Zones.Contains(z, StringComparer.OrdinalIgnoreCase))
                 .OrderBy(z => z, StringComparer.OrdinalIgnoreCase)
                 .ToList();
             var selectedRoles = roles.OrderBy(r => r, StringComparer.OrdinalIgnoreCase).ToList();

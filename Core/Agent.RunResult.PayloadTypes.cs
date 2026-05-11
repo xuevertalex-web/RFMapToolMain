@@ -33,6 +33,9 @@ namespace LocalCursorAgent.Core
             [JsonPropertyName("summary")]
             public string Summary { get; init; } = string.Empty;
 
+            [JsonPropertyName("planningSummary")]
+            public string PlanningSummary { get; init; } = string.Empty;
+
             [JsonPropertyName("changedFiles")]
             public string[] ChangedFiles { get; init; } = Array.Empty<string>();
 

@@ -88,6 +88,10 @@ RunProjectMap_EntrypointsDetected_ByNameRules();
 RunProjectMap_UnknownPaths_FallbackStable();
 RunProjectRetrievalPlanner_ZoneRoleSelection();
 RunProjectRetrievalPlanner_UnknownFallback();
+await RunPlanningSummary_ContextAnalysisRegression();
+await RunPlanningSummary_UiAnalysisRegression();
+await RunPlanningSummary_UnknownFallbackRegression();
+await RunPlanningSummary_ChatNoNoiseRegression();
 await RunContextSelection_UsesProjectMapHints_WithoutBreakingBudget();
 await RunMtimeAwareIndexingCacheRegression();
 
@@ -3260,6 +3264,71 @@ static void RunProjectRetrievalPlanner_UnknownFallback()
     AssertTrue(plan.FallbackUsed, "Unknown task should fallback.");
     AssertTrue(plan.Confidence == 0.0, "Unknown task confidence should be 0.");
     Console.WriteLine("PASS ProjectRetrievalPlanner_UnknownFallback");
+}
+
+static async Task RunPlanningSummary_ContextAnalysisRegression()
+{
+    var structured = await RunIntentMatrixTask("сделай code review context indexing retrieval, ничего не меняй", new FakeNoToolAnalysisClient(), registerFileTool: true);
+    var reason = structured.GetProperty("reasonCode").GetString() ?? string.Empty;
+    AssertTrue(!string.Equals(reason, "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase), "Expected non-chat route for analysis request.");
+    var planningSummary = structured.GetProperty("planningSummary").GetString() ?? string.Empty;
+    AssertTrue(!string.IsNullOrWhiteSpace(planningSummary), "Expected non-empty planningSummary payload for context analysis.");
+    AssertTrue(planningSummary.Contains("Context", StringComparison.OrdinalIgnoreCase), "Expected Context zone in planning summary.");
+    Console.WriteLine("PASS PlanningSummary_ContextAnalysis");
+}
+
+static async Task RunPlanningSummary_UiAnalysisRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    Directory.CreateDirectory(Path.Combine(workspaceRoot, "vscode-extension"));
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "vscode-extension", "webviewClient.js"), "export const x = 1;");
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "Program.cs"), "public static class Program { public static void Main(){} }");
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    tracer.StartRun("сделай code review extension webview panel status, без правок", "сделай code review extension webview panel status, без правок", workspaceRoot, runtimeRoot, AgentAccessMode.WorkspaceWrite.ToString(), "FakeNoToolAnalysisClient", "fake-ui-analysis-model");
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+    var agent = CreateSimpleAgentForIntentTests(workspaceRoot, runtimeRoot, session, tracer, new FakeNoToolAnalysisClient());
+    var oldOut = Console.Out;
+    var capture = new StringWriter();
+    Console.SetOut(capture);
+    try { _ = await agent.RunTask("сделай code review extension webview panel status, без правок"); } finally { Console.SetOut(oldOut); }
+    var structured = ExtractStructuredPayload(capture.ToString());
+
+    var planningSummary = structured.GetProperty("planningSummary").GetString() ?? string.Empty;
+    AssertTrue(planningSummary.Contains("vscode-extension", StringComparison.OrdinalIgnoreCase), "Expected planningSummary payload to include vscode-extension.");
+    Console.WriteLine("PASS PlanningSummary_UiAnalysis");
+}
+
+static async Task RunPlanningSummary_UnknownFallbackRegression()
+{
+    var structured = await RunIntentMatrixTask("проанализируй qwerty zyxwvu без правок", new FakeNoToolAnalysisClient(), registerFileTool: true);
+    var planningSummary = structured.GetProperty("planningSummary").GetString() ?? string.Empty;
+    if (!string.IsNullOrWhiteSpace(planningSummary))
+    {
+        AssertTrue(planningSummary.Contains("обычный context selection", StringComparison.OrdinalIgnoreCase), "Expected fallback planning summary text.");
+    }
+    Console.WriteLine("PASS PlanningSummary_UnknownFallback");
+}
+
+static async Task RunPlanningSummary_ChatNoNoiseRegression()
+{
+    var structured = await RunIntentMatrixTask("привет", new FakeNoToolAnalysisClient(), registerFileTool: true);
+    var planningSummary = structured.GetProperty("planningSummary").GetString() ?? string.Empty;
+    AssertTrue(string.IsNullOrWhiteSpace(planningSummary), "Expected no planning summary for simple chat.");
+    var message = structured.GetProperty("message").GetString() ?? string.Empty;
+    AssertTrue(!message.StartsWith("План:", StringComparison.OrdinalIgnoreCase), "Expected no planning prefix for chat message.");
+    Console.WriteLine("PASS PlanningSummary_ChatNoNoise");
 }
 
 static async Task RunContextSelection_UsesProjectMapHints_WithoutBreakingBudget()
