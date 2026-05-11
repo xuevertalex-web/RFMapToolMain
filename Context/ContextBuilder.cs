@@ -146,8 +146,11 @@ namespace LocalCursorAgent.Context
             }
 
             var candidates = resolution.Candidates;
+            var projectMap = ProjectMapBuilder.Build(_projectPath, BuildCandidatePool(semanticMatches, symbolMatches));
+            var roleHints = projectMap.Files.ToDictionary(x => x.Path, x => x, StringComparer.OrdinalIgnoreCase);
+
             var ranked = candidates
-                .Select(path => CreateFileScore(path, query, semanticMatches, symbolMatches, targetToken, strategy))
+                .Select(path => CreateFileScore(path, query, semanticMatches, symbolMatches, targetToken, strategy, roleHints))
                 .OrderByDescending(x => x.MatchPriority)
                 .ThenByDescending(x => x.SortScore)
                 .ThenBy(x => x.FilePath, StringComparer.OrdinalIgnoreCase)
@@ -440,7 +443,7 @@ namespace LocalCursorAgent.Context
                 .ToList();
         }
 
-        private RankedFileScore CreateFileScore(string filePath, string query, List<string> semanticMatches, List<string> symbolMatches, string targetToken, ContextSelectionStrategy strategy)
+        private RankedFileScore CreateFileScore(string filePath, string query, List<string> semanticMatches, List<string> symbolMatches, string targetToken, ContextSelectionStrategy strategy, Dictionary<string, FileMapEntry> roleHints)
         {
             var semanticPosition = semanticMatches.FindIndex(x => x.Equals(filePath, StringComparison.OrdinalIgnoreCase));
             var semanticScore = semanticPosition >= 0 ? 1.0 / (semanticPosition + 1) : 0.0;
@@ -452,7 +455,8 @@ namespace LocalCursorAgent.Context
             var recencyScore = ConvertRecencyToScore(_fileStateManager.GetLastActivityUtc(filePath));
             var matchPriority = GetTargetMatchPriority(filePath, targetToken);
             var weights = GetStrategyWeights(strategy);
-            var sortScore = semanticScore * weights.Semantic + symbolScore * weights.Symbol + stateBoost * weights.State + recencyScore * weights.Recency;
+            var roleBoost = GetProjectMapBoost(filePath, query, roleHints);
+            var sortScore = semanticScore * weights.Semantic + symbolScore * weights.Symbol + stateBoost * weights.State + recencyScore * weights.Recency + roleBoost;
 
             return new RankedFileScore
             {
@@ -465,6 +469,37 @@ namespace LocalCursorAgent.Context
                 MatchPriority = matchPriority,
                 SortScore = sortScore + matchPriority * 100.0
             };
+        }
+
+        private static double GetProjectMapBoost(string filePath, string query, Dictionary<string, FileMapEntry> roleHints)
+        {
+            if (!roleHints.TryGetValue(filePath, out var mapEntry))
+                return 0.0;
+
+            var text = query ?? string.Empty;
+            var boost = 0.0;
+            if (mapEntry.IsEntrypoint && (text.Contains("start", StringComparison.OrdinalIgnoreCase) ||
+                                          text.Contains("entry", StringComparison.OrdinalIgnoreCase) ||
+                                          text.Contains("bootstrap", StringComparison.OrdinalIgnoreCase)))
+                boost += 0.04;
+
+            if (mapEntry.Role.Equals("test", StringComparison.OrdinalIgnoreCase) &&
+                (text.Contains("test", StringComparison.OrdinalIgnoreCase) || text.Contains("regression", StringComparison.OrdinalIgnoreCase)))
+                boost += 0.20;
+
+            if (mapEntry.Role.Equals("security", StringComparison.OrdinalIgnoreCase) &&
+                text.Contains("security", StringComparison.OrdinalIgnoreCase))
+                boost += 0.04;
+
+            if (mapEntry.Role.Equals("context", StringComparison.OrdinalIgnoreCase) &&
+                text.Contains("context", StringComparison.OrdinalIgnoreCase))
+                boost += 0.03;
+
+            if (mapEntry.Role.Equals("indexing", StringComparison.OrdinalIgnoreCase) &&
+                text.Contains("index", StringComparison.OrdinalIgnoreCase))
+                boost += 0.03;
+
+            return Math.Min(0.20, boost);
         }
 
         private static int GetTargetMatchPriority(string filePath, string targetToken)

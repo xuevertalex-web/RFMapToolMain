@@ -83,6 +83,10 @@ await RunIsolatedExecutionWorkspaceRoutingRegression();
 await RunContextSelectionPrecisionRegression();
 await RunContextSelectionAdaptiveBudgetFitRegression();
 await RunContextSelectionEntryPointAwarenessRegression();
+RunProjectMap_ClassifiesZonesAndRoles_Deterministically();
+RunProjectMap_EntrypointsDetected_ByNameRules();
+RunProjectMap_UnknownPaths_FallbackStable();
+await RunContextSelection_UsesProjectMapHints_WithoutBreakingBudget();
 await RunMtimeAwareIndexingCacheRegression();
 
 static async Task RunAnalysisFallbackTimeoutRegression()
@@ -3142,6 +3146,98 @@ static async Task RunMtimeAwareIndexingCacheRegression()
     AssertTrue(symbolsB2.Contains("RunB", StringComparer.Ordinal), "Expected unchanged file symbols to remain available from cache.");
 
     Console.WriteLine("PASS MtimeAwareIndexingCache");
+}
+
+static void RunProjectMap_ClassifiesZonesAndRoles_Deterministically()
+{
+    var files = new[]
+    {
+        @"Core/Agent.cs",
+        @"Context/ContextBuilder.cs",
+        @"Indexing/ProjectIndexer.cs",
+        @"Security/PermissionGuard.cs",
+        @"Execution/BuildVerifier.cs",
+        @"Tools/FileTool.cs",
+        @"Diagnostics/ExecutionTracer.cs",
+        @"Memory/MemoryStore.cs",
+        @"LLM/OllamaClient.cs",
+        @"SafetyTests/Program.cs",
+        @"vscode-extension/webviewClient.js",
+        @"scripts/devtools/Doctor.cmd",
+        @"desktop-app/main.js",
+        @"README.md",
+        @"Configuration/appsettings.json"
+    };
+
+    var map1 = ProjectMapBuilder.Build("repo", files);
+    var map2 = ProjectMapBuilder.Build("repo", files.Reverse());
+
+    AssertTrue(map1.FileCount == files.Length, "Expected all files to be classified.");
+    AssertTrue(map1.Files.Select(x => x.Path).SequenceEqual(map2.Files.Select(x => x.Path), StringComparer.OrdinalIgnoreCase), "Expected deterministic file ordering.");
+    AssertTrue(map1.Files.Any(x => x.Zone == "Core"), "Expected Core zone.");
+    AssertTrue(map1.Files.Any(x => x.Zone == "vscode-extension"), "Expected vscode-extension zone.");
+    AssertTrue(map1.Files.Any(x => x.Role == "security"), "Expected security role.");
+    AssertTrue(map1.Files.Any(x => x.Role == "devtool"), "Expected devtool role.");
+    Console.WriteLine("PASS ProjectMap_ClassifiesZonesAndRoles_Deterministically");
+}
+
+static void RunProjectMap_EntrypointsDetected_ByNameRules()
+{
+    var files = new[]
+    {
+        "Program.cs",
+        "LocalCursorAgent.csproj",
+        "vscode-extension/extension.js",
+        "vscode-extension/package.json",
+        "desktop-app/main.js",
+        "Core/Agent.cs"
+    };
+    var map = ProjectMapBuilder.Build("repo", files);
+    AssertTrue(map.Files.First(x => x.Path.Equals("Program.cs", StringComparison.OrdinalIgnoreCase)).IsEntrypoint, "Program.cs should be entrypoint.");
+    AssertTrue(map.Files.First(x => x.Path.Equals("LocalCursorAgent.csproj", StringComparison.OrdinalIgnoreCase)).IsEntrypoint, ".csproj should be entrypoint.");
+    AssertTrue(map.Files.First(x => x.Path.Equals("vscode-extension/package.json", StringComparison.OrdinalIgnoreCase)).IsEntrypoint, "package.json should be entrypoint.");
+    AssertTrue(!map.Files.First(x => x.Path.Equals("Core/Agent.cs", StringComparison.OrdinalIgnoreCase)).IsEntrypoint, "Core/Agent.cs should not be entrypoint.");
+    Console.WriteLine("PASS ProjectMap_EntrypointsDetected_ByNameRules");
+}
+
+static void RunProjectMap_UnknownPaths_FallbackStable()
+{
+    var files = new[]
+    {
+        "weird/unknown.xyz",
+        "misc/notes.txt"
+    };
+    var map = ProjectMapBuilder.Build("repo", files);
+    AssertTrue(map.Files.All(x => x.Zone == "docs/config"), "Unknown zone should fallback to docs/config.");
+    AssertTrue(map.Files.All(x => x.Role == "config"), "Unknown role should fallback to config.");
+    Console.WriteLine("PASS ProjectMap_UnknownPaths_FallbackStable");
+}
+
+static async Task RunContextSelection_UsesProjectMapHints_WithoutBreakingBudget()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    Directory.CreateDirectory(Path.Combine(workspaceRoot, "Core"));
+    Directory.CreateDirectory(Path.Combine(workspaceRoot, "SafetyTests"));
+
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "Core", "Agent.cs"), new string('a', 10000));
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "SafetyTests", "AgentFlow.test.cs"), new string('b', 9000));
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "Core", "Noise.cs"), new string('c', 14000));
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    var builder = new ContextBuilder(workspaceRoot, new VectorStore(), new FileStateManager(), new ProjectSymbolDirectory(), tracer);
+    var semantic = new List<string> { "Core/Agent.cs", "Core/Noise.cs", "SafetyTests/AgentFlow.test.cs" };
+    var symbols = new List<string> { "Core/Agent.cs" };
+    var map = ProjectMapBuilder.Build(workspaceRoot, semantic);
+
+    var info = builder.BuildContext("add regression test for agent", semantic, symbols, 6);
+    AssertTrue(info.TotalLength <= 30000, "Budget should remain bounded.");
+    AssertTrue(info.SelectedFiles.Count > 0, "Expected non-empty context.");
+    AssertTrue(map.Files.Any(x => x.Path.Equals("SafetyTests/AgentFlow.test.cs", StringComparison.OrdinalIgnoreCase) && x.Role == "test"), "Expected ProjectMap test role classification.");
+    Console.WriteLine("PASS ContextSelection_UsesProjectMapHints_WithoutBreakingBudget");
 }
 
 static async Task<(JsonElement structured, string workspaceRoot, string runtimeRoot)> RunAgentWithAdapter(ILlmProviderAdapter adapter)
