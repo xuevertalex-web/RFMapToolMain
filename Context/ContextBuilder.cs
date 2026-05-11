@@ -148,10 +148,12 @@ namespace LocalCursorAgent.Context
             var candidates = resolution.Candidates;
             ProjectMapSnapshot? projectMap = null;
             ProjectMapDiagnosticsSnapshot projectMapDiagnostics;
+            ProjectRetrievalPlan retrievalPlan;
             try
             {
                 projectMap = ProjectMapBuilder.Build(_projectPath, BuildCandidatePool(semanticMatches, symbolMatches));
                 projectMapDiagnostics = BuildProjectMapDiagnostics(projectMap);
+                retrievalPlan = ProjectRetrievalPlanner.Plan(query, projectMap);
             }
             catch (Exception ex)
             {
@@ -161,13 +163,19 @@ namespace LocalCursorAgent.Context
                     RulesVersion = ProjectMapBuilder.RulesVersion,
                     Error = ex.Message
                 };
+                retrievalPlan = new ProjectRetrievalPlan
+                {
+                    Reason = "planner_failed",
+                    Confidence = 0.0,
+                    FallbackUsed = true
+                };
             }
 
             var roleHints = (projectMap?.Files ?? new List<FileMapEntry>())
                 .ToDictionary(x => x.Path, x => x, StringComparer.OrdinalIgnoreCase);
 
             var ranked = candidates
-                .Select(path => CreateFileScore(path, query, semanticMatches, symbolMatches, targetToken, strategy, roleHints))
+                .Select(path => CreateFileScore(path, query, semanticMatches, symbolMatches, targetToken, strategy, roleHints, retrievalPlan))
                 .OrderByDescending(x => x.MatchPriority)
                 .ThenByDescending(x => x.SortScore)
                 .ThenBy(x => x.FilePath, StringComparer.OrdinalIgnoreCase)
@@ -238,7 +246,8 @@ namespace LocalCursorAgent.Context
                     TotalChars = context.TotalLength,
                     BudgetUsed = diagnosticsItems.Count,
                     BudgetLimit = effectiveBudget,
-                    ProjectMapDiagnostics = projectMapDiagnostics
+                    ProjectMapDiagnostics = projectMapDiagnostics,
+                    RetrievalPlanningDiagnostics = BuildRetrievalPlanningDiagnostics(retrievalPlan)
                 };
             }
             return context;
@@ -461,7 +470,7 @@ namespace LocalCursorAgent.Context
                 .ToList();
         }
 
-        private RankedFileScore CreateFileScore(string filePath, string query, List<string> semanticMatches, List<string> symbolMatches, string targetToken, ContextSelectionStrategy strategy, Dictionary<string, FileMapEntry> roleHints)
+        private RankedFileScore CreateFileScore(string filePath, string query, List<string> semanticMatches, List<string> symbolMatches, string targetToken, ContextSelectionStrategy strategy, Dictionary<string, FileMapEntry> roleHints, ProjectRetrievalPlan retrievalPlan)
         {
             var semanticPosition = semanticMatches.FindIndex(x => x.Equals(filePath, StringComparison.OrdinalIgnoreCase));
             var semanticScore = semanticPosition >= 0 ? 1.0 / (semanticPosition + 1) : 0.0;
@@ -474,7 +483,8 @@ namespace LocalCursorAgent.Context
             var matchPriority = GetTargetMatchPriority(filePath, targetToken);
             var weights = GetStrategyWeights(strategy);
             var roleBoost = GetProjectMapBoost(filePath, query, roleHints);
-            var sortScore = semanticScore * weights.Semantic + symbolScore * weights.Symbol + stateBoost * weights.State + recencyScore * weights.Recency + roleBoost;
+            var retrievalBoost = GetRetrievalPlanBoost(filePath, roleHints, retrievalPlan);
+            var sortScore = semanticScore * weights.Semantic + symbolScore * weights.Symbol + stateBoost * weights.State + recencyScore * weights.Recency + roleBoost + retrievalBoost;
 
             return new RankedFileScore
             {
@@ -518,6 +528,22 @@ namespace LocalCursorAgent.Context
                 boost += 0.03;
 
             return Math.Min(0.20, boost);
+        }
+
+        private static double GetRetrievalPlanBoost(string filePath, Dictionary<string, FileMapEntry> roleHints, ProjectRetrievalPlan retrievalPlan)
+        {
+            if (retrievalPlan.FallbackUsed || retrievalPlan.Confidence < 0.5)
+                return 0.0;
+            if (!roleHints.TryGetValue(filePath, out var entry))
+                return 0.0;
+
+            var boost = 0.0;
+            if (retrievalPlan.SelectedZones.Contains(entry.Zone, StringComparer.OrdinalIgnoreCase))
+                boost += 0.04;
+            if (retrievalPlan.SelectedRoles.Contains(entry.Role, StringComparer.OrdinalIgnoreCase))
+                boost += 0.04;
+
+            return Math.Min(0.08, boost);
         }
 
         private static int GetTargetMatchPriority(string filePath, string targetToken)
@@ -676,6 +702,18 @@ namespace LocalCursorAgent.Context
                 GeneratedAtUtc = projectMap.GeneratedAtUtc
             };
         }
+
+        private static RetrievalPlanningDiagnosticsSnapshot BuildRetrievalPlanningDiagnostics(ProjectRetrievalPlan plan)
+        {
+            return new RetrievalPlanningDiagnosticsSnapshot
+            {
+                SelectedZones = plan.SelectedZones.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
+                SelectedRoles = plan.SelectedRoles.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
+                Reason = plan.Reason ?? string.Empty,
+                Confidence = plan.Confidence,
+                FallbackUsed = plan.FallbackUsed
+            };
+        }
     }
 
     public sealed class ContextDiagnosticsItem
@@ -694,6 +732,7 @@ namespace LocalCursorAgent.Context
         public int BudgetUsed { get; set; }
         public int BudgetLimit { get; set; }
         public ProjectMapDiagnosticsSnapshot ProjectMapDiagnostics { get; set; } = new();
+        public RetrievalPlanningDiagnosticsSnapshot RetrievalPlanningDiagnostics { get; set; } = new();
 
         public ContextDiagnosticsSnapshot Clone()
         {
@@ -710,7 +749,29 @@ namespace LocalCursorAgent.Context
                 TotalChars = TotalChars,
                 BudgetUsed = BudgetUsed,
                 BudgetLimit = BudgetLimit,
-                ProjectMapDiagnostics = ProjectMapDiagnostics.Clone()
+                ProjectMapDiagnostics = ProjectMapDiagnostics.Clone(),
+                RetrievalPlanningDiagnostics = RetrievalPlanningDiagnostics.Clone()
+            };
+        }
+    }
+
+    public sealed class RetrievalPlanningDiagnosticsSnapshot
+    {
+        public List<string> SelectedZones { get; set; } = new();
+        public List<string> SelectedRoles { get; set; } = new();
+        public string Reason { get; set; } = string.Empty;
+        public double Confidence { get; set; }
+        public bool FallbackUsed { get; set; }
+
+        public RetrievalPlanningDiagnosticsSnapshot Clone()
+        {
+            return new RetrievalPlanningDiagnosticsSnapshot
+            {
+                SelectedZones = SelectedZones.ToList(),
+                SelectedRoles = SelectedRoles.ToList(),
+                Reason = Reason,
+                Confidence = Confidence,
+                FallbackUsed = FallbackUsed
             };
         }
     }

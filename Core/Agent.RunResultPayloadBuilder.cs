@@ -133,6 +133,7 @@ namespace LocalCursorAgent.Core
                 ApprovalStatusSummary = ApprovalStatusSummaryBuilder.Build(actionLifecycleEntries),
                 ContextDiagnostics = BuildContextDiagnosticsPayload(),
                 ProjectMapDiagnostics = BuildProjectMapDiagnosticsPayload(),
+                RetrievalPlanningDiagnostics = BuildRetrievalPlanningDiagnosticsPayload(),
                 IndexingDiagnostics = BuildIndexingDiagnosticsPayload()
             };
         }
@@ -183,6 +184,27 @@ namespace LocalCursorAgent.Core
                 GeneratedAtUtc = diagnostics.GeneratedAtUtc,
                 Warning = diagnostics.Warning ?? string.Empty,
                 Error = diagnostics.Error ?? string.Empty
+            };
+        }
+
+        private static RetrievalPlanningDiagnosticsPayload BuildRetrievalPlanningDiagnosticsPayload()
+        {
+            var diagnostics = Context.ContextBuilder.GetLatestDiagnostics().RetrievalPlanningDiagnostics;
+            return new RetrievalPlanningDiagnosticsPayload
+            {
+                SelectedZones = (diagnostics.SelectedZones ?? new List<string>())
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                    .ToArray(),
+                SelectedRoles = (diagnostics.SelectedRoles ?? new List<string>())
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                    .ToArray(),
+                Reason = diagnostics.Reason ?? string.Empty,
+                Confidence = Math.Clamp(diagnostics.Confidence, 0.0, 1.0),
+                FallbackUsed = diagnostics.FallbackUsed
             };
         }
 

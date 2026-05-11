@@ -252,6 +252,9 @@ namespace LocalCursorAgent.Core
             [JsonPropertyName("projectMapDiagnostics")]
             public ProjectMapDiagnosticsPayload ProjectMapDiagnostics { get; init; } = new();
 
+            [JsonPropertyName("retrievalPlanningDiagnostics")]
+            public RetrievalPlanningDiagnosticsPayload RetrievalPlanningDiagnostics { get; init; } = new();
+
             [JsonPropertyName("indexingDiagnostics")]
             public IndexingDiagnosticsPayload IndexingDiagnostics { get; init; } = new();
         }
@@ -317,6 +320,24 @@ namespace LocalCursorAgent.Core
 
             [JsonPropertyName("error")]
             public string Error { get; init; } = string.Empty;
+        }
+
+        private sealed class RetrievalPlanningDiagnosticsPayload
+        {
+            [JsonPropertyName("selectedZones")]
+            public string[] SelectedZones { get; init; } = Array.Empty<string>();
+
+            [JsonPropertyName("selectedRoles")]
+            public string[] SelectedRoles { get; init; } = Array.Empty<string>();
+
+            [JsonPropertyName("reason")]
+            public string Reason { get; init; } = string.Empty;
+
+            [JsonPropertyName("confidence")]
+            public double Confidence { get; init; }
+
+            [JsonPropertyName("fallbackUsed")]
+            public bool FallbackUsed { get; init; }
         }
 
         private sealed class RetryDiagnosticsPayload

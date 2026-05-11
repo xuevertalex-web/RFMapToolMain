@@ -86,6 +86,8 @@ await RunContextSelectionEntryPointAwarenessRegression();
 RunProjectMap_ClassifiesZonesAndRoles_Deterministically();
 RunProjectMap_EntrypointsDetected_ByNameRules();
 RunProjectMap_UnknownPaths_FallbackStable();
+RunProjectRetrievalPlanner_ZoneRoleSelection();
+RunProjectRetrievalPlanner_UnknownFallback();
 await RunContextSelection_UsesProjectMapHints_WithoutBreakingBudget();
 await RunMtimeAwareIndexingCacheRegression();
 
@@ -294,6 +296,10 @@ static async Task RunAnalysisNormalResponseRegression()
     AssertTrue(projectMapDiagnostics.GetProperty("roleCounts").ValueKind == JsonValueKind.Object, "Expected roleCounts object.");
     AssertTrue(projectMapDiagnostics.TryGetProperty("rulesVersion", out var rulesVersion) && !string.IsNullOrWhiteSpace(rulesVersion.GetString()), "Expected non-empty rulesVersion.");
     AssertTrue(!projectMapDiagnostics.TryGetProperty("files", out _), "Expected compact projectMapDiagnostics without files list.");
+    AssertTrue(structured.TryGetProperty("retrievalPlanningDiagnostics", out var retrievalPlanningDiagnostics), "Expected retrievalPlanningDiagnostics in payload.");
+    AssertTrue(retrievalPlanningDiagnostics.GetProperty("selectedZones").ValueKind == JsonValueKind.Array, "Expected selectedZones array.");
+    AssertTrue(retrievalPlanningDiagnostics.GetProperty("selectedRoles").ValueKind == JsonValueKind.Array, "Expected selectedRoles array.");
+    AssertTrue(retrievalPlanningDiagnostics.GetProperty("confidence").GetDouble() >= 0.0, "Expected confidence >= 0.");
 
     Console.WriteLine("PASS Analysis_NormalModelResponse_NoFallbackTimeline");
 }
@@ -3218,6 +3224,42 @@ static void RunProjectMap_UnknownPaths_FallbackStable()
     AssertTrue(map.Files.All(x => x.Zone == "docs/config"), "Unknown zone should fallback to docs/config.");
     AssertTrue(map.Files.All(x => x.Role == "config"), "Unknown role should fallback to config.");
     Console.WriteLine("PASS ProjectMap_UnknownPaths_FallbackStable");
+}
+
+static void RunProjectRetrievalPlanner_ZoneRoleSelection()
+{
+    var snapshot = ProjectMapBuilder.Build("repo", new[]
+    {
+        "vscode-extension/webviewClientResultHandlers.js",
+        "Security/PermissionGuard.cs",
+        "Context/ContextBuilder.cs",
+        "Indexing/ProjectIndexer.cs",
+        "scripts/devtools/Doctor.cmd",
+        "SafetyTests/Program.cs"
+    });
+
+    var uiPlan = ProjectRetrievalPlanner.Plan("fix webview panel status rendering in extension", snapshot);
+    AssertTrue(uiPlan.SelectedZones.Contains("vscode-extension", StringComparer.OrdinalIgnoreCase), "UI task should target vscode-extension zone.");
+    AssertTrue(uiPlan.SelectedRoles.Contains("extension-ui", StringComparer.OrdinalIgnoreCase), "UI task should target extension-ui role.");
+
+    var safetyPlan = ProjectRetrievalPlanner.Plan("tighten permission guard and approval safety tests", snapshot);
+    AssertTrue(safetyPlan.SelectedZones.Contains("Security", StringComparer.OrdinalIgnoreCase), "Safety task should target Security zone.");
+    AssertTrue(safetyPlan.SelectedRoles.Contains("test", StringComparer.OrdinalIgnoreCase), "Safety task should include test role.");
+
+    var doctorPlan = ProjectRetrievalPlanner.Plan("doctor smoke devtools script check", snapshot);
+    AssertTrue(doctorPlan.SelectedZones.Contains("scripts/devtools", StringComparer.OrdinalIgnoreCase), "Doctor task should target devtools zone.");
+    AssertTrue(doctorPlan.SelectedRoles.Contains("devtool", StringComparer.OrdinalIgnoreCase), "Doctor task should target devtool role.");
+
+    Console.WriteLine("PASS ProjectRetrievalPlanner_ZoneRoleSelection");
+}
+
+static void RunProjectRetrievalPlanner_UnknownFallback()
+{
+    var snapshot = ProjectMapBuilder.Build("repo", new[] { "Core/Agent.cs" });
+    var plan = ProjectRetrievalPlanner.Plan("blabla qwerty non-domain topic", snapshot);
+    AssertTrue(plan.FallbackUsed, "Unknown task should fallback.");
+    AssertTrue(plan.Confidence == 0.0, "Unknown task confidence should be 0.");
+    Console.WriteLine("PASS ProjectRetrievalPlanner_UnknownFallback");
 }
 
 static async Task RunContextSelection_UsesProjectMapHints_WithoutBreakingBudget()
