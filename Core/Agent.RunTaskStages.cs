@@ -62,7 +62,6 @@ namespace LocalCursorAgent.Core
             var (promptKind, prompt) = BuildIterationPrompt(context.Task, context.AnalysisOnlyTask, iteration, context.RunState.CurrentResponse, preparedContext.ContextString, context.Tracer!);
             context.RunState.ModelCallStarted = true;
             var modelRequest = await ExecuteModelRequestAsync(prompt, promptKind, iteration, context.RuntimeClient, context.Tracer!);
-            context.RuntimeResult = modelRequest.RuntimeResult ?? default;
             context.RunState.CurrentResponse = modelRequest.Response;
             context.RunState.LlmRetryCount = _lastLlmRetryCount;
             context.RunState.LlmErrorType = _lastLlmErrorType;
@@ -72,7 +71,7 @@ namespace LocalCursorAgent.Core
             var modelDecision = HandleModelResponseDecision(
                 context.Task,
                 context.AnalysisOnlyTask,
-                context.RuntimeResult,
+                modelRequest.RuntimeResult,
                 iteration,
                 context.RunState.CurrentResponse,
                 context.ContextInfo!,
