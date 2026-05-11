@@ -68,6 +68,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$files=Get-ChildItem -Path $root -Filter 'local-cursor-agent-*.vsix' -File | Sort-Object LastWriteTime -Descending;" ^
   "if($files.Count -gt 2){$files | Select-Object -Skip 2 | Remove-Item -Force}"
 
+echo [update] Configuring VS Code backendProjectPath for any-workspace runs...
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
+  "$settingsPath = Join-Path $env:APPDATA 'Code\User\settings.json';" ^
+  "$projectPath = [System.IO.Path]::GetFullPath('%ROOT%LocalCursorAgent.csproj');" ^
+  "$targetWorkspacePath = [System.IO.Path]::GetFullPath('%ROOT%');" ^
+  "if (-not (Test-Path -LiteralPath $settingsPath)) { '{}' | Set-Content -LiteralPath $settingsPath -Encoding UTF8 };" ^
+  "$raw = Get-Content -LiteralPath $settingsPath -Raw;" ^
+  "if ([string]::IsNullOrWhiteSpace($raw)) { $raw = '{}' };" ^
+  "try { $obj = $raw | ConvertFrom-Json } catch { $obj = New-Object psobject };" ^
+  "if ($null -eq $obj) { $obj = New-Object psobject };" ^
+  "$existing = $obj.PSObject.Properties['localCursorAgent.backendProjectPath'];" ^
+  "if ($existing) { $existing.Value = $projectPath } else { $obj | Add-Member -NotePropertyName 'localCursorAgent.backendProjectPath' -NotePropertyValue $projectPath };" ^
+  "$existingTarget = $obj.PSObject.Properties['localCursorAgent.targetWorkspacePath'];" ^
+  "if ($existingTarget) { $existingTarget.Value = $targetWorkspacePath } else { $obj | Add-Member -NotePropertyName 'localCursorAgent.targetWorkspacePath' -NotePropertyValue $targetWorkspacePath };" ^
+  "$obj | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $settingsPath -Encoding UTF8"
+
 echo [update] Done. Installed version !NEW_VERSION!.
 echo [update] If UI still shows old state, run: Developer: Reload Window
 exit /b 0
