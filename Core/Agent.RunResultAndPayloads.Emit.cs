@@ -1,8 +1,6 @@
-using LocalCursorAgent.Context;
+﻿using LocalCursorAgent.Context;
 using LocalCursorAgent.Diagnostics;
 using LocalCursorAgent.Security;
-using System.Linq;
-using System.Text;
 using System.Text.Json;
 
 namespace LocalCursorAgent.Core
@@ -47,7 +45,9 @@ namespace LocalCursorAgent.Core
                 changedHints,
                 changedRanges,
                 changedKinds);
-            var planningSummary = BuildPlanningSummary(reasonCode);
+            var contextDiagnostics = ContextBuilder.GetLatestDiagnostics();
+            var taskPlan = TaskPlanner.Build(reasonCode, contextDiagnostics);
+            var planningSummary = TaskPlanner.BuildPlanningSummary(taskPlan, contextDiagnostics.RetrievalPlanningDiagnostics.FallbackUsed, contextDiagnostics.RetrievalPlanningDiagnostics.Reason);
             var messageWithPlanning = string.IsNullOrWhiteSpace(planningSummary)
                 ? message
                 : $"{planningSummary}{Environment.NewLine}{Environment.NewLine}{message}";
@@ -57,6 +57,7 @@ namespace LocalCursorAgent.Core
                 messageWithPlanning,
                 summary,
                 planningSummary,
+                taskPlan,
                 reasonCode,
                 normalizedChangedPayload,
                 buildSucceeded,
@@ -83,42 +84,6 @@ namespace LocalCursorAgent.Core
 
             Console.WriteLine(JsonSerializer.Serialize(payload));
             return messageWithPlanning;
-        }
-
-        private static string BuildPlanningSummary(string reasonCode)
-        {
-            if (string.Equals(reasonCode, "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase))
-                return string.Empty;
-
-            var diagnostics = ContextBuilder.GetLatestDiagnostics().RetrievalPlanningDiagnostics;
-            var zones = diagnostics.SelectedZones
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            var roles = diagnostics.SelectedRoles
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (diagnostics.FallbackUsed || zones.Count == 0)
-                return "План: не нашёл точной зоны, использую обычный context selection.";
-
-            var sb = new StringBuilder("План: посмотрю ");
-            sb.Append(string.Join(" + ", zones));
-            if (roles.Count > 0)
-            {
-                sb.Append(" (роли: ");
-                sb.Append(string.Join(", ", roles));
-                sb.Append(')');
-            }
-            if (!string.IsNullOrWhiteSpace(diagnostics.Reason))
-            {
-                sb.Append(". Причина: ");
-                sb.Append(diagnostics.Reason);
-            }
-            return sb.ToString();
         }
     }
 }

@@ -12,6 +12,7 @@ namespace LocalCursorAgent.Core
             string message,
             string summary,
             string planningSummary,
+            TaskPlan? taskPlan,
             string reasonCode,
             NormalizedChangedPayload normalizedChangedPayload,
             bool buildSucceeded,
@@ -42,6 +43,7 @@ namespace LocalCursorAgent.Core
                 Message = message,
                 Summary = summary,
                 PlanningSummary = planningSummary,
+                TaskPlan = BuildTaskPlanPayload(taskPlan),
                 ChangedFiles = normalizedChangedPayload.Files,
                 ChangedHints = normalizedChangedPayload.Hints,
                 ChangedRanges = normalizedChangedPayload.Ranges,
@@ -207,6 +209,26 @@ namespace LocalCursorAgent.Core
                 Reason = diagnostics.Reason ?? string.Empty,
                 Confidence = Math.Clamp(diagnostics.Confidence, 0.0, 1.0),
                 FallbackUsed = diagnostics.FallbackUsed
+            };
+        }
+
+        private static TaskPlanPayload? BuildTaskPlanPayload(TaskPlan? taskPlan)
+        {
+            if (taskPlan is null)
+                return null;
+
+            return new TaskPlanPayload
+            {
+                Mode = taskPlan.Mode.ToString().ToLowerInvariant(),
+                Steps = taskPlan.Steps.ToArray(),
+                TargetZones = taskPlan.TargetZones.ToArray(),
+                TargetRoles = taskPlan.TargetRoles.ToArray(),
+                CandidateFiles = taskPlan.CandidateFiles.ToArray(),
+                Risks = taskPlan.Risks.ToArray(),
+                Checks = taskPlan.Checks.ToArray(),
+                StopConditions = taskPlan.StopConditions.ToArray(),
+                Confidence = Math.Clamp(taskPlan.Confidence, 0.0, 1.0),
+                Reason = taskPlan.Reason ?? string.Empty
             };
         }
 

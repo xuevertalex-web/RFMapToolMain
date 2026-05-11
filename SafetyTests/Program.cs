@@ -92,6 +92,13 @@ await RunPlanningSummary_ContextAnalysisRegression();
 await RunPlanningSummary_UiAnalysisRegression();
 await RunPlanningSummary_UnknownFallbackRegression();
 await RunPlanningSummary_ChatNoNoiseRegression();
+await RunTaskPlan_AnalysisMode_NoMutationChecks();
+await RunTaskPlan_ExecuteMode_InspectEditTestFlow();
+await RunTaskPlan_ChatMode_NotEmitted();
+await RunTaskPlan_ClarifyMode_NotEmitted();
+await RunTaskPlan_CandidateFiles_MaxFive();
+await RunTaskPlan_StopConditions_UnsafePathApprovalAmbiguous();
+await RunTaskPlan_Checks_ByZone();
 await RunContextSelection_UsesProjectMapHints_WithoutBreakingBudget();
 await RunMtimeAwareIndexingCacheRegression();
 
@@ -3329,6 +3336,94 @@ static async Task RunPlanningSummary_ChatNoNoiseRegression()
     var message = structured.GetProperty("message").GetString() ?? string.Empty;
     AssertTrue(!message.StartsWith("План:", StringComparison.OrdinalIgnoreCase), "Expected no planning prefix for chat message.");
     Console.WriteLine("PASS PlanningSummary_ChatNoNoise");
+}
+
+static async Task RunTaskPlan_AnalysisMode_NoMutationChecks()
+{
+    var structured = await RunIntentMatrixTask("сделай code review context indexing retrieval, ничего не меняй", new FakeNoToolAnalysisClient(), registerFileTool: true);
+    AssertTrue(structured.TryGetProperty("taskPlan", out var taskPlan) && taskPlan.ValueKind == JsonValueKind.Object, "Expected taskPlan for analysis.");
+    AssertTrue(string.Equals(taskPlan.GetProperty("mode").GetString(), "analysis", StringComparison.OrdinalIgnoreCase), "Expected analysis mode.");
+    AssertTrue(taskPlan.GetProperty("steps").EnumerateArray().Any(x => string.Equals(x.GetString(), "inspect", StringComparison.OrdinalIgnoreCase)), "Expected inspect step.");
+    AssertTrue(taskPlan.GetProperty("checks").EnumerateArray().Any(x => string.Equals(x.GetString(), "no_file_changes", StringComparison.OrdinalIgnoreCase)), "Expected no_file_changes check.");
+    Console.WriteLine("PASS TaskPlan_AnalysisMode_NoMutationChecks");
+}
+
+static async Task RunTaskPlan_ExecuteMode_InspectEditTestFlow()
+{
+    var structured = await RunIntentMatrixTask("исправь ошибку в ContextBuilder.cs", new FakeNoToolAnalysisClient(), registerFileTool: true);
+    AssertTrue(structured.TryGetProperty("taskPlan", out var taskPlan) && taskPlan.ValueKind == JsonValueKind.Object, "Expected taskPlan for execute.");
+    AssertTrue(string.Equals(taskPlan.GetProperty("mode").GetString(), "execute", StringComparison.OrdinalIgnoreCase), "Expected execute mode.");
+    var steps = taskPlan.GetProperty("steps").EnumerateArray().Select(x => x.GetString() ?? string.Empty).ToArray();
+    AssertContains(steps, "inspect");
+    AssertContains(steps, "edit");
+    AssertContains(steps, "test");
+    Console.WriteLine("PASS TaskPlan_ExecuteMode_InspectEditTestFlow");
+}
+
+static async Task RunTaskPlan_ChatMode_NotEmitted()
+{
+    var structured = await RunIntentMatrixTask("привет", new FakeNoToolAnalysisClient(), registerFileTool: true);
+    AssertTrue(!structured.TryGetProperty("taskPlan", out var taskPlan) || taskPlan.ValueKind == JsonValueKind.Null, "Expected no taskPlan for chat.");
+    Console.WriteLine("PASS TaskPlan_ChatMode_NotEmitted");
+}
+
+static async Task RunTaskPlan_ClarifyMode_NotEmitted()
+{
+    var structured = await RunIntentMatrixTask("сделай нормально", new FakeNoToolAnalysisClient(), registerFileTool: true);
+    AssertTrue(!structured.TryGetProperty("taskPlan", out var taskPlan) || taskPlan.ValueKind == JsonValueKind.Null, "Expected no taskPlan for clarify.");
+    Console.WriteLine("PASS TaskPlan_ClarifyMode_NotEmitted");
+}
+
+static async Task RunTaskPlan_CandidateFiles_MaxFive()
+{
+    var structured = await RunIntentMatrixTask("исправь ошибку в ContextBuilder.cs и соседних файлах", new FakeNoToolAnalysisClient(), registerFileTool: true);
+    if (structured.TryGetProperty("taskPlan", out var taskPlan) && taskPlan.ValueKind == JsonValueKind.Object)
+    {
+        var files = taskPlan.GetProperty("candidateFiles");
+        AssertTrue(files.ValueKind == JsonValueKind.Array && files.GetArrayLength() <= 5, "Expected candidateFiles max 5.");
+    }
+    Console.WriteLine("PASS TaskPlan_CandidateFiles_MaxFive");
+}
+
+static async Task RunTaskPlan_StopConditions_UnsafePathApprovalAmbiguous()
+{
+    var structured = await RunIntentMatrixTask("исправь баг и если надо трогай защищенные пути", new FakeNoToolAnalysisClient(), registerFileTool: true);
+    if (structured.TryGetProperty("taskPlan", out var taskPlan) && taskPlan.ValueKind == JsonValueKind.Object)
+    {
+        var stop = taskPlan.GetProperty("stopConditions").EnumerateArray().Select(x => x.GetString() ?? string.Empty).ToArray();
+        AssertContains(stop, "unsafe_path");
+        AssertContains(stop, "approval_required");
+        AssertContains(stop, "ambiguous_scope");
+    }
+    Console.WriteLine("PASS TaskPlan_StopConditions_UnsafePathApprovalAmbiguous");
+}
+
+static async Task RunTaskPlan_Checks_ByZone()
+{
+    var ui = await RunIntentMatrixTask("исправь webview status", new FakeNoToolAnalysisClient(), registerFileTool: true);
+    if (ui.TryGetProperty("taskPlan", out var uiPlan) && uiPlan.ValueKind == JsonValueKind.Object)
+    {
+        var checks = uiPlan.GetProperty("checks").EnumerateArray().Select(x => x.GetString() ?? string.Empty).ToArray();
+        AssertContains(checks, "npm test");
+    }
+
+    var core = await RunIntentMatrixTask("исправь ошибку в ContextBuilder.cs", new FakeNoToolAnalysisClient(), registerFileTool: true);
+    if (core.TryGetProperty("taskPlan", out var corePlan) && corePlan.ValueKind == JsonValueKind.Object)
+    {
+        var checks = corePlan.GetProperty("checks").EnumerateArray().Select(x => x.GetString() ?? string.Empty).ToArray();
+        AssertContains(checks, "SmokeGate");
+        AssertContains(checks, "SafetyTests");
+    }
+
+    var dev = await RunIntentMatrixTask("обнови doctor script", new FakeNoToolAnalysisClient(), registerFileTool: true);
+    if (dev.TryGetProperty("taskPlan", out var devPlan) && devPlan.ValueKind == JsonValueKind.Object)
+    {
+        var checks = devPlan.GetProperty("checks").EnumerateArray().Select(x => x.GetString() ?? string.Empty).ToArray();
+        AssertContains(checks, "Doctor-Quick");
+        AssertContains(checks, "SmokeGate");
+    }
+
+    Console.WriteLine("PASS TaskPlan_Checks_ByZone");
 }
 
 static async Task RunContextSelection_UsesProjectMapHints_WithoutBreakingBudget()

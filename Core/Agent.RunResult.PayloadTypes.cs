@@ -36,6 +36,9 @@ namespace LocalCursorAgent.Core
             [JsonPropertyName("planningSummary")]
             public string PlanningSummary { get; init; } = string.Empty;
 
+            [JsonPropertyName("taskPlan")]
+            public TaskPlanPayload? TaskPlan { get; init; }
+
             [JsonPropertyName("changedFiles")]
             public string[] ChangedFiles { get; init; } = Array.Empty<string>();
 
@@ -341,6 +344,39 @@ namespace LocalCursorAgent.Core
 
             [JsonPropertyName("fallbackUsed")]
             public bool FallbackUsed { get; init; }
+        }
+
+        private sealed class TaskPlanPayload
+        {
+            [JsonPropertyName("mode")]
+            public string Mode { get; init; } = string.Empty;
+
+            [JsonPropertyName("steps")]
+            public string[] Steps { get; init; } = Array.Empty<string>();
+
+            [JsonPropertyName("targetZones")]
+            public string[] TargetZones { get; init; } = Array.Empty<string>();
+
+            [JsonPropertyName("targetRoles")]
+            public string[] TargetRoles { get; init; } = Array.Empty<string>();
+
+            [JsonPropertyName("candidateFiles")]
+            public string[] CandidateFiles { get; init; } = Array.Empty<string>();
+
+            [JsonPropertyName("risks")]
+            public string[] Risks { get; init; } = Array.Empty<string>();
+
+            [JsonPropertyName("checks")]
+            public string[] Checks { get; init; } = Array.Empty<string>();
+
+            [JsonPropertyName("stopConditions")]
+            public string[] StopConditions { get; init; } = Array.Empty<string>();
+
+            [JsonPropertyName("confidence")]
+            public double Confidence { get; init; }
+
+            [JsonPropertyName("reason")]
+            public string Reason { get; init; } = string.Empty;
         }
 
         private sealed class RetryDiagnosticsPayload
