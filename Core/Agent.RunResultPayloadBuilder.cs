@@ -1,5 +1,6 @@
 using LocalCursorAgent.Diagnostics;
 using LocalCursorAgent.Security;
+using System.Collections.Generic;
 using System.Linq;
 
 namespace LocalCursorAgent.Core
@@ -131,6 +132,7 @@ namespace LocalCursorAgent.Core
                 ActionLifecycle = ActionLifecycleMapper.MapActionLifecycle(actionLifecycleEntries),
                 ApprovalStatusSummary = ApprovalStatusSummaryBuilder.Build(actionLifecycleEntries),
                 ContextDiagnostics = BuildContextDiagnosticsPayload(),
+                ProjectMapDiagnostics = BuildProjectMapDiagnosticsPayload(),
                 IndexingDiagnostics = BuildIndexingDiagnosticsPayload()
             };
         }
@@ -164,6 +166,23 @@ namespace LocalCursorAgent.Core
                 CacheMisses = Math.Max(0, diagnostics.CacheMisses),
                 FullRebuild = diagnostics.FullRebuild,
                 PartialRefresh = diagnostics.PartialRefresh
+            };
+        }
+
+        private static ProjectMapDiagnosticsPayload BuildProjectMapDiagnosticsPayload()
+        {
+            var diagnostics = Context.ContextBuilder.GetLatestDiagnostics().ProjectMapDiagnostics;
+            return new ProjectMapDiagnosticsPayload
+            {
+                Enabled = diagnostics.Enabled,
+                RulesVersion = diagnostics.RulesVersion ?? string.Empty,
+                FileCount = Math.Max(0, diagnostics.FileCount),
+                ZoneCounts = new Dictionary<string, int>(diagnostics.ZoneCounts, StringComparer.OrdinalIgnoreCase),
+                RoleCounts = new Dictionary<string, int>(diagnostics.RoleCounts, StringComparer.OrdinalIgnoreCase),
+                EntrypointCount = Math.Max(0, diagnostics.EntrypointCount),
+                GeneratedAtUtc = diagnostics.GeneratedAtUtc,
+                Warning = diagnostics.Warning ?? string.Empty,
+                Error = diagnostics.Error ?? string.Empty
             };
         }
 

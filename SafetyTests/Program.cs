@@ -287,6 +287,13 @@ static async Task RunAnalysisNormalResponseRegression()
     var budgetLimit = contextDiagnostics.GetProperty("budgetLimit").GetInt32();
     AssertTrue(totalChars <= 45000, "Expected context diagnostics totalChars to stay bounded.");
     AssertTrue(budgetLimit > 0, "Expected context diagnostics budgetLimit > 0.");
+    AssertTrue(structured.TryGetProperty("projectMapDiagnostics", out var projectMapDiagnostics), "Expected projectMapDiagnostics in payload.");
+    AssertTrue(projectMapDiagnostics.GetProperty("enabled").GetBoolean(), "Expected projectMapDiagnostics.enabled=true.");
+    AssertTrue(projectMapDiagnostics.GetProperty("fileCount").GetInt32() > 0, "Expected projectMapDiagnostics.fileCount > 0.");
+    AssertTrue(projectMapDiagnostics.GetProperty("zoneCounts").ValueKind == JsonValueKind.Object, "Expected zoneCounts object.");
+    AssertTrue(projectMapDiagnostics.GetProperty("roleCounts").ValueKind == JsonValueKind.Object, "Expected roleCounts object.");
+    AssertTrue(projectMapDiagnostics.TryGetProperty("rulesVersion", out var rulesVersion) && !string.IsNullOrWhiteSpace(rulesVersion.GetString()), "Expected non-empty rulesVersion.");
+    AssertTrue(!projectMapDiagnostics.TryGetProperty("files", out _), "Expected compact projectMapDiagnostics without files list.");
 
     Console.WriteLine("PASS Analysis_NormalModelResponse_NoFallbackTimeline");
 }

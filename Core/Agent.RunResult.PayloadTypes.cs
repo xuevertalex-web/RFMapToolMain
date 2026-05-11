@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using LocalCursorAgent.Context;
 
@@ -247,6 +249,9 @@ namespace LocalCursorAgent.Core
             [JsonPropertyName("contextDiagnostics")]
             public ContextDiagnosticsPayload ContextDiagnostics { get; init; } = new();
 
+            [JsonPropertyName("projectMapDiagnostics")]
+            public ProjectMapDiagnosticsPayload ProjectMapDiagnostics { get; init; } = new();
+
             [JsonPropertyName("indexingDiagnostics")]
             public IndexingDiagnosticsPayload IndexingDiagnostics { get; init; } = new();
         }
@@ -282,6 +287,36 @@ namespace LocalCursorAgent.Core
 
             [JsonPropertyName("charCount")]
             public int CharCount { get; init; }
+        }
+
+        private sealed class ProjectMapDiagnosticsPayload
+        {
+            [JsonPropertyName("enabled")]
+            public bool Enabled { get; init; }
+
+            [JsonPropertyName("rulesVersion")]
+            public string RulesVersion { get; init; } = string.Empty;
+
+            [JsonPropertyName("fileCount")]
+            public int FileCount { get; init; }
+
+            [JsonPropertyName("zoneCounts")]
+            public Dictionary<string, int> ZoneCounts { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+            [JsonPropertyName("roleCounts")]
+            public Dictionary<string, int> RoleCounts { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+            [JsonPropertyName("entrypointCount")]
+            public int EntrypointCount { get; init; }
+
+            [JsonPropertyName("generatedAtUtc")]
+            public DateTime? GeneratedAtUtc { get; init; }
+
+            [JsonPropertyName("warning")]
+            public string Warning { get; init; } = string.Empty;
+
+            [JsonPropertyName("error")]
+            public string Error { get; init; } = string.Empty;
         }
 
         private sealed class RetryDiagnosticsPayload

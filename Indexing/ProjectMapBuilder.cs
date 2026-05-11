@@ -4,6 +4,8 @@ namespace LocalCursorAgent.Indexing
 {
     public static class ProjectMapBuilder
     {
+        public const string RulesVersion = "project-map-v1";
+
         public static ProjectMapSnapshot Build(string projectRoot, IEnumerable<string> relativePaths)
         {
             var normalized = (relativePaths ?? Array.Empty<string>())

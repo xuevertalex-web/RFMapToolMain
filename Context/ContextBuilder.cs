@@ -146,8 +146,25 @@ namespace LocalCursorAgent.Context
             }
 
             var candidates = resolution.Candidates;
-            var projectMap = ProjectMapBuilder.Build(_projectPath, BuildCandidatePool(semanticMatches, symbolMatches));
-            var roleHints = projectMap.Files.ToDictionary(x => x.Path, x => x, StringComparer.OrdinalIgnoreCase);
+            ProjectMapSnapshot? projectMap = null;
+            ProjectMapDiagnosticsSnapshot projectMapDiagnostics;
+            try
+            {
+                projectMap = ProjectMapBuilder.Build(_projectPath, BuildCandidatePool(semanticMatches, symbolMatches));
+                projectMapDiagnostics = BuildProjectMapDiagnostics(projectMap);
+            }
+            catch (Exception ex)
+            {
+                projectMapDiagnostics = new ProjectMapDiagnosticsSnapshot
+                {
+                    Enabled = false,
+                    RulesVersion = ProjectMapBuilder.RulesVersion,
+                    Error = ex.Message
+                };
+            }
+
+            var roleHints = (projectMap?.Files ?? new List<FileMapEntry>())
+                .ToDictionary(x => x.Path, x => x, StringComparer.OrdinalIgnoreCase);
 
             var ranked = candidates
                 .Select(path => CreateFileScore(path, query, semanticMatches, symbolMatches, targetToken, strategy, roleHints))
@@ -220,7 +237,8 @@ namespace LocalCursorAgent.Context
                     TotalFiles = diagnosticsItems.Count,
                     TotalChars = context.TotalLength,
                     BudgetUsed = diagnosticsItems.Count,
-                    BudgetLimit = effectiveBudget
+                    BudgetLimit = effectiveBudget,
+                    ProjectMapDiagnostics = projectMapDiagnostics
                 };
             }
             return context;
@@ -638,6 +656,26 @@ namespace LocalCursorAgent.Context
 
             return best;
         }
+
+        private static ProjectMapDiagnosticsSnapshot BuildProjectMapDiagnostics(ProjectMapSnapshot projectMap)
+        {
+            return new ProjectMapDiagnosticsSnapshot
+            {
+                Enabled = true,
+                RulesVersion = ProjectMapBuilder.RulesVersion,
+                FileCount = projectMap.FileCount,
+                ZoneCounts = projectMap.Files
+                    .GroupBy(x => x.Zone, StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(x => x.Key, x => x.Count(), StringComparer.OrdinalIgnoreCase),
+                RoleCounts = projectMap.Files
+                    .GroupBy(x => x.Role, StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(x => x.Key, x => x.Count(), StringComparer.OrdinalIgnoreCase),
+                EntrypointCount = projectMap.Files.Count(x => x.IsEntrypoint),
+                GeneratedAtUtc = projectMap.GeneratedAtUtc
+            };
+        }
     }
 
     public sealed class ContextDiagnosticsItem
@@ -655,6 +693,7 @@ namespace LocalCursorAgent.Context
         public int TotalChars { get; set; }
         public int BudgetUsed { get; set; }
         public int BudgetLimit { get; set; }
+        public ProjectMapDiagnosticsSnapshot ProjectMapDiagnostics { get; set; } = new();
 
         public ContextDiagnosticsSnapshot Clone()
         {
@@ -670,7 +709,37 @@ namespace LocalCursorAgent.Context
                 TotalFiles = TotalFiles,
                 TotalChars = TotalChars,
                 BudgetUsed = BudgetUsed,
-                BudgetLimit = BudgetLimit
+                BudgetLimit = BudgetLimit,
+                ProjectMapDiagnostics = ProjectMapDiagnostics.Clone()
+            };
+        }
+    }
+
+    public sealed class ProjectMapDiagnosticsSnapshot
+    {
+        public bool Enabled { get; set; }
+        public string RulesVersion { get; set; } = string.Empty;
+        public int FileCount { get; set; }
+        public Dictionary<string, int> ZoneCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, int> RoleCounts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public int EntrypointCount { get; set; }
+        public DateTime? GeneratedAtUtc { get; set; }
+        public string Warning { get; set; } = string.Empty;
+        public string Error { get; set; } = string.Empty;
+
+        public ProjectMapDiagnosticsSnapshot Clone()
+        {
+            return new ProjectMapDiagnosticsSnapshot
+            {
+                Enabled = Enabled,
+                RulesVersion = RulesVersion,
+                FileCount = FileCount,
+                ZoneCounts = new Dictionary<string, int>(ZoneCounts, StringComparer.OrdinalIgnoreCase),
+                RoleCounts = new Dictionary<string, int>(RoleCounts, StringComparer.OrdinalIgnoreCase),
+                EntrypointCount = EntrypointCount,
+                GeneratedAtUtc = GeneratedAtUtc,
+                Warning = Warning,
+                Error = Error
             };
         }
     }
