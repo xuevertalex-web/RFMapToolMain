@@ -9,9 +9,9 @@ namespace LocalCursorAgent.Core
     {
         private bool TryRejectTaskBeforeExecution(string task, ExecutionTracer tracer, out string finalResult)
         {
-            var intent = TaskIntentScorer.Classify(task);
-            var analysisOnlyTask = TaskPrecheckHeuristics.IsAnalysisOnlyTask(task);
-            if (!analysisOnlyTask && intent == TaskIntentKind.Chat)
+            var decision = IntentDecisionEngine.Decide(task);
+            var analysisOnlyTask = decision.Intent == UnifiedIntentKind.Analysis;
+            if (decision.Intent == UnifiedIntentKind.Chat)
             {
                 var message = BuildChatResponse(task);
                 tracer.MarkStopPoint("Agent", "SUCCESS_NO_TOOL_CALLS", "Conversational response without execution", new[] { "Indexing", "ModelRequest", "PatchApply", "BuildVerification" });
@@ -31,7 +31,7 @@ namespace LocalCursorAgent.Core
                 return true;
             }
 
-            if (!analysisOnlyTask && intent == TaskIntentKind.Clarify)
+            if (!analysisOnlyTask && decision.NeedsClarification)
             {
                 var message = "Уточни, что именно нужно сделать: создать файл, изменить код или проверить ошибку? Напиши цель и файл/путь, если он известен.";
                 tracer.MarkStopPoint("Agent", "CLARIFICATION_REQUIRED", message, new[] { "Indexing", "ModelRequest", "PatchApply", "BuildVerification" });

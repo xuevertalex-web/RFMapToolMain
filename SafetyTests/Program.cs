@@ -48,6 +48,7 @@ await RunChatOnlyRoutingMatrix_ClarifyCasesRegression();
 await RunChatOnlyRoutingMatrix_ExecuteCasesRegression();
 await RunChatOnlyRoutingMatrix_AnalysisOnlyCasesRegression();
 await RunSessionFlow_ChatClarifyExecute_Regression();
+await RunUnifiedIntentDecision_NaturalLanguageRegression();
 await RunBroadExecuteIntent_ProjectWideFixRegression();
 await RunHostDiagnosticsCommandApprovalRegression();
 await RunProcessExecutionHardeningRegression();
@@ -2020,6 +2021,45 @@ static async Task RunSessionFlow_ChatClarifyExecute_Regression()
     AssertTrue(!string.Equals(executeReason, "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase), "Execute step must not fallback to chat.");
 
     Console.WriteLine("PASS SessionFlow_ChatClarifyExecute");
+}
+
+static async Task RunUnifiedIntentDecision_NaturalLanguageRegression()
+{
+    foreach (var input in new[] { "ну что думаешь по проекту?", "как лучше это доделать?", "объясни что тут происходит" })
+    {
+        var structured = await RunIntentMatrixTask(input, new FakeNoToolAnalysisClient(), registerFileTool: true);
+        var reasonCode = structured.GetProperty("reasonCode").GetString() ?? string.Empty;
+        AssertTrue(
+            string.Equals(reasonCode, "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(reasonCode, "SUCCESS_ANALYSIS_RESPONSE", StringComparison.OrdinalIgnoreCase),
+            $"Expected chat/analysis outcome for '{input}', got '{reasonCode}'.");
+        AssertTrue(structured.GetProperty("changedFiles").GetArrayLength() == 0, $"Expected no file changes for '{input}'.");
+    }
+
+    foreach (var input in new[] { "посмотри код и скажи что не так, без правок", "сделай code review, ничего не меняй" })
+    {
+        var structured = await RunIntentMatrixTask(input, new FakeNoToolAnalysisClient(), registerFileTool: true);
+        AssertTrue(structured.GetProperty("changedFiles").GetArrayLength() == 0, $"Expected analysis-only no changes for '{input}'.");
+        var reasonCode = structured.GetProperty("reasonCode").GetString() ?? string.Empty;
+        AssertTrue(!string.Equals(reasonCode, "CLARIFICATION_REQUIRED", StringComparison.OrdinalIgnoreCase), $"Analysis-only phrase '{input}' should not require clarification.");
+    }
+
+    foreach (var input in new[] { "сделай нормально", "почини всё", "оно не работает" })
+    {
+        var structured = await RunIntentMatrixTask(input, new FakeNoToolAnalysisClient(), registerFileTool: true);
+        AssertTrue(string.Equals(structured.GetProperty("reasonCode").GetString(), "CLARIFICATION_REQUIRED", StringComparison.OrdinalIgnoreCase), $"Expected clarification for '{input}'.");
+        AssertTrue(structured.GetProperty("changedFiles").GetArrayLength() == 0, $"Expected no file changes for clarify phrase '{input}'.");
+    }
+
+    foreach (var input in new[] { "создай файл X", "исправь ошибку в Y", "добавь тест", "удали временный файл" })
+    {
+        var structured = await RunIntentMatrixTask(input, new FakeNoToolAnalysisClient(), registerFileTool: true);
+        var reasonCode = structured.GetProperty("reasonCode").GetString() ?? string.Empty;
+        AssertTrue(!string.Equals(reasonCode, "CLARIFICATION_REQUIRED", StringComparison.OrdinalIgnoreCase), $"Execute phrase '{input}' should not require clarification.");
+        AssertTrue(!string.Equals(reasonCode, "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase), $"Execute phrase '{input}' should not be chat-routed.");
+    }
+
+    Console.WriteLine("PASS UnifiedIntentDecision_NaturalLanguage");
 }
 
 static async Task<JsonElement> RunIntentMatrixTask(string task, ILLMClient llmClient, bool registerFileTool)
