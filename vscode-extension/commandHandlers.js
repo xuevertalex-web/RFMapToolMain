@@ -1,22 +1,11 @@
 const vscode = require('vscode');
 function isAnalysisOnlyTask(task) {
   const value = String(task || '').toLowerCase();
-  return value.includes('analyze') ||
-    value.includes('analyse') ||
-    value.includes('summarize') ||
-    value.includes('summarise') ||
-    value.includes('explain') ||
-    value.includes('review') ||
-    value.includes('diagnose') ||
-    value.includes('опиши') ||
-    value.includes('описать') ||
-    value.includes('объясни') ||
-    value.includes('объяснить') ||
-    value.includes('обзор') ||
-    value.includes('структуру') ||
-    value.includes('структура') ||
-    value.includes('ключевые файлы') ||
-    value.includes('расскажи');
+  const mutationKeywords = [
+    'создай', 'удали', 'исправь', 'обнови',
+    'create', 'delete', 'remove', 'rename', 'edit', 'update'
+  ];
+  return !mutationKeywords.some(k => value.includes(k));
 }
 
 function createExtensionCommandHandlers(options) {

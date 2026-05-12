@@ -1,22 +1,13 @@
 const vscode = require('vscode');
 function isAnalysisOnlyTask(task) {
   const value = String(task || '').toLowerCase();
-  return value.includes('analyze') ||
-    value.includes('analyse') ||
-    value.includes('summarize') ||
-    value.includes('summarise') ||
-    value.includes('explain') ||
-    value.includes('review') ||
-    value.includes('diagnose') ||
-    value.includes('опиши') ||
-    value.includes('описать') ||
-    value.includes('объясни') ||
-    value.includes('объяснить') ||
-    value.includes('обзор') ||
-    value.includes('структуру') ||
-    value.includes('структура') ||
-    value.includes('ключевые файлы') ||
-    value.includes('расскажи');
+  const mutationKeywords = [
+    'создай', 'удали', 'исправь', 'обнови',
+    'fix',
+    'create', 'delete', 'remove', 'rename', 'edit', 'update'
+  ];
+  // If any mutation keyword is present, this is NOT analysis-only
+  return !mutationKeywords.some(k => value.includes(k));
 }
 
 function createPanelRunController(options) {
