@@ -293,6 +293,12 @@ namespace LocalCursorAgent.Core
 
             [JsonPropertyName("analysisContextIncludesFileContents")]
             public bool AnalysisContextIncludesFileContents { get; init; }
+
+            [JsonPropertyName("candidateSeedCategory")]
+            public string CandidateSeedCategory { get; init; } = string.Empty;
+
+            [JsonPropertyName("seededCandidateFiles")]
+            public string[] SeededCandidateFiles { get; init; } = Array.Empty<string>();
         }
 
         private sealed class ContextDiagnosticsItemPayload

@@ -1,4 +1,5 @@
 using LocalCursorAgent.Context;
+using System.IO;
 
 namespace LocalCursorAgent.Core
 {
@@ -31,6 +32,16 @@ namespace LocalCursorAgent.Core
             var deepAnalysisTask = analysisOnlyTask && deepDecision.IsDeep;
             var semanticTopK = analysisOnlyTask ? 8 : 25 + CONTEXT_EXPANSION_BUFFER;
             var candidateFiles = gatedTargetFiles ?? await _projectIndexer.FindRelevantFiles(task, semanticTopK);
+            if (analysisOnlyTask)
+            {
+                var seeded = SeedAuditCandidates(task, candidateFiles);
+                candidateFiles = seeded.Candidates;
+                _candidateSeedDiagnostics = new CandidateSeedDiagnostics(seeded.Category, seeded.SeededFiles.Take(5).ToList());
+            }
+            else
+            {
+                _candidateSeedDiagnostics = CandidateSeedDiagnostics.Default;
+            }
             if (candidateFiles.Count > 0 && gatedTargetFiles == null)
             {
                 _memory.Add("semantic_matches", string.Join(", ", candidateFiles));
@@ -97,6 +108,71 @@ namespace LocalCursorAgent.Core
                     ContextString = contextString
                 }
             };
+        }
+
+        private (List<string> Candidates, string Category, List<string> SeededFiles) SeedAuditCandidates(string task, List<string> existing)
+        {
+            var text = (task ?? string.Empty).ToLowerInvariant();
+            var root = _sessionContext?.ActiveWorkspaceRoot ?? Directory.GetCurrentDirectory();
+            var seeds = new List<string>();
+            var category = "none";
+
+            void AddIfExists(string rel)
+            {
+                var abs = Path.Combine(root, rel.Replace('/', Path.DirectorySeparatorChar));
+                if (File.Exists(abs) && !existing.Contains(rel, StringComparer.OrdinalIgnoreCase) && !seeds.Contains(rel, StringComparer.OrdinalIgnoreCase))
+                    seeds.Add(rel);
+            }
+
+            if (text.Contains("approval") || text.Contains("token") || text.Contains("destructive") || text.Contains("обойти"))
+            {
+                category = "approval-destructive";
+                AddIfExists("Tools/FileTool.cs");
+                AddIfExists("Core/Agent.ToolingOrchestration.PrecheckHelpers.cs");
+                AddIfExists("Core/Agent.ToolingOrchestration.cs");
+                AddIfExists("Security/PermissionGuard.cs");
+                AddIfExists("SafetyTests/Program.cs");
+            }
+            if (text.Contains("command") || text.Contains("process") || text.Contains("shell"))
+            {
+                category = category == "none" ? "command-process" : category + "+command-process";
+                AddIfExists("Execution/SafeProcessRunner.cs");
+                AddIfExists("Security/CommandRiskPolicy.cs");
+                AddIfExists("Tools/FileTool.cs");
+                AddIfExists("SafetyTests/Program.cs");
+            }
+            if (text.Contains("workspace") || text.Contains("guard") || text.Contains("boundary") || text.Contains("рабочая область"))
+            {
+                category = category == "none" ? "workspace-boundary" : category + "+workspace-boundary";
+                AddIfExists("vscode-extension/workspaceResolver.js");
+                AddIfExists("vscode-extension/workspaceTaskClassifier.js");
+                AddIfExists("vscode-extension/panelRunController.js");
+                AddIfExists("vscode-extension/commandHandlers.js");
+                AddIfExists("Program.WorkspacePolicyLoader.cs");
+            }
+            if (text.Contains("vsix") || text.Contains("install") || text.Contains("update") || text.Contains("workflow") || text.Contains("stale") || text.Contains("package"))
+            {
+                category = category == "none" ? "install-update" : category + "+install-update";
+                AddIfExists("scripts/devtools/Update-VSCodeExtension.cmd");
+                AddIfExists("vscode-extension/package.json");
+            }
+            if (text.Contains("retrieval") || text.Contains("context") || text.Contains("deep analysis"))
+            {
+                category = category == "none" ? "retrieval-context" : category + "+retrieval-context";
+                AddIfExists("Context/ContextBuilder.cs");
+                AddIfExists("Context/RetrievalSignalScorer.cs");
+                AddIfExists("Context/ProjectRetrievalPlanner.cs");
+                AddIfExists("Core/Agent.ContextPreparation.cs");
+                AddIfExists("Core/AnalysisContextFormatter.cs");
+                AddIfExists("Core/AnalysisPromptBuilder.cs");
+            }
+
+            var combined = existing
+                .Concat(seeds)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return (combined, category, seeds);
         }
     }
 }

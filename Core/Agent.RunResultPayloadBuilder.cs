@@ -142,7 +142,7 @@ namespace LocalCursorAgent.Core
             };
         }
 
-        private static ContextDiagnosticsPayload BuildContextDiagnosticsPayload(AnalysisModeDiagnostics analysisModeDiagnostics)
+        private ContextDiagnosticsPayload BuildContextDiagnosticsPayload(AnalysisModeDiagnostics analysisModeDiagnostics)
         {
             var diagnostics = Context.ContextBuilder.GetLatestDiagnostics();
             return new ContextDiagnosticsPayload
@@ -161,7 +161,14 @@ namespace LocalCursorAgent.Core
                 DeepAnalysisTask = analysisModeDiagnostics.DeepAnalysisTask,
                 DeepAnalysisTrigger = analysisModeDiagnostics.TriggerCategory,
                 AnalysisFileBudgetCap = analysisModeDiagnostics.BudgetCapUsed,
-                AnalysisContextIncludesFileContents = analysisModeDiagnostics.IncludesFileContents
+                AnalysisContextIncludesFileContents = analysisModeDiagnostics.IncludesFileContents,
+                CandidateSeedCategory = _candidateSeedDiagnostics.Category,
+                SeededCandidateFiles = (_candidateSeedDiagnostics.Files ?? new List<string>())
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                    .Take(5)
+                    .ToArray()
             };
         }
 

@@ -31,6 +31,7 @@ namespace LocalCursorAgent.Core
         private readonly AgentSessionContext? _sessionContext;
         private readonly WorkspaceResolutionResult? _workspaceResolution;
         private AnalysisModeDiagnostics _analysisModeDiagnostics = AnalysisModeDiagnostics.Default;
+        private CandidateSeedDiagnostics _candidateSeedDiagnostics = CandidateSeedDiagnostics.Default;
         private int _lastLlmRetryCount;
         private string _lastLlmErrorType = string.Empty;
 
@@ -45,6 +46,13 @@ namespace LocalCursorAgent.Core
             public string TriggerCategory { get; } = triggerCategory ?? "none";
             public int BudgetCapUsed { get; } = budgetCapUsed;
             public bool IncludesFileContents { get; } = includesFileContents;
+        }
+
+        private readonly struct CandidateSeedDiagnostics(string category, List<string> files)
+        {
+            public static CandidateSeedDiagnostics Default => new("none", new List<string>());
+            public string Category { get; } = category ?? "none";
+            public List<string> Files { get; } = files ?? new List<string>();
         }
 
         public Agent(

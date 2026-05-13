@@ -112,6 +112,7 @@ RunDeepAnalysisDetectionRegression();
 RunDeepAnalysisContextFormatterRegression();
 RunDeepAnalysisPromptRegression();
 await RunDeepAnalysisDiagnosticsRegression();
+await RunAuditRoutingAndCandidateSeedingRegression();
 
 static void RunDeepAnalysisDetectionRegression()
 {
@@ -187,6 +188,36 @@ static async Task RunDeepAnalysisDiagnosticsRegression()
     AssertTrue(compactContext.GetProperty("analysisFileBudgetCap").GetInt32() == 4, "Expected compact analysis budget cap=4.");
     AssertTrue(!compactContext.GetProperty("analysisContextIncludesFileContents").GetBoolean(), "Expected compact analysis not to include file contents.");
     Console.WriteLine("PASS DeepAnalysisDiagnosticsRegression");
+}
+
+static async Task RunAuditRoutingAndCandidateSeedingRegression()
+{
+    var cases = new (string Task, string[] ExpectedSeeds)[]
+    {
+        ("Analyze only: Find bypasses in approval tokens and destructive file operations", new[] { "Tools/FileTool.cs", "SafetyTests/Program.cs" }),
+        ("Analyze only: Find weak spots in command execution and shell handling", new[] { "Execution/SafeProcessRunner.cs", "Security/CommandRiskPolicy.cs" }),
+        ("Analyze only: Что можно обойти в workspace guard и approval tokens", new[] { "vscode-extension/workspaceResolver.js", "vscode-extension/workspaceTaskClassifier.js" }),
+        ("Analyze only: Find stale VSIX/install workflow risks", new[] { "scripts/devtools/Update-VSCodeExtension.cmd", "vscode-extension/package.json" }),
+        ("Analyze only: Find retrieval/context blind spots in deep analysis mode", new[] { "Core/Agent.ContextPreparation.cs", "Context/ContextBuilder.cs" })
+    };
+
+    foreach (var c in cases)
+    {
+        var structured = await RunIntentMatrixTask(c.Task, new FakeNoToolAnalysisClient(), registerFileTool: true);
+        var reason = structured.GetProperty("reasonCode").GetString() ?? string.Empty;
+        AssertTrue(!string.Equals(reason, "CLARIFICATION_REQUIRED", StringComparison.OrdinalIgnoreCase), $"Audit query should not route to clarification: {c.Task}");
+        var context = structured.GetProperty("contextDiagnostics");
+        AssertTrue(context.GetProperty("deepAnalysisTask").GetBoolean(), $"Audit query should activate deep analysis: {c.Task}");
+        var seedCategory = context.GetProperty("candidateSeedCategory").GetString() ?? string.Empty;
+        AssertTrue(!string.Equals(seedCategory, "none", StringComparison.OrdinalIgnoreCase), $"Expected candidate seed category for query: {c.Task}");
+        var seeded = context.GetProperty("seededCandidateFiles").EnumerateArray().Select(x => x.GetString() ?? string.Empty).ToArray();
+        AssertTrue(seeded.Length <= 5, "Expected compact seededCandidateFiles diagnostics.");
+    }
+
+    var unrelated = await RunIntentMatrixTask("Explain this project", new FakeNoToolAnalysisClient(), registerFileTool: true);
+    var unrelatedContext = unrelated.GetProperty("contextDiagnostics");
+    AssertTrue(string.Equals(unrelatedContext.GetProperty("candidateSeedCategory").GetString(), "none", StringComparison.OrdinalIgnoreCase) || unrelatedContext.GetProperty("seededCandidateFiles").GetArrayLength() == 0, "Unrelated query should not get audit seeds.");
+    Console.WriteLine("PASS AuditRoutingAndCandidateSeedingRegression");
 }
 
 static async Task RunAnalysisFallbackTimeoutRegression()

@@ -27,7 +27,7 @@ namespace LocalCursorAgent.Core
 
             var normalized = value.ToLowerInvariant();
 
-            if (ContainsAny(normalized, "без правок", "ничего не меняй", "только объясни"))
+            if (ContainsAny(normalized, "Р±РµР· РїСЂР°РІРѕРє", "РЅРёС‡РµРіРѕ РЅРµ РјРµРЅСЏР№", "С‚РѕР»СЊРєРѕ РѕР±СЉСЏСЃРЅРё"))
             {
                 return new IntentDecision(UnifiedIntentKind.Analysis, 0.95, "explicit_no_mutation", MutationAllowed: false, NeedsClarification: false);
             }
@@ -35,6 +35,10 @@ namespace LocalCursorAgent.Core
             if (TaskPrecheckHeuristics.IsAnalysisOnlyTask(value))
             {
                 return new IntentDecision(UnifiedIntentKind.Analysis, 0.90, "analysis_precheck", MutationAllowed: false, NeedsClarification: false);
+            }
+            if (AnalysisPromptBuilder.IsDeepAnalysisTask(value))
+            {
+                return new IntentDecision(UnifiedIntentKind.Analysis, 0.88, "deep_analysis_audit_routing", MutationAllowed: false, NeedsClarification: false);
             }
 
             if (IsBroadVagueMutation(normalized))
@@ -53,7 +57,7 @@ namespace LocalCursorAgent.Core
                 return new IntentDecision(UnifiedIntentKind.Clarify, 0.90, "task_intent_clarify", MutationAllowed: false, NeedsClarification: true);
             }
 
-            if (ContainsAny(normalized, "создай", "измени", "исправь", "удали", "добавь"))
+            if (ContainsAny(normalized, "СЃРѕР·РґР°Р№", "РёР·РјРµРЅРё", "РёСЃРїСЂР°РІСЊ", "СѓРґР°Р»Рё", "РґРѕР±Р°РІСЊ"))
             {
                 return new IntentDecision(UnifiedIntentKind.Execute, 0.90, "explicit_mutation_phrase", MutationAllowed: true, NeedsClarification: false);
             }
@@ -83,8 +87,8 @@ namespace LocalCursorAgent.Core
 
         private static bool IsBroadVagueMutation(string text)
         {
-            var hasBroadTarget = text.Contains("всё", StringComparison.Ordinal) || text.Contains("все", StringComparison.Ordinal);
-            var hasMutationVerb = ContainsAny(text, "почини", "исправь", "сделай");
+            var hasBroadTarget = text.Contains("РІСЃС‘", StringComparison.Ordinal) || text.Contains("РІСЃРµ", StringComparison.Ordinal);
+            var hasMutationVerb = ContainsAny(text, "РїРѕС‡РёРЅРё", "РёСЃРїСЂР°РІСЊ", "СЃРґРµР»Р°Р№");
             return hasBroadTarget && hasMutationVerb;
         }
     }
