@@ -13,6 +13,14 @@ set "SEEN3=0"
 set "HAS_FAIL=0"
 
 echo [smoke-gate] dotnet build "%ROOT%\LocalCursorAgent.csproj"
+echo [smoke-gate] node "%ROOT%\vscode-extension\encodingGuard.test.js"
+node "%ROOT%\vscode-extension\encodingGuard.test.js"
+if errorlevel 1 (
+  echo [smoke-gate] FAILED: encoding audit failed.
+  exit /b 1
+)
+
+echo [smoke-gate] dotnet build "%ROOT%\LocalCursorAgent.csproj"
 dotnet build "%ROOT%\LocalCursorAgent.csproj"
 if errorlevel 1 (
   echo [smoke-gate] FAILED: build step failed.

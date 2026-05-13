@@ -1,0 +1,5 @@
+#!/usr/bin/env node
+const cp = require('child_process');
+const path = require('path');
+const root = path.resolve(__dirname, '..');
+cp.execFileSync(process.execPath, [path.join(root,'scripts','devtools','encoding-precommit-check.js')], {cwd: root, stdio: 'inherit'});
