@@ -1,4 +1,4 @@
-﻿const webviewClientResultHandlers = `function applyNormalizedRunResult(run, options) {
+const webviewClientResultHandlers = `function applyNormalizedRunResult(run, options) {
         const opts = options && typeof options === 'object' ? options : {};
         if (resultSection) {
           resultSection.style.display = '';

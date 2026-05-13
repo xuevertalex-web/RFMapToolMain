@@ -1,4 +1,4 @@
-﻿# Local Cursor Agent VS Code Extension
+# Local Cursor Agent VS Code Extension
 
 VS Code frontend for LocalCursorAgent backend.
 

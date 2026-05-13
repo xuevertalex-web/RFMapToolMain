@@ -1,4 +1,4 @@
-﻿const webviewClientActions = `function startAgentRunFromInput() {
+const webviewClientActions = `function startAgentRunFromInput() {
         if (uiRunning) {
           return;
         }

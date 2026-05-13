@@ -1,4 +1,4 @@
-﻿const webviewClientRecentRunsState = `
+const webviewClientRecentRunsState = `
       function getRecentRunDisplayTask(task) {
         const value = String(task || '').trim();
         return value || '(no task)';

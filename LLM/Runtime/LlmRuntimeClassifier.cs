@@ -1,4 +1,4 @@
-﻿namespace LocalCursorAgent.LLM.Runtime
+namespace LocalCursorAgent.LLM.Runtime
 {
     public static class LlmRuntimeClassifier
     {

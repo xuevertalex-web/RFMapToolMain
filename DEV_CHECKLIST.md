@@ -1,4 +1,4 @@
-﻿# Dev Checklist
+# Dev Checklist
 
 ## Baseline before any change
 

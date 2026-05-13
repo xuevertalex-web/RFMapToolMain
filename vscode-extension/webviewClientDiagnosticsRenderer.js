@@ -1,4 +1,4 @@
-﻿const webviewClientDiagnosticsRenderer = `function renderBuildDiagnostics(run) {
+const webviewClientDiagnosticsRenderer = `function renderBuildDiagnostics(run) {
         if (!diagnosticsSection || !diagnosticsList || !diagnosticsEmpty) return;
         const diagnosticsCount = Array.isArray(run.diagnostics) ? run.diagnostics.length : 0;
         const buildTextNormalized = String(run.buildText || '').trim().toLowerCase();

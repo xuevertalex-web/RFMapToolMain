@@ -1,4 +1,4 @@
-﻿namespace LocalCursorAgent.Core
+namespace LocalCursorAgent.Core
 {
     internal enum TaskIntentKind
     {
