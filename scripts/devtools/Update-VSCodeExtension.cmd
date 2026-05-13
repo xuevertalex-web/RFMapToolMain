@@ -5,24 +5,51 @@ set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..\..") do set "ROOT=%%~fI\"
 set "EXT_DIR=%ROOT%vscode-extension"
 set "PKG_JSON=%EXT_DIR%\package.json"
+set "BUMP_SCRIPT=%SCRIPT_DIR%Update-VSCodeExtension.ps1"
 
 if not exist "%PKG_JSON%" (
   echo [update] package.json not found: "%PKG_JSON%"
   exit /b 1
 )
 
-echo [update] Bumping patch version in vscode-extension\package.json...
-set "BUMP_SCRIPT=%SCRIPT_DIR%Update-VSCodeExtension.ps1"
 if not exist "%BUMP_SCRIPT%" (
   echo [update] bump script not found: "%BUMP_SCRIPT%"
   exit /b 1
 )
 
-echo [update] Unblocking local scripts/VSIX files to avoid security prompts...
-powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
-  "$root='%ROOT%';" ^
-  "Get-ChildItem -Path $root -Recurse -File -Include *.cmd,*.ps1,*.vsix | ForEach-Object { Unblock-File -LiteralPath $_.FullName -ErrorAction SilentlyContinue }" >nul 2>nul
+where powershell >nul 2>nul
+if errorlevel 1 (
+  echo [update] powershell was not found in PATH.
+  exit /b 1
+)
 
+where code >nul 2>nul
+if errorlevel 1 (
+  echo [update] VS Code CLI 'code' was not found in PATH.
+  echo [update] In VS Code, run: Shell Command: Install 'code' command in PATH
+  exit /b 1
+)
+
+where npx >nul 2>nul
+if errorlevel 1 (
+  echo [update] npx was not found in PATH. Install Node.js/npm first.
+  exit /b 1
+)
+
+echo [update] Unblocking only required update scripts...
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
+  "$targets = @('%~f0','%BUMP_SCRIPT%');" ^
+  "foreach ($t in $targets) { if (Test-Path -LiteralPath $t) { Unblock-File -LiteralPath $t -ErrorAction Stop } }" >nul 2>nul
+if errorlevel 1 (
+  echo [update] Failed while unblocking required update scripts.
+  exit /b 1
+)
+
+echo [update] Removing stale VSIX files before packaging...
+del /q "%EXT_DIR%\local-cursor-agent-*.vsix" >nul 2>nul
+del /q "%ROOT%local-cursor-agent-*.vsix" >nul 2>nul
+
+echo [update] Bumping patch version in vscode-extension\package.json...
 for /f "usebackq delims=" %%V in (`powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%BUMP_SCRIPT%" -PackageJson "%PKG_JSON%"`) do (
   set "NEW_VERSION=%%V"
 )
@@ -32,11 +59,23 @@ if not defined NEW_VERSION (
   exit /b 1
 )
 
-echo [update] New version: !NEW_VERSION!
+echo [update] New package version: !NEW_VERSION!
 
 pushd "%EXT_DIR%" >nul
+if errorlevel 1 (
+  echo [update] Failed to enter extension directory: "%EXT_DIR%"
+  exit /b 1
+)
 
-echo [update] Packaging VSIX...
+echo [update] Running extension tests...
+call npm test
+if errorlevel 1 (
+  popd >nul
+  echo [update] Extension tests failed.
+  exit /b 1
+)
+
+echo [update] Packaging fresh VSIX...
 call npx @vscode/vsce package --allow-missing-repository
 if errorlevel 1 (
   popd >nul
@@ -47,11 +86,29 @@ if errorlevel 1 (
 set "VSIX_FILE=local-cursor-agent-!NEW_VERSION!.vsix"
 if not exist "%VSIX_FILE%" (
   popd >nul
-  echo [update] VSIX file not found: "%VSIX_FILE%"
+  echo [update] Expected VSIX file not found: "%VSIX_FILE%"
   exit /b 1
 )
 
-echo [update] Installing extension into VS Code...
+for /f %%C in ('dir /b "local-cursor-agent-*.vsix" 2^>nul ^| find /c /v ""') do set "VSIX_COUNT=%%C"
+if not "!VSIX_COUNT!"=="1" (
+  popd >nul
+  echo [update] Expected exactly one freshly packaged VSIX, found !VSIX_COUNT!.
+  exit /b 1
+)
+
+echo [update] Unblocking freshly packaged VSIX only...
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
+  "$vsix = Join-Path '%CD%' '%VSIX_FILE%';" ^
+  "if (-not (Test-Path -LiteralPath $vsix)) { throw 'Packaged VSIX not found for unblocking.' };" ^
+  "Unblock-File -LiteralPath $vsix -ErrorAction Stop" >nul 2>nul
+if errorlevel 1 (
+  popd >nul
+  echo [update] Failed while unblocking packaged VSIX.
+  exit /b 1
+)
+
+echo [update] Installing fresh VSIX into VS Code...
 call code --install-extension "%CD%\%VSIX_FILE%" --force
 if errorlevel 1 (
   popd >nul
@@ -60,13 +117,35 @@ if errorlevel 1 (
 )
 
 copy /Y "%VSIX_FILE%" "%ROOT%%VSIX_FILE%" >nul
+if errorlevel 1 (
+  popd >nul
+  echo [update] Failed to copy VSIX to repo root.
+  exit /b 1
+)
+
 popd >nul
 
-echo [update] Keeping only the 2 newest root VSIX files...
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$root='%ROOT%';" ^
-  "$files=Get-ChildItem -Path $root -Filter 'local-cursor-agent-*.vsix' -File | Sort-Object LastWriteTime -Descending;" ^
-  "if($files.Count -gt 2){$files | Select-Object -Skip 2 | Remove-Item -Force}"
+echo [update] Verifying installed extension files match workspace sources...
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
+  "$extRoot = Join-Path $env:USERPROFILE '.vscode\extensions';" ^
+  "$installed = Get-ChildItem -LiteralPath $extRoot -Directory -Filter 'local.local-cursor-agent-*' | Sort-Object LastWriteTime -Descending | Select-Object -First 1;" ^
+  "if (-not $installed) { throw 'Installed extension folder not found under .vscode\extensions' };" ^
+  "$srcRoot = [System.IO.Path]::GetFullPath('%EXT_DIR%');" ^
+  "$targets = @('commandHandlers.js','panelRunController.js','workspaceTaskClassifier.js','workspaceGuard.test.js','package.json');" ^
+  "foreach ($rel in $targets) {" ^
+  "  $src = Join-Path $srcRoot $rel;" ^
+  "  $dst = Join-Path $installed.FullName $rel;" ^
+  "  if (-not (Test-Path -LiteralPath $src)) { throw \"Source file missing: $src\" };" ^
+  "  if (-not (Test-Path -LiteralPath $dst)) { throw \"Installed file missing: $dst\" };" ^
+  "  $h1 = (Get-FileHash -Algorithm SHA256 -LiteralPath $src).Hash;" ^
+  "  $h2 = (Get-FileHash -Algorithm SHA256 -LiteralPath $dst).Hash;" ^
+  "  if ($h1 -ne $h2) { throw \"Hash mismatch for $rel`n  src=$src`n  dst=$dst\" };" ^
+  "};" ^
+  "Write-Output ('[update] Sync verified against installed folder: ' + $installed.FullName)"
+if errorlevel 1 (
+  echo [update] Installed extension does not match current workspace sources.
+  exit /b 1
+)
 
 echo [update] Configuring VS Code backendProjectPath for any-workspace runs...
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
@@ -83,7 +162,18 @@ powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
   "$existingTarget = $obj.PSObject.Properties['localCursorAgent.targetWorkspacePath'];" ^
   "if ($existingTarget) { $existingTarget.Value = $targetWorkspacePath } else { $obj | Add-Member -NotePropertyName 'localCursorAgent.targetWorkspacePath' -NotePropertyValue $targetWorkspacePath };" ^
   "$obj | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $settingsPath -Encoding UTF8"
+if errorlevel 1 (
+  echo [update] Failed to update VS Code user settings.
+  exit /b 1
+)
 
-echo [update] Done. Installed version !NEW_VERSION!.
-echo [update] If UI still shows old state, run: Developer: Reload Window
+echo [update] Installed version !NEW_VERSION! from fresh package %VSIX_FILE%.
+echo [update] Attempting to reload VS Code window...
+call code --reuse-window --command workbench.action.reloadWindow >nul 2>nul
+if errorlevel 1 (
+  echo [update] Auto-reload command is not available in this code CLI build.
+  echo [update] Run manually in VS Code: Developer: Reload Window
+) else (
+  echo [update] Reload command sent successfully.
+)
 exit /b 0
