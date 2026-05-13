@@ -18,9 +18,18 @@ Module.prototype.require = function patchedRequire(request) {
 
 const { resolveWorkspaceRoot } = require('./workspaceResolver');
 Module.prototype.require = originalRequire;
+const { isAnalysisOnlyTask } = require('./workspaceTaskClassifier');
 
 function mkd(name) {
   return fs.mkdtempSync(path.join(os.tmpdir(), name));
+}
+
+function assertClassifierAllows(task) {
+  assert.strictEqual(isAnalysisOnlyTask(task), true, `Task "${task}" should be classified as analysis-only`);
+}
+
+function assertClassifierBlocks(task) {
+  assert.strictEqual(isAnalysisOnlyTask(task), false, `Task "${task}" should be classified as explicit mutation`);
 }
 
 function runGuardTests() {
@@ -29,38 +38,56 @@ function runGuardTests() {
   fs.writeFileSync(backendProjectPath, '<Project />', 'utf8');
 
   const allowExamples = [
+    'тут?',
     'тут',
-    'что ты умеешь',
-    'объясни проект',
+    '`тут?`',
+    'here?',
+    'here',
+    'что тут?',
+    'what can you do',
+    'explain this project',
+    'fix it',
+    'make it better',
+    'почини',
     'ало',
-    'агент',
-    'почини'
+    'агент'
   ];
 
   for (const task of allowExamples) {
+    assertClassifierAllows(task);
     const result = resolveWorkspaceRoot({
       configuredWorkspaceRoot: backendRoot,
       backendProjectPath,
       allowBackendWorkspace: false,
-      analysisOnlyTask: true // simulate low‑signal/analysis; actual detection done in UI before call
+      analysisOnlyTask: isAnalysisOnlyTask(task)
     });
-    assert.ok(result.workspaceRoot, `Task "${task}" should be allowed (analysis‑only)`);
+    assert.ok(result.workspaceRoot, `Task "${task}" should be allowed in backend workspace`);
   }
 
   const blockExamples = [
+    'create file TEST.md',
+    'delete TEST.md',
+    'remove file TEST.md',
+    'rename TEST.md',
+    'fix ContextBuilder.cs',
+    'update package.json',
+    'change this file',
+    'modify commandHandlers.js',
     'создай файл TEST.md',
     'удали TEST.md',
-    'исправь ContextBuilder.cs'
+    'исправь ContextBuilder.cs',
+    'обнови package.json'
   ];
 
   for (const task of blockExamples) {
+    assertClassifierBlocks(task);
     const result = resolveWorkspaceRoot({
       configuredWorkspaceRoot: backendRoot,
       backendProjectPath,
       allowBackendWorkspace: false,
-      analysisOnlyTask: false // mutation detected by UI
+      analysisOnlyTask: isAnalysisOnlyTask(task)
     });
-    assert.strictEqual(result.workspaceRoot, '', `Task "${task}" should be blocked`);
+    assert.strictEqual(result.workspaceRoot, '', `Task "${task}" should be blocked in backend workspace`);
     assert.strictEqual(result.reason, 'backend_workspace_blocked');
   }
 
