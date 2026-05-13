@@ -210,6 +210,18 @@ namespace LocalCursorAgent.Core
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
                     .ToArray(),
+                TopSignalFiles = (diagnostics.TopSignalFiles ?? new List<string>())
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                    .Take(5)
+                    .ToArray(),
+                TopSignalReasons = (diagnostics.TopSignalReasons ?? new List<string>())
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                    .Take(5)
+                    .ToArray(),
                 Reason = diagnostics.Reason ?? string.Empty,
                 Confidence = Math.Clamp(diagnostics.Confidence, 0.0, 1.0),
                 FallbackUsed = diagnostics.FallbackUsed

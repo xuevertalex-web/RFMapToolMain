@@ -98,32 +98,44 @@ namespace LocalCursorAgent.Context
         private static double GetTaskSpecificBoost(string text, string path, string fileName, string fileStem, HashSet<string> reasons)
         {
             var boost = 0.0;
-            if (ContainsAnyToken(text, "approval", "token", "permission", "security"))
+            if (ContainsAnyToken(text, "approval", "token", "permission", "security", "destructive", "delete", "overwrite", "rename"))
             {
-                if (path.StartsWith("Security/", StringComparison.OrdinalIgnoreCase) || path.StartsWith("Tools/", StringComparison.OrdinalIgnoreCase) || fileName.Equals("FileTool.cs", StringComparison.OrdinalIgnoreCase) || path.StartsWith("Core/Agent.Tooling", StringComparison.OrdinalIgnoreCase))
+                if (path.StartsWith("Security/", StringComparison.OrdinalIgnoreCase) || path.StartsWith("Tools/", StringComparison.OrdinalIgnoreCase) || fileName.Equals("FileTool.cs", StringComparison.OrdinalIgnoreCase) || path.StartsWith("Core/Agent.Tooling", StringComparison.OrdinalIgnoreCase) || path.Equals("SafetyTests/Program.cs", StringComparison.OrdinalIgnoreCase))
                 {
-                    boost += 1.4; reasons.Add("task-approval-security");
+                    boost += fileName.Equals("FileTool.cs", StringComparison.OrdinalIgnoreCase) ? 2.2 : 1.5;
+                    reasons.Add("task-approval-security");
                 }
             }
-            if (ContainsAnyToken(text, "workspace", "boundary", "guard"))
+            if (ContainsAnyToken(text, "workspace", "boundary", "guard", "обойти", "рабочая область", "разрешение"))
             {
-                if (ContainsToken(fileName, "workspaceResolver") || ContainsToken(fileName, "workspaceTaskClassifier") || path.Contains("workspace", StringComparison.OrdinalIgnoreCase))
+                if (ContainsToken(fileName, "workspaceResolver") || ContainsToken(fileName, "workspaceTaskClassifier") || ContainsToken(fileName, "panelRunController") || ContainsToken(fileName, "commandHandlers") || path.Contains("workspace", StringComparison.OrdinalIgnoreCase) || ContainsToken(fileName, "WorkspacePolicy"))
                 {
-                    boost += 1.3; reasons.Add("task-workspace-boundary");
+                    var exactWorkspaceSurface = fileName.Equals("workspaceResolver.js", StringComparison.OrdinalIgnoreCase) ||
+                                                fileName.Equals("workspaceTaskClassifier.js", StringComparison.OrdinalIgnoreCase) ||
+                                                fileName.Equals("panelRunController.js", StringComparison.OrdinalIgnoreCase) ||
+                                                fileName.Equals("commandHandlers.js", StringComparison.OrdinalIgnoreCase);
+                    boost += exactWorkspaceSurface ? 2.6 : 1.8;
+                    reasons.Add("task-workspace-boundary");
                 }
             }
             if (ContainsAnyToken(text, "command", "process", "shell"))
             {
-                if (fileName.Equals("SafeProcessRunner.cs", StringComparison.OrdinalIgnoreCase) || fileName.Equals("CommandRiskPolicy.cs", StringComparison.OrdinalIgnoreCase))
+                if (fileName.Equals("SafeProcessRunner.cs", StringComparison.OrdinalIgnoreCase) || fileName.Equals("CommandRiskPolicy.cs", StringComparison.OrdinalIgnoreCase) || path.StartsWith("Tools/", StringComparison.OrdinalIgnoreCase) || path.Equals("SafetyTests/Program.cs", StringComparison.OrdinalIgnoreCase))
                 {
-                    boost += 1.4; reasons.Add("task-command-process");
+                    boost += fileName.Equals("SafeProcessRunner.cs", StringComparison.OrdinalIgnoreCase) ? 2.4 : 1.6;
+                    reasons.Add("task-command-process");
                 }
             }
-            if (ContainsAnyToken(text, "retrieval", "context"))
+            if (ContainsAnyToken(text, "retrieval", "context", "deep analysis"))
             {
-                if (path.StartsWith("Context/", StringComparison.OrdinalIgnoreCase) || fileName.Equals("Agent.ContextPreparation.cs", StringComparison.OrdinalIgnoreCase))
+                if (path.Equals("Context/ContextBuilder.cs", StringComparison.OrdinalIgnoreCase) ||
+                    path.Equals("Context/RetrievalSignalScorer.cs", StringComparison.OrdinalIgnoreCase) ||
+                    path.Equals("Context/ProjectRetrievalPlanner.cs", StringComparison.OrdinalIgnoreCase) ||
+                    path.Equals("Core/Agent.ContextPreparation.cs", StringComparison.OrdinalIgnoreCase) ||
+                    path.Equals("Core/AnalysisContextFormatter.cs", StringComparison.OrdinalIgnoreCase) ||
+                    path.Equals("Core/AnalysisPromptBuilder.cs", StringComparison.OrdinalIgnoreCase))
                 {
-                    boost += 1.2; reasons.Add("task-retrieval-context");
+                    boost += 1.9; reasons.Add("task-retrieval-context");
                 }
             }
             if (ContainsAnyToken(text, "payload", "result", "status"))
@@ -133,11 +145,12 @@ namespace LocalCursorAgent.Context
                     boost += 1.1; reasons.Add("task-payload-result");
                 }
             }
-            if (ContainsAnyToken(text, "install", "vsix", "update"))
+            if (ContainsAnyToken(text, "install", "vsix", "update", "workflow", "stale", "package", "расширение", "установка", "пакет"))
             {
-                if (path.Equals("scripts/devtools/Update-VSCodeExtension.cmd", StringComparison.OrdinalIgnoreCase) || path.Equals("vscode-extension/package.json", StringComparison.OrdinalIgnoreCase))
+                if (path.Equals("scripts/devtools/Update-VSCodeExtension.cmd", StringComparison.OrdinalIgnoreCase) || path.Equals("vscode-extension/package.json", StringComparison.OrdinalIgnoreCase) || path.Contains("package", StringComparison.OrdinalIgnoreCase) || path.Contains("update", StringComparison.OrdinalIgnoreCase))
                 {
-                    boost += 1.4; reasons.Add("task-install-update");
+                    boost += (path.Equals("scripts/devtools/Update-VSCodeExtension.cmd", StringComparison.OrdinalIgnoreCase) || path.Equals("vscode-extension/package.json", StringComparison.OrdinalIgnoreCase)) ? 2.4 : 1.3;
+                    reasons.Add("task-install-update");
                 }
             }
             if (ContainsAnyToken(text, "snapshot", "source archive"))

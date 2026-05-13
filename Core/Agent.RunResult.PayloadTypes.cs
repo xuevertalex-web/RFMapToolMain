@@ -348,6 +348,12 @@ namespace LocalCursorAgent.Core
             [JsonPropertyName("selectedRoles")]
             public string[] SelectedRoles { get; init; } = Array.Empty<string>();
 
+            [JsonPropertyName("topSignalFiles")]
+            public string[] TopSignalFiles { get; init; } = Array.Empty<string>();
+
+            [JsonPropertyName("topSignalReasons")]
+            public string[] TopSignalReasons { get; init; } = Array.Empty<string>();
+
             [JsonPropertyName("reason")]
             public string Reason { get; init; } = string.Empty;
 

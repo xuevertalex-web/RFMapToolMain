@@ -709,6 +709,8 @@ namespace LocalCursorAgent.Context
             {
                 SelectedZones = plan.SelectedZones.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
                 SelectedRoles = plan.SelectedRoles.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
+                TopSignalFiles = (plan.TopSignalFiles ?? new List<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).Take(5).ToList(),
+                TopSignalReasons = (plan.TopSignalReasons ?? new List<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).Take(5).ToList(),
                 Reason = plan.Reason ?? string.Empty,
                 Confidence = plan.Confidence,
                 FallbackUsed = plan.FallbackUsed
@@ -759,6 +761,8 @@ namespace LocalCursorAgent.Context
     {
         public List<string> SelectedZones { get; set; } = new();
         public List<string> SelectedRoles { get; set; } = new();
+        public List<string> TopSignalFiles { get; set; } = new();
+        public List<string> TopSignalReasons { get; set; } = new();
         public string Reason { get; set; } = string.Empty;
         public double Confidence { get; set; }
         public bool FallbackUsed { get; set; }
@@ -769,6 +773,8 @@ namespace LocalCursorAgent.Context
             {
                 SelectedZones = SelectedZones.ToList(),
                 SelectedRoles = SelectedRoles.ToList(),
+                TopSignalFiles = TopSignalFiles.ToList(),
+                TopSignalReasons = TopSignalReasons.ToList(),
                 Reason = Reason,
                 Confidence = Confidence,
                 FallbackUsed = FallbackUsed

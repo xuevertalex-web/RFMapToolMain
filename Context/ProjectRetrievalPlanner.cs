@@ -26,6 +26,7 @@ namespace LocalCursorAgent.Context
             Match(text, zones, roles, reasons, new[] { "safety", "permission", "approval", "guard" }, "Security", "test", "safety_guard");
             Match(text, zones, roles, reasons, new[] { "process", "command", "build" }, "Execution", "devtool", "process_build");
             Match(text, zones, roles, reasons, new[] { "context", "retrieval", "budget", "index" }, "Context", "indexing", "context_indexing");
+            Match(text, zones, roles, reasons, new[] { "vsix", "install", "update", "workflow", "stale", "package", "расширение", "установка", "пакет" }, "scripts/devtools", "devtool", "install_update");
             Match(text, zones, roles, reasons, new[] { "doctor", "smoke", "devtools", "script" }, "scripts/devtools", "devtool", "devtools");
             Match(text, zones, roles, reasons, new[] { "tests", "regression", "safetytests" }, "SafetyTests", "test", "tests");
             Match(text, zones, roles, reasons, new[] { "llm", "model", "provider" }, "LLM", "llm", "llm");

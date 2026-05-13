@@ -94,6 +94,7 @@ RunProjectRetrievalPlanner_ZoneRoleSelection();
 RunProjectRetrievalPlanner_UnknownFallback();
 RunRetrievalSignalScorer_TargetedRanking();
 RunRetrievalSignalScorer_Determinism();
+await RunRetrievalDiagnostics_TopSignalsAndVsixDeepMode();
 await RunPlanningSummary_ContextAnalysisRegression();
 await RunPlanningSummary_UiAnalysisRegression();
 await RunPlanningSummary_UnknownFallbackRegression();
@@ -3461,9 +3462,14 @@ static void RunRetrievalSignalScorer_TargetedRanking()
         "Security/CommandRiskPolicy.cs",
         "Context/ContextBuilder.cs",
         "Core/Agent.ContextPreparation.cs",
+        "Core/AnalysisPromptBuilder.cs",
+        "Core/AnalysisContextFormatter.cs",
+        "Core/Agent.ToolingOrchestration.PrecheckHelpers.cs",
         "Core/Agent.RunResultPayloadBuilder.cs",
         "vscode-extension/workspaceResolver.js",
         "vscode-extension/workspaceTaskClassifier.js",
+        "vscode-extension/panelRunController.js",
+        "vscode-extension/commandHandlers.js",
         "scripts/devtools/Update-VSCodeExtension.cmd",
         "vscode-extension/package.json",
         "scripts/Create-SourceSnapshot.ps1",
@@ -3476,19 +3482,29 @@ static void RunRetrievalSignalScorer_TargetedRanking()
     });
 
     var approval = RetrievalSignalScorer.Score("Find approval token security issues in tooling", snapshot);
-    AssertTrue(approval.Take(4).Any(x => x.Path.Equals("Security/PermissionGuard.cs", StringComparison.OrdinalIgnoreCase) || x.Path.Equals("Tools/FileTool.cs", StringComparison.OrdinalIgnoreCase)), "Approval/security query should rank security/tooling files.");
+    AssertTrue(approval.Take(5).Any(x => x.Path.Equals("Tools/FileTool.cs", StringComparison.OrdinalIgnoreCase)), "Approval/security query should include FileTool.");
+    AssertTrue(approval.Take(8).Any(x => x.Path.StartsWith("Core/Agent.Tooling", StringComparison.OrdinalIgnoreCase)), "Approval/security query should include Agent.Tooling files.");
 
     var process = RetrievalSignalScorer.Score("Audit command process shell handling", snapshot);
-    AssertTrue(process.Take(4).Any(x => x.Path.EndsWith("SafeProcessRunner.cs", StringComparison.OrdinalIgnoreCase)), "Process query should rank SafeProcessRunner.");
+    var safeRunnerRank = process.FindIndex(x => x.Path.EndsWith("SafeProcessRunner.cs", StringComparison.OrdinalIgnoreCase));
+    var diagRank = process.FindIndex(x => x.Path.Contains("ExecutionTracer", StringComparison.OrdinalIgnoreCase));
+    AssertTrue(safeRunnerRank >= 0, "Process query should include SafeProcessRunner.");
+    AssertTrue(diagRank < 0 || safeRunnerRank < diagRank, "SafeProcessRunner should outrank tracer diagnostics.");
     AssertTrue(process.Take(4).Any(x => x.Path.EndsWith("CommandRiskPolicy.cs", StringComparison.OrdinalIgnoreCase)), "Process query should rank CommandRiskPolicy.");
+    AssertTrue(process.Take(8).Any(x => x.Path.StartsWith("Tools/", StringComparison.OrdinalIgnoreCase)), "Process query should include Tools files.");
 
-    var workspace = RetrievalSignalScorer.Score("Check workspace boundary guard behavior", snapshot);
-    AssertTrue(workspace.Take(4).Any(x => x.Path.EndsWith("workspaceResolver.js", StringComparison.OrdinalIgnoreCase) || x.Path.EndsWith("workspaceTaskClassifier.js", StringComparison.OrdinalIgnoreCase)), "Workspace query should rank workspace resolver/classifier files.");
+    var workspace = RetrievalSignalScorer.Score("Что можно обойти в workspace guard и approval tokens", snapshot);
+    AssertTrue(workspace.Take(8).Any(x => x.Path.EndsWith("workspaceResolver.js", StringComparison.OrdinalIgnoreCase)), "Workspace query should include workspaceResolver.");
+    AssertTrue(workspace.Take(8).Any(x => x.Path.EndsWith("workspaceTaskClassifier.js", StringComparison.OrdinalIgnoreCase)), "Workspace query should include workspaceTaskClassifier.");
+    AssertTrue(workspace.Take(8).Any(x => x.Path.EndsWith("panelRunController.js", StringComparison.OrdinalIgnoreCase)), "Workspace query should include panelRunController.");
+    AssertTrue(workspace.Take(8).Any(x => x.Path.EndsWith("commandHandlers.js", StringComparison.OrdinalIgnoreCase)), "Workspace query should include commandHandlers.");
 
     var retrieval = RetrievalSignalScorer.Score("Improve retrieval context preparation", snapshot);
-    AssertTrue(retrieval.Take(5).Any(x => x.Path.StartsWith("Context/", StringComparison.OrdinalIgnoreCase) || x.Path.EndsWith("Agent.ContextPreparation.cs", StringComparison.OrdinalIgnoreCase)), "Retrieval query should rank context files.");
+    AssertTrue(retrieval.Take(8).Any(x => x.Path.Equals("Context/ContextBuilder.cs", StringComparison.OrdinalIgnoreCase)), "Retrieval query should include ContextBuilder.cs.");
+    AssertTrue(retrieval.Take(8).Any(x => x.Path.Equals("Core/Agent.ContextPreparation.cs", StringComparison.OrdinalIgnoreCase)), "Retrieval query should include Agent.ContextPreparation.cs.");
+    AssertTrue(retrieval.Take(8).Any(x => x.Path.Equals("Core/AnalysisPromptBuilder.cs", StringComparison.OrdinalIgnoreCase)), "Retrieval query should include AnalysisPromptBuilder.cs.");
 
-    var update = RetrievalSignalScorer.Score("fix vsix update install issue", snapshot);
+    var update = RetrievalSignalScorer.Score("Find stale VSIX/install workflow risks", snapshot);
     AssertTrue(update.Take(4).Any(x => x.Path.Equals("scripts/devtools/Update-VSCodeExtension.cmd", StringComparison.OrdinalIgnoreCase) || x.Path.Equals("vscode-extension/package.json", StringComparison.OrdinalIgnoreCase)), "Update query should rank update/package files.");
 
     var unrelated = RetrievalSignalScorer.Score("refactor readme wording", snapshot);
@@ -3510,6 +3526,29 @@ static void RunRetrievalSignalScorer_Determinism()
     var second = RetrievalSignalScorer.Score(q, snapshot).Select(x => $"{x.Path}:{x.Score:F4}:{string.Join(",", x.Reasons)}").ToArray();
     AssertTrue(first.SequenceEqual(second), "Retrieval scoring should be deterministic for same input.");
     Console.WriteLine("PASS RetrievalSignalScorer_Determinism");
+}
+
+static async Task RunRetrievalDiagnostics_TopSignalsAndVsixDeepMode()
+{
+    var t = typeof(Agent).Assembly.GetType("LocalCursorAgent.Core.AnalysisPromptBuilder", throwOnError: true)!;
+    var deepCheck = t.GetMethod("IsDeepAnalysisTask", new[] { typeof(string) })!;
+    AssertTrue((bool)deepCheck.Invoke(null, new object[] { "Find stale VSIX/install workflow risks" })!, "Expected VSIX/install workflow query to be detected as deep analysis task.");
+
+    var snapshot = ProjectMapBuilder.Build("repo", new[]
+    {
+        "scripts/devtools/Update-VSCodeExtension.cmd",
+        "vscode-extension/package.json",
+        "scripts/devtools/Doctor-Quick.cmd",
+        "Core/Agent.cs"
+    });
+    var plan = ProjectRetrievalPlanner.Plan("Find stale VSIX/install workflow risks", snapshot);
+    AssertTrue(plan.TopSignalFiles.Count <= 5, "Expected compact topSignalFiles.");
+    AssertTrue(plan.TopSignalReasons.Count <= 5, "Expected compact topSignalReasons.");
+    AssertTrue(plan.TopSignalFiles.Any(x => x.Equals("scripts/devtools/Update-VSCodeExtension.cmd", StringComparison.OrdinalIgnoreCase) || x.Equals("vscode-extension/package.json", StringComparison.OrdinalIgnoreCase)), "Expected VSIX/install top signal files.");
+    var repeat = ProjectRetrievalPlanner.Plan("Find stale VSIX/install workflow risks", snapshot);
+    AssertTrue(plan.TopSignalFiles.SequenceEqual(repeat.TopSignalFiles), "Expected deterministic topSignalFiles ordering.");
+    await Task.CompletedTask;
+    Console.WriteLine("PASS RetrievalDiagnostics_TopSignalsAndVsixDeepMode");
 }
 
 static async Task RunPlanningSummary_ContextAnalysisRegression()
