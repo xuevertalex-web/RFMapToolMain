@@ -28,15 +28,24 @@ if (Test-Path $archivePath) { Remove-Item -LiteralPath $archivePath -Force }
 $includeDirs = @(
     "Core",
     "Context",
+    "Configuration",
+    "Diagnostics",
+    "Embeddings",
+    "Execution",
     "Indexing",
+    "LLM",
+    "Memory",
     "SafetyTests",
+    "Security",
     "scripts",
+    "Tools",
     "vscode-extension"
 )
 
 $includeRootPatterns = @(
     "*.sln",
     "*.csproj",
+    "*.cs",
     "*.props",
     "*.targets",
     "*.json",
