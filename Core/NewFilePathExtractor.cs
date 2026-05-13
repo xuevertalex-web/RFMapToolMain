@@ -14,15 +14,17 @@ namespace LocalCursorAgent.Core
                                  normalized.Contains("generate") ||
                                  normalized.Contains("write") ||
                                  normalized.Contains("make") ||
-                                 normalized.Contains("создай") ||
-                                 normalized.Contains("создать") ||
-                                 normalized.Contains("добавь") ||
-                                 normalized.Contains("добавить") ||
-                                 normalized.Contains("напиши") ||
-                                 normalized.Contains("сделай") ||
-                                 normalized.Contains("саздай") ||
-                                 normalized.Contains("зделай") ||
-                                 normalized.Contains("напеши");
+                                 normalized.Contains("\u0441\u043e\u0437\u0434\u0430\u0439") ||
+                                 normalized.Contains("\u0441\u043e\u0437\u0434\u0430\u0442\u044c") ||
+                                 normalized.Contains("\u0434\u043e\u0431\u0430\u0432\u044c") ||
+                                 normalized.Contains("\u0434\u043e\u0431\u0430\u0432\u0438\u0442\u044c") ||
+                                 normalized.Contains("\u043d\u0430\u043f\u0438\u0448\u0438") ||
+                                 normalized.Contains("\u043d\u0430\u043f\u0435\u0448\u0438") ||
+                                 normalized.Contains("\u0441\u0434\u0435\u043b\u0430\u0439") ||
+                                 normalized.Contains("\u0441\u0434\u0435\u043b\u0430\u0442\u044c") ||
+                                 normalized.Contains("\u0441\u0430\u0437\u0434\u0430\u0439") ||
+                                 normalized.Contains("\u0437\u0434\u0435\u043b\u0430\u0439") ||
+                                 normalized.Contains("\u0441\u0433\u0435\u043d\u0435\u0440\u0438\u0440\u0443\u0439");
 
             if (!isCreateIntent)
                 return null;
@@ -45,7 +47,6 @@ namespace LocalCursorAgent.Core
         {
             if (Regex.IsMatch(candidate, @"^[a-zA-Z][a-zA-Z0-9+\-.]*://"))
                 return true;
-
             var tokenStart = matchIndex;
             while (tokenStart > 0)
             {
@@ -54,7 +55,6 @@ namespace LocalCursorAgent.Core
                     break;
                 tokenStart--;
             }
-
             var tokenEnd = matchIndex + matchLength;
             while (tokenEnd < task.Length)
             {
@@ -63,7 +63,6 @@ namespace LocalCursorAgent.Core
                     break;
                 tokenEnd++;
             }
-
             var surroundingToken = task[tokenStart..tokenEnd];
             return surroundingToken.Contains("://", StringComparison.Ordinal);
         }
