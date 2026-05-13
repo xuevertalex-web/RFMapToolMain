@@ -103,13 +103,14 @@ public sealed class SafeProcessRunner
         var startInfo = new ProcessStartInfo
         {
             FileName = request.Command,
-            Arguments = BuildArguments(GetNormalizedArgs(request)),
             WorkingDirectory = workingDirectory,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true
         };
+        foreach (var arg in GetNormalizedArgs(request))
+            startInfo.ArgumentList.Add(arg);
 
         using var process = new Process { StartInfo = startInfo };
         var startedAt = DateTime.UtcNow;
@@ -206,7 +207,7 @@ public sealed class SafeProcessRunner
             StdOut = stdout,
             StdErr = stderr,
             Command = request.Command,
-            Arguments = BuildArguments(GetNormalizedArgs(request)),
+            Arguments = string.Join(" ", GetNormalizedArgs(request)),
             WorkingDirectory = workingDirectory,
             ReasonCode = timedOut ? "PROCESS_TIMEOUT" : (canceled ? "PROCESS_CANCELED" : PermissionReasonCodes.Allowed),
             Message = canceled ? "Process execution was canceled" : string.Empty
@@ -250,17 +251,6 @@ public sealed class SafeProcessRunner
                 // Ignore cleanup failures.
             }
         }
-    }
-
-    private static string BuildArguments(IEnumerable<string>? args)
-        => args is null ? string.Empty : string.Join(" ", args.Select(QuoteArgument));
-
-    private static string QuoteArgument(string arg)
-    {
-        if (string.IsNullOrWhiteSpace(arg))
-            return "\"\"";
-
-        return arg.Any(char.IsWhiteSpace) ? $"\"{arg.Replace("\"", "\\\"")}\"" : arg;
     }
 
     private bool IsWithinExecutionRoot(string path)
