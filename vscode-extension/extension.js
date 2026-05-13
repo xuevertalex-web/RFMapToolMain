@@ -6,6 +6,7 @@ const { createEditorNavigationService } = require('./editorNavigation');
 const { createExportService } = require('./exportService');
 const { createPanelMessageHandler } = require('./messageRouter');
 const { createExtensionCommandHandlers } = require('./commandHandlers');
+const { createRuntimeLogger } = require('./runtimeLogger');
 const {
   loadSelectedOllamaModel,
   getSelectedOllamaModelSync,
@@ -34,6 +35,12 @@ function activate(context) {
       vscode.workspace.getConfiguration('localCursorAgent').get('targetWorkspacePath') || ''
     ).trim();
     const getAllowBackendWorkspace = () => vscode.workspace.getConfiguration('localCursorAgent').get('allowBackendWorkspace') === true;
+    const runtimeLogger = createRuntimeLogger({
+      extensionRoot,
+      workspaceRoot: getTargetWorkspacePath(),
+      backendProjectPath: getBackendProjectPath()
+    });
+    runtimeLogger.info('Local Cursor Agent activation started');
     const resolveConfiguredWorkspaceRoot = () => resolveWorkspaceRoot({
       configuredWorkspaceRoot: getTargetWorkspacePath(),
       backendProjectPath: getBackendProjectPath(),
@@ -57,6 +64,7 @@ function activate(context) {
     };
     const commandHandlers = createExtensionCommandHandlers({
       output,
+      runtimeLogger,
       extensionRoot,
       resolveWorkspaceRoot: resolveConfiguredWorkspaceRoot,
       runAgent: runConfiguredAgent,
@@ -74,6 +82,7 @@ function activate(context) {
     const createMessageHandler = webviewHost => createPanelMessageHandler({
       panel: webviewHost,
       output,
+      runtimeLogger,
       extensionRoot,
       resolveWorkspaceRoot: resolveConfiguredWorkspaceRoot,
       runAgent: runConfiguredAgent,
@@ -153,6 +162,7 @@ function activate(context) {
       output.appendLine(`Model selection init failed: ${message}`);
     });
     output.appendLine('Local Cursor Agent activation completed');
+    runtimeLogger.info('Local Cursor Agent activation completed');
 
     if (process.env.LOCAL_CURSOR_AGENT_AUTO_OPEN_PANEL === '1') {
       setTimeout(() => {
@@ -162,6 +172,7 @@ function activate(context) {
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           output.appendLine(`Local Cursor Agent chat auto-open failed: ${message}`);
+          runtimeLogger.error('Local Cursor Agent chat auto-open failed', { message });
           vscode.window.showErrorMessage(`Local Cursor Agent chat failed to open: ${message}`);
         }
       }, 500);
@@ -172,6 +183,14 @@ function activate(context) {
       : String(err);
     output.appendLine('Local Cursor Agent activation failed');
     output.appendLine(message);
+    try {
+      const fallbackLogger = createRuntimeLogger({
+        extensionRoot: context.extensionPath,
+        workspaceRoot: '',
+        backendProjectPath: ''
+      });
+      fallbackLogger.error('Local Cursor Agent activation failed', { message });
+    } catch (_) {}
     output.show(true);
     vscode.window.showErrorMessage(`Local Cursor Agent activation failed: ${err instanceof Error ? err.message : String(err)}`);
     throw err;
