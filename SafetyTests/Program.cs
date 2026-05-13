@@ -216,7 +216,17 @@ static async Task RunAuditRoutingAndCandidateSeedingRegression()
         AssertTrue(context.GetProperty("bypassedFastPath").GetBoolean(), $"Expected bypassedFastPath=true: {c.Task}");
         var seeded = context.GetProperty("seededCandidateFiles").EnumerateArray().Select(x => x.GetString() ?? string.Empty).ToArray();
         AssertTrue(seeded.Length <= 5, "Expected compact seededCandidateFiles diagnostics.");
-        AssertTrue(structured.GetProperty("retrievalPlanningDiagnostics").ValueKind == JsonValueKind.Object, "Expected retrieval diagnostics object.");
+        var retrieval = structured.GetProperty("retrievalPlanningDiagnostics");
+        AssertTrue(retrieval.ValueKind == JsonValueKind.Object, "Expected retrieval diagnostics object.");
+        var topFiles = retrieval.GetProperty("topSignalFiles").EnumerateArray().Select(x => x.GetString() ?? string.Empty).ToArray();
+        var topReasons = retrieval.GetProperty("topSignalReasons").EnumerateArray().Select(x => x.GetString() ?? string.Empty).ToArray();
+        AssertTrue(topFiles.Length > 0, $"Expected non-empty topSignalFiles for audit query: {c.Task}");
+        AssertTrue(topReasons.Length > 0, $"Expected non-empty topSignalReasons for audit query: {c.Task}");
+        if (c.Task.Contains("bypasses", StringComparison.OrdinalIgnoreCase) || c.Task.Contains("command execution", StringComparison.OrdinalIgnoreCase))
+        {
+            var items = context.GetProperty("items").EnumerateArray().Select(x => x.GetProperty("path").GetString() ?? string.Empty).ToArray();
+            AssertTrue(items.Length > 0, $"Expected non-empty selected context files for audit query: {c.Task}");
+        }
     }
 
     var unrelated = await RunIntentMatrixTask("Explain this project", new FakeNoToolAnalysisClient(), registerFileTool: true);

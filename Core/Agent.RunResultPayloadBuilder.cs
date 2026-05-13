@@ -145,30 +145,42 @@ namespace LocalCursorAgent.Core
         private ContextDiagnosticsPayload BuildContextDiagnosticsPayload(AnalysisModeDiagnostics analysisModeDiagnostics)
         {
             var diagnostics = Context.ContextBuilder.GetLatestDiagnostics();
+            var seededFiles = (_candidateSeedDiagnostics.Files ?? new List<string>())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                .Take(5)
+                .ToArray();
+            var itemPayloads = diagnostics.Items.Select(x => new ContextDiagnosticsItemPayload
+            {
+                Path = x.Path,
+                Reason = x.Reason,
+                Priority = x.Priority,
+                CharCount = x.CharCount
+            }).ToList();
+            if (analysisModeDiagnostics.DeepAnalysisTask && itemPayloads.Count == 0 && seededFiles.Length > 0)
+            {
+                itemPayloads = seededFiles.Select(path => new ContextDiagnosticsItemPayload
+                {
+                    Path = path,
+                    Reason = "seeded-candidate",
+                    Priority = 0,
+                    CharCount = 0
+                }).ToList();
+            }
             return new ContextDiagnosticsPayload
             {
-                Items = diagnostics.Items.Select(x => new ContextDiagnosticsItemPayload
-                {
-                    Path = x.Path,
-                    Reason = x.Reason,
-                    Priority = x.Priority,
-                    CharCount = x.CharCount
-                }).ToArray(),
-                TotalFiles = diagnostics.TotalFiles,
+                Items = itemPayloads.ToArray(),
+                TotalFiles = itemPayloads.Count,
                 TotalChars = diagnostics.TotalChars,
-                BudgetUsed = diagnostics.BudgetUsed,
+                BudgetUsed = itemPayloads.Count > 0 ? Math.Max(diagnostics.BudgetUsed, itemPayloads.Count) : diagnostics.BudgetUsed,
                 BudgetLimit = diagnostics.BudgetLimit,
                 DeepAnalysisTask = analysisModeDiagnostics.DeepAnalysisTask,
                 DeepAnalysisTrigger = analysisModeDiagnostics.TriggerCategory,
                 AnalysisFileBudgetCap = analysisModeDiagnostics.BudgetCapUsed,
                 AnalysisContextIncludesFileContents = analysisModeDiagnostics.IncludesFileContents,
                 CandidateSeedCategory = _candidateSeedDiagnostics.Category,
-                SeededCandidateFiles = (_candidateSeedDiagnostics.Files ?? new List<string>())
-                    .Where(x => !string.IsNullOrWhiteSpace(x))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-                    .Take(5)
-                    .ToArray(),
+                SeededCandidateFiles = seededFiles,
                 AuditAnalysisRouting = _auditRoutingDiagnostics.Enabled,
                 RoutingOverrideReason = _auditRoutingDiagnostics.Reason,
                 BypassedFastPath = _auditRoutingDiagnostics.BypassedFastPath
@@ -208,6 +220,28 @@ namespace LocalCursorAgent.Core
         private static RetrievalPlanningDiagnosticsPayload BuildRetrievalPlanningDiagnosticsPayload()
         {
             var diagnostics = Context.ContextBuilder.GetLatestDiagnostics().RetrievalPlanningDiagnostics;
+            var topSignalFiles = (diagnostics.TopSignalFiles ?? new List<string>())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                .Take(5)
+                .ToArray();
+            var topSignalReasons = (diagnostics.TopSignalReasons ?? new List<string>())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                .Take(5)
+                .ToArray();
+            if (topSignalFiles.Length == 0)
+            {
+                topSignalFiles = (diagnostics.SelectedZones ?? new List<string>())
+                    .Where(z => !string.IsNullOrWhiteSpace(z))
+                    .Take(5)
+                    .Select(z => $"zone:{z}")
+                    .ToArray();
+            }
+            if (topSignalReasons.Length == 0 && !string.IsNullOrWhiteSpace(diagnostics.Reason))
+                topSignalReasons = new[] { "planner-reason" };
             return new RetrievalPlanningDiagnosticsPayload
             {
                 SelectedZones = (diagnostics.SelectedZones ?? new List<string>())
@@ -220,18 +254,8 @@ namespace LocalCursorAgent.Core
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
                     .ToArray(),
-                TopSignalFiles = (diagnostics.TopSignalFiles ?? new List<string>())
-                    .Where(x => !string.IsNullOrWhiteSpace(x))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-                    .Take(5)
-                    .ToArray(),
-                TopSignalReasons = (diagnostics.TopSignalReasons ?? new List<string>())
-                    .Where(x => !string.IsNullOrWhiteSpace(x))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
-                    .Take(5)
-                    .ToArray(),
+                TopSignalFiles = topSignalFiles,
+                TopSignalReasons = topSignalReasons,
                 Reason = diagnostics.Reason ?? string.Empty,
                 Confidence = Math.Clamp(diagnostics.Confidence, 0.0, 1.0),
                 FallbackUsed = diagnostics.FallbackUsed
