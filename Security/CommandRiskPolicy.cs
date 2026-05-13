@@ -9,40 +9,113 @@ internal static class CommandRiskPolicy
             return false;
 
         var lowered = text.ToLowerInvariant();
-        return lowered.Contains("nvidia-smi", StringComparison.Ordinal) ||
-               lowered.Contains("curl ", StringComparison.Ordinal) ||
-               lowered.Contains("wget ", StringComparison.Ordinal) ||
-               lowered.Contains("invoke-webrequest", StringComparison.Ordinal) ||
-               lowered.Contains("invoke-restmethod", StringComparison.Ordinal) ||
-               lowered.Contains("netstat", StringComparison.Ordinal) ||
-               lowered.Contains("tcpdump", StringComparison.Ordinal) ||
-               lowered.Contains("wireshark", StringComparison.Ordinal) ||
-               lowered.Contains("tasklist", StringComparison.Ordinal) ||
-               lowered.Contains("get-process", StringComparison.Ordinal) ||
-               lowered.Contains("wmic", StringComparison.Ordinal) ||
-               lowered.Contains("pip install", StringComparison.Ordinal) ||
-               lowered.Contains("npm install -g", StringComparison.Ordinal) ||
-               lowered.Contains("winget install", StringComparison.Ordinal) ||
-               lowered.Contains("choco install", StringComparison.Ordinal) ||
-               lowered.Contains("apt install", StringComparison.Ordinal) ||
-               lowered.Contains("yum install", StringComparison.Ordinal) ||
-               lowered.Contains("dnf install", StringComparison.Ordinal) ||
-               lowered.Contains("powershell -enc", StringComparison.Ordinal) ||
-               lowered.Contains("remove-item -recurse", StringComparison.Ordinal) ||
-               lowered.Contains("rm -rf", StringComparison.Ordinal);
+        if (ContainsShellMeta(lowered))
+            return true;
+
+        var tokens = Tokenize(lowered);
+        if (tokens.Count == 0)
+            return false;
+
+        return ContainsHighRiskPattern(tokens);
     }
 
     public static string ResolveCommandRiskLevel(string? payload)
     {
-        var lowered = NormalizeCommandPayload(payload).ToLowerInvariant();
-        if (lowered.Contains("rm -rf", StringComparison.Ordinal) ||
-            lowered.Contains("remove-item -recurse", StringComparison.Ordinal) ||
-            lowered.Contains("powershell -enc", StringComparison.Ordinal))
+        var text = NormalizeCommandPayload(payload);
+        if (text.Length == 0)
+            return "medium";
+
+        var lowered = text.ToLowerInvariant();
+        if (ContainsCriticalPattern(Tokenize(lowered)) || ContainsShellMeta(lowered))
         {
             return "high";
         }
 
         return "medium";
+    }
+
+    private static bool ContainsHighRiskPattern(IReadOnlyList<string> tokens)
+    {
+        if (ContainsCriticalPattern(tokens))
+            return true;
+
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            var token = tokens[i];
+            if (token is "curl" or "wget" or "invoke-webrequest" or "invoke-restmethod" or "netstat" or "tcpdump" or "wireshark" or "tasklist" or "get-process" or "wmic" or "nvidia-smi")
+                return true;
+
+            if ((token is "pip" or "winget" or "choco" or "apt" or "yum" or "dnf") && i + 1 < tokens.Count && tokens[i + 1] == "install")
+                return true;
+
+            if (token == "npm" && i + 2 < tokens.Count && tokens[i + 1] == "install" && tokens[i + 2] == "-g")
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool ContainsCriticalPattern(IReadOnlyList<string> tokens)
+    {
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            var token = tokens[i];
+            if (token is "-encodedcommand" or "-enc" or "-rf" or "--force" or "-force" or "/s" or "/q")
+                return true;
+            if (token == "npm" && i + 1 < tokens.Count && tokens[i + 1] == "run")
+                return true;
+            if (token == "npx")
+                return true;
+            if (token is "iex" or "invoke-expression" or "start-process")
+                return true;
+            if (token is "rm" or "del" or "erase" or "rmdir" or "rd" or "remove-item" or "ri")
+                return true;
+            if (token == "git" && MatchesGitDestructive(tokens, i))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool MatchesGitDestructive(IReadOnlyList<string> tokens, int gitIndex)
+    {
+        if (gitIndex + 2 < tokens.Count && tokens[gitIndex + 1] == "reset" && tokens[gitIndex + 2] == "--hard")
+            return true;
+        if (gitIndex + 2 < tokens.Count && tokens[gitIndex + 1] == "clean" && tokens[gitIndex + 2].Contains("fd", StringComparison.Ordinal))
+            return true;
+        if (gitIndex + 3 < tokens.Count && tokens[gitIndex + 1] == "checkout" && tokens[gitIndex + 2] == "--" && tokens[gitIndex + 3] == ".")
+            return true;
+        if (gitIndex + 2 < tokens.Count && tokens[gitIndex + 1] == "restore" && tokens[gitIndex + 2] == ".")
+            return true;
+        return false;
+    }
+
+    private static bool ContainsShellMeta(string lowered)
+    {
+        return lowered.Contains("&&", StringComparison.Ordinal) ||
+               lowered.Contains("||", StringComparison.Ordinal) ||
+               lowered.Contains(';', StringComparison.Ordinal) ||
+               lowered.Contains('|', StringComparison.Ordinal) ||
+               lowered.Contains('`', StringComparison.Ordinal) ||
+               lowered.Contains("$(", StringComparison.Ordinal) ||
+               lowered.Contains(">>", StringComparison.Ordinal) ||
+               lowered.Contains('>', StringComparison.Ordinal);
+    }
+
+    private static List<string> Tokenize(string text)
+    {
+        var split = text.Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        var tokens = new List<string>(split.Length);
+        foreach (var raw in split)
+        {
+            var token = raw.Trim().Trim('"', '\'');
+            if (token.Length == 0)
+                continue;
+
+            tokens.Add(token);
+        }
+
+        return tokens;
     }
 
     public static bool HasExplicitApprovalMarker(string? payload)

@@ -58,6 +58,7 @@ await RunProcessArgumentListPreservesArgumentsRegression();
 await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
 await RunDestructiveFileApprovalMarkerRegression();
 await RunGuardedToolExplicitApprovalHandoffRegression();
+RunCommandRiskPolicyTokenizationRegression();
 RunExtractRequestedNewFilePath_ExtensionRegression();
 RunExtractRequestedNewFilePath_NoCreateIntentRegression();
 RunExtractRequestedNewFilePath_NoExtensionRegression();
@@ -2453,6 +2454,31 @@ static async Task RunRuntimeGpuDiagnosticsTruthfulReportingRegression()
     AssertTrue(root.GetProperty("provider").GetString() == "ollama", "Expected provider=ollama.");
     AssertTrue(root.GetProperty("gpuUsageMeasured").GetBoolean() == false, "Expected gpuUsageMeasured=false without measured diagnostics output.");
     Console.WriteLine("PASS RuntimeGpuDiagnostics_TruthfulReporting");
+}
+
+static void RunCommandRiskPolicyTokenizationRegression()
+{
+    var t = typeof(Agent).Assembly.GetType("LocalCursorAgent.Security.CommandRiskPolicy", throwOnError: true)!;
+    var isHighRisk = t.GetMethod("IsHighRiskCommand", new[] { typeof(string) })!;
+    var resolveRisk = t.GetMethod("ResolveCommandRiskLevel", new[] { typeof(string) })!;
+    bool High(string command) => (bool)isHighRisk.Invoke(null, new object[] { command })!;
+    string Risk(string command) => (string)resolveRisk.Invoke(null, new object[] { command })!;
+
+    AssertTrue(!High("dotnet --version"), "Expected safe baseline command to remain non-high-risk.");
+    AssertTrue(High("ri TEST.md"), "Expected Remove-Item alias to be high-risk.");
+    AssertTrue(High("rd /s /q temp"), "Expected rd /s /q to be high-risk.");
+    AssertTrue(High("erase /q temp.txt"), "Expected erase alias to be high-risk.");
+    AssertTrue(High("git reset --hard"), "Expected destructive git reset to be high-risk.");
+    AssertTrue(High("git clean -fd"), "Expected destructive git clean to be high-risk.");
+    AssertTrue(High("git checkout -- ."), "Expected destructive git checkout to be high-risk.");
+    AssertTrue(High("git restore ."), "Expected destructive git restore to be high-risk.");
+    AssertTrue(High("powershell -EncodedCommand SQBlAHgA"), "Expected encoded PowerShell command to be high-risk.");
+    AssertTrue(High("npm run dangerous-script"), "Expected npm run script execution to be high-risk.");
+    AssertTrue(High("echo ok && whoami"), "Expected chained command to be high-risk.");
+    AssertTrue(Risk("rm -rf /tmp/test") == "high", "Expected rm -rf to resolve as high.");
+    AssertTrue(Risk("powershell -enc SQBlAHgA") == "high", "Expected encoded PowerShell to resolve as high.");
+    AssertTrue(Risk("git reset --hard") == "high", "Expected destructive git reset to resolve as high.");
+    Console.WriteLine("PASS RunCommandRiskPolicy_TokenizationRegression");
 }
 
 static async Task RunDestructiveFileApprovalMarkerRegression()
