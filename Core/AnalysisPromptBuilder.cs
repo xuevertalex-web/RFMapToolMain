@@ -16,13 +16,15 @@ namespace LocalCursorAgent.Core
             "security", "audit", "vulnerability", "exploit", "bypass", "permission", "approval",
             "sandbox", "workspace boundary", "path traversal", "command execution", "deep analysis",
             "full analysis", "review architecture", "vsix", "install", "stale", "package", "workflow", "update",
+            "find bypasses", "weak spots", "failure modes", "blind spots", "risks", "attack path", "exploit path", "adversarial audit", "security audit",
             "\u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043d\u0438\u0435", "\u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430", "\u043f\u0430\u043a\u0435\u0442",
             "\u0443\u044f\u0437\u0432\u0438\u043c\u043e\u0441\u0442\u044c", // уязвимость
             "\u0430\u0443\u0434\u0438\u0442", // аудит
             "\u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u044c", // безопасность
             "\u043e\u0431\u0445\u043e\u0434", // обход
             "\u0441\u043b\u043e\u043c\u0430\u0442\u044c", // сломать
-            "\u0434\u044b\u0440\u0430" // дыра
+            "\u0434\u044b\u0440\u0430", // дыра
+            "\u0441\u043b\u0430\u0431\u044b\u0435 \u043c\u0435\u0441\u0442\u0430", "\u0440\u0438\u0441\u043a\u0438", "\u0430\u0443\u0434\u0438\u0442 \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438", "\u0447\u0442\u043e \u043c\u043e\u0436\u043d\u043e \u043e\u0431\u043e\u0439\u0442\u0438"
         };
 
         private static readonly string[] RiskNouns = new[]

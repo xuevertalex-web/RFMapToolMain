@@ -32,6 +32,7 @@ namespace LocalCursorAgent.Core
         private readonly WorkspaceResolutionResult? _workspaceResolution;
         private AnalysisModeDiagnostics _analysisModeDiagnostics = AnalysisModeDiagnostics.Default;
         private CandidateSeedDiagnostics _candidateSeedDiagnostics = CandidateSeedDiagnostics.Default;
+        private AuditRoutingDiagnostics _auditRoutingDiagnostics = AuditRoutingDiagnostics.Default;
         private int _lastLlmRetryCount;
         private string _lastLlmErrorType = string.Empty;
 
@@ -53,6 +54,14 @@ namespace LocalCursorAgent.Core
             public static CandidateSeedDiagnostics Default => new("none", new List<string>());
             public string Category { get; } = category ?? "none";
             public List<string> Files { get; } = files ?? new List<string>();
+        }
+
+        private readonly struct AuditRoutingDiagnostics(bool enabled, string reason, bool bypassedFastPath)
+        {
+            public static AuditRoutingDiagnostics Default => new(false, "none", false);
+            public bool Enabled { get; } = enabled;
+            public string Reason { get; } = reason ?? "none";
+            public bool BypassedFastPath { get; } = bypassedFastPath;
         }
 
         public Agent(

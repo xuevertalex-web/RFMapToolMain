@@ -127,8 +127,8 @@ static void RunDeepAnalysisDetectionRegression()
     var riskComboTrigger = (string)riskCombo.GetType().GetProperty("Trigger")!.GetValue(riskCombo)!;
     var ruRiskComboIsDeep = (bool)ruRiskCombo.GetType().GetProperty("IsDeep")!.GetValue(ruRiskCombo)!;
     var ruRiskComboTrigger = (string)ruRiskCombo.GetType().GetProperty("Trigger")!.GetValue(ruRiskCombo)!;
-    AssertTrue(riskComboIsDeep && riskComboTrigger == "risk-combination", "Expected fallback risk-combination deep trigger.");
-    AssertTrue(ruRiskComboIsDeep && ruRiskComboTrigger == "risk-combination", "Expected Russian fallback risk-combination deep trigger.");
+    AssertTrue(riskComboIsDeep && (riskComboTrigger == "risk-combination" || riskComboTrigger == "keyword"), "Expected deep trigger for weak-spots query.");
+    AssertTrue(ruRiskComboIsDeep && (ruRiskComboTrigger == "risk-combination" || ruRiskComboTrigger == "keyword"), "Expected Russian deep trigger.");
     AssertTrue(!(bool)m.Invoke(null, new object[] { "Explain this project" })!, "Expected simple overview to remain non-deep analysis.");
     Console.WriteLine("PASS DeepAnalysisDetectionRegression");
 }
@@ -194,11 +194,11 @@ static async Task RunAuditRoutingAndCandidateSeedingRegression()
 {
     var cases = new (string Task, string[] ExpectedSeeds)[]
     {
-        ("Analyze only: Find bypasses in approval tokens and destructive file operations", new[] { "Tools/FileTool.cs", "SafetyTests/Program.cs" }),
-        ("Analyze only: Find weak spots in command execution and shell handling", new[] { "Execution/SafeProcessRunner.cs", "Security/CommandRiskPolicy.cs" }),
-        ("Analyze only: Что можно обойти в workspace guard и approval tokens", new[] { "vscode-extension/workspaceResolver.js", "vscode-extension/workspaceTaskClassifier.js" }),
-        ("Analyze only: Find stale VSIX/install workflow risks", new[] { "scripts/devtools/Update-VSCodeExtension.cmd", "vscode-extension/package.json" }),
-        ("Analyze only: Find retrieval/context blind spots in deep analysis mode", new[] { "Core/Agent.ContextPreparation.cs", "Context/ContextBuilder.cs" })
+        ("Find bypasses in approval tokens and destructive file operations", new[] { "Tools/FileTool.cs", "SafetyTests/Program.cs" }),
+        ("Find weak spots in command execution and shell handling", new[] { "Execution/SafeProcessRunner.cs", "Security/CommandRiskPolicy.cs" }),
+        ("Что можно обойти в workspace guard и approval tokens", new[] { "vscode-extension/workspaceResolver.js", "vscode-extension/workspaceTaskClassifier.js" }),
+        ("Find stale VSIX/install workflow risks", new[] { "scripts/devtools/Update-VSCodeExtension.cmd", "vscode-extension/package.json" }),
+        ("Find retrieval/context blind spots in deep analysis mode", new[] { "Core/Agent.ContextPreparation.cs", "Context/ContextBuilder.cs" })
     };
 
     foreach (var c in cases)
@@ -206,12 +206,17 @@ static async Task RunAuditRoutingAndCandidateSeedingRegression()
         var structured = await RunIntentMatrixTask(c.Task, new FakeNoToolAnalysisClient(), registerFileTool: true);
         var reason = structured.GetProperty("reasonCode").GetString() ?? string.Empty;
         AssertTrue(!string.Equals(reason, "CLARIFICATION_REQUIRED", StringComparison.OrdinalIgnoreCase), $"Audit query should not route to clarification: {c.Task}");
+        AssertTrue(!string.Equals(reason, "SUCCESS_NO_TOOL_CALLS", StringComparison.OrdinalIgnoreCase), $"Audit query should not end as chat fast-path: {c.Task}");
+        AssertTrue(!string.Equals(reason, "TARGET_RESOLUTION_FAILED", StringComparison.OrdinalIgnoreCase), $"Audit query should not fail target-resolution gate: {c.Task}");
         var context = structured.GetProperty("contextDiagnostics");
         AssertTrue(context.GetProperty("deepAnalysisTask").GetBoolean(), $"Audit query should activate deep analysis: {c.Task}");
         var seedCategory = context.GetProperty("candidateSeedCategory").GetString() ?? string.Empty;
         AssertTrue(!string.Equals(seedCategory, "none", StringComparison.OrdinalIgnoreCase), $"Expected candidate seed category for query: {c.Task}");
+        AssertTrue(context.GetProperty("auditAnalysisRouting").GetBoolean(), $"Expected auditAnalysisRouting=true: {c.Task}");
+        AssertTrue(context.GetProperty("bypassedFastPath").GetBoolean(), $"Expected bypassedFastPath=true: {c.Task}");
         var seeded = context.GetProperty("seededCandidateFiles").EnumerateArray().Select(x => x.GetString() ?? string.Empty).ToArray();
         AssertTrue(seeded.Length <= 5, "Expected compact seededCandidateFiles diagnostics.");
+        AssertTrue(structured.GetProperty("retrievalPlanningDiagnostics").ValueKind == JsonValueKind.Object, "Expected retrieval diagnostics object.");
     }
 
     var unrelated = await RunIntentMatrixTask("Explain this project", new FakeNoToolAnalysisClient(), registerFileTool: true);

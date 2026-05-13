@@ -299,6 +299,15 @@ namespace LocalCursorAgent.Core
 
             [JsonPropertyName("seededCandidateFiles")]
             public string[] SeededCandidateFiles { get; init; } = Array.Empty<string>();
+
+            [JsonPropertyName("auditAnalysisRouting")]
+            public bool AuditAnalysisRouting { get; init; }
+
+            [JsonPropertyName("routingOverrideReason")]
+            public string RoutingOverrideReason { get; init; } = string.Empty;
+
+            [JsonPropertyName("bypassedFastPath")]
+            public bool BypassedFastPath { get; init; }
         }
 
         private sealed class ContextDiagnosticsItemPayload

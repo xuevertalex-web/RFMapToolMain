@@ -17,7 +17,7 @@ namespace LocalCursorAgent.Core
             context.RunStartedUtc = bootstrap.RunStartedUtc;
             context.Tracer = bootstrap.Tracer;
             context.RequestedNewFile = bootstrap.RequestedNewFile;
-            context.AnalysisOnlyTask = TaskPrecheckHeuristics.IsAnalysisOnlyTask(context.Task);
+            context.AnalysisOnlyTask = TaskPrecheckHeuristics.IsAnalysisOnlyTask(context.Task) || AnalysisPromptBuilder.IsDeepAnalysisTask(context.Task);
             context.RuntimeClient = _llmClient as ILlmRuntimeClient;
             context.RuntimeMetadata = context.RuntimeClient?.Metadata;
             return RunStageResult.Continue();

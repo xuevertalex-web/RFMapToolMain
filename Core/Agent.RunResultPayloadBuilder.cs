@@ -168,7 +168,10 @@ namespace LocalCursorAgent.Core
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
                     .Take(5)
-                    .ToArray()
+                    .ToArray(),
+                AuditAnalysisRouting = _auditRoutingDiagnostics.Enabled,
+                RoutingOverrideReason = _auditRoutingDiagnostics.Reason,
+                BypassedFastPath = _auditRoutingDiagnostics.BypassedFastPath
             };
         }
 

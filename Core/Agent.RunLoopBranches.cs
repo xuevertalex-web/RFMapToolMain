@@ -9,9 +9,13 @@ namespace LocalCursorAgent.Core
     {
         private bool TryRejectTaskBeforeExecution(string task, ExecutionTracer tracer, out string finalResult)
         {
+            var auditAnalysisTask = AnalysisPromptBuilder.IsDeepAnalysisTask(task);
+            _auditRoutingDiagnostics = auditAnalysisTask
+                ? new AuditRoutingDiagnostics(true, "audit_analysis_override", true)
+                : AuditRoutingDiagnostics.Default;
             var decision = IntentDecisionEngine.Decide(task);
             var analysisOnlyTask = decision.Intent == UnifiedIntentKind.Analysis;
-            if (decision.Intent == UnifiedIntentKind.Chat)
+            if (!auditAnalysisTask && decision.Intent == UnifiedIntentKind.Chat)
             {
                 var message = BuildChatResponse(task);
                 tracer.MarkStopPoint("Agent", "SUCCESS_NO_TOOL_CALLS", "Conversational response without execution", new[] { "Indexing", "ModelRequest", "PatchApply", "BuildVerification" });
@@ -31,9 +35,9 @@ namespace LocalCursorAgent.Core
                 return true;
             }
 
-            if (!analysisOnlyTask && decision.NeedsClarification)
+            if (!auditAnalysisTask && !analysisOnlyTask && decision.NeedsClarification)
             {
-                var message = "Уточни, что именно нужно сделать: создать файл, изменить код или проверить ошибку? Напиши цель и файл/путь, если он известен.";
+                var message = "РЈС‚РѕС‡РЅРё, С‡С‚Рѕ РёРјРµРЅРЅРѕ РЅСѓР¶РЅРѕ СЃРґРµР»Р°С‚СЊ: СЃРѕР·РґР°С‚СЊ С„Р°Р№Р», РёР·РјРµРЅРёС‚СЊ РєРѕРґ РёР»Рё РїСЂРѕРІРµСЂРёС‚СЊ РѕС€РёР±РєСѓ? РќР°РїРёС€Рё С†РµР»СЊ Рё С„Р°Р№Р»/РїСѓС‚СЊ, РµСЃР»Рё РѕРЅ РёР·РІРµСЃС‚РµРЅ.";
                 tracer.MarkStopPoint("Agent", "CLARIFICATION_REQUIRED", message, new[] { "Indexing", "ModelRequest", "PatchApply", "BuildVerification" });
                 finalResult = FinalizeRunResult(
                     false,
@@ -59,7 +63,7 @@ namespace LocalCursorAgent.Core
                 return true;
             }
 
-            if (TaskPrecheckHeuristics.IsLowSignalTask(task))
+            if (!auditAnalysisTask && TaskPrecheckHeuristics.IsLowSignalTask(task))
             {
                 var message = "Task is too short or ambiguous. Provide a concrete natural-language request.";
                 tracer.MarkStopPoint("Agent", "NON_ACTIONABLE_TASK", message, new[] { "Indexing", "ModelRequest", "PatchApply", "BuildVerification" });
@@ -74,11 +78,11 @@ namespace LocalCursorAgent.Core
         private static string BuildChatResponse(string task)
         {
             var value = (task ?? string.Empty).Trim().ToLowerInvariant();
-            if (value.Contains("что ты умеешь") || value.Contains("что умеешь"))
-                return "Я могу: объяснить проект и код, предложить план, а по явной задаче — изменить файлы и проверить результат.";
-            if (value.Contains("объясни") || value.Contains("опиши проект"))
-                return "Это локальный coding-агент: он анализирует проект, выполняет явные инженерные задачи и возвращает structured результат с проверками.";
-            return "Я на связи. Сформулируй задачу: что создать, изменить или проверить.";
+            if (value.Contains("С‡С‚Рѕ С‚С‹ СѓРјРµРµС€СЊ") || value.Contains("С‡С‚Рѕ СѓРјРµРµС€СЊ"))
+                return "РЇ РјРѕРіСѓ: РѕР±СЉСЏСЃРЅРёС‚СЊ РїСЂРѕРµРєС‚ Рё РєРѕРґ, РїСЂРµРґР»РѕР¶РёС‚СЊ РїР»Р°РЅ, Р° РїРѕ СЏРІРЅРѕР№ Р·Р°РґР°С‡Рµ вЂ” РёР·РјРµРЅРёС‚СЊ С„Р°Р№Р»С‹ Рё РїСЂРѕРІРµСЂРёС‚СЊ СЂРµР·СѓР»СЊС‚Р°С‚.";
+            if (value.Contains("РѕР±СЉСЏСЃРЅРё") || value.Contains("РѕРїРёС€Рё РїСЂРѕРµРєС‚"))
+                return "Р­С‚Рѕ Р»РѕРєР°Р»СЊРЅС‹Р№ coding-Р°РіРµРЅС‚: РѕРЅ Р°РЅР°Р»РёР·РёСЂСѓРµС‚ РїСЂРѕРµРєС‚, РІС‹РїРѕР»РЅСЏРµС‚ СЏРІРЅС‹Рµ РёРЅР¶РµРЅРµСЂРЅС‹Рµ Р·Р°РґР°С‡Рё Рё РІРѕР·РІСЂР°С‰Р°РµС‚ structured СЂРµР·СѓР»СЊС‚Р°С‚ СЃ РїСЂРѕРІРµСЂРєР°РјРё.";
+            return "РЇ РЅР° СЃРІСЏР·Рё. РЎС„РѕСЂРјСѓР»РёСЂСѓР№ Р·Р°РґР°С‡Сѓ: С‡С‚Рѕ СЃРѕР·РґР°С‚СЊ, РёР·РјРµРЅРёС‚СЊ РёР»Рё РїСЂРѕРІРµСЂРёС‚СЊ.";
         }
 
         private bool TryHandleHardModelFailure(
