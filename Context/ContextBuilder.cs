@@ -532,18 +532,18 @@ namespace LocalCursorAgent.Context
 
         private static double GetRetrievalPlanBoost(string filePath, Dictionary<string, FileMapEntry> roleHints, ProjectRetrievalPlan retrievalPlan)
         {
-            if (retrievalPlan.FallbackUsed || retrievalPlan.Confidence < 0.5)
-                return 0.0;
-            if (!roleHints.TryGetValue(filePath, out var entry))
-                return 0.0;
-
             var boost = 0.0;
-            if (retrievalPlan.SelectedZones.Contains(entry.Zone, StringComparer.OrdinalIgnoreCase))
-                boost += 0.04;
-            if (retrievalPlan.SelectedRoles.Contains(entry.Role, StringComparer.OrdinalIgnoreCase))
-                boost += 0.04;
+            if (!retrievalPlan.FallbackUsed && retrievalPlan.Confidence >= 0.5 && roleHints.TryGetValue(filePath, out var entry))
+            {
+                if (retrievalPlan.SelectedZones.Contains(entry.Zone, StringComparer.OrdinalIgnoreCase))
+                    boost += 0.04;
+                if (retrievalPlan.SelectedRoles.Contains(entry.Role, StringComparer.OrdinalIgnoreCase))
+                    boost += 0.04;
+            }
+            if (retrievalPlan.TopSignalFiles.Contains(filePath, StringComparer.OrdinalIgnoreCase))
+                boost += 0.10;
 
-            return Math.Min(0.08, boost);
+            return Math.Min(0.18, boost);
         }
 
         private static int GetTargetMatchPriority(string filePath, string targetToken)

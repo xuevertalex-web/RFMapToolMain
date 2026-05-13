@@ -92,6 +92,8 @@ RunProjectMap_EntrypointsDetected_ByNameRules();
 RunProjectMap_UnknownPaths_FallbackStable();
 RunProjectRetrievalPlanner_ZoneRoleSelection();
 RunProjectRetrievalPlanner_UnknownFallback();
+RunRetrievalSignalScorer_TargetedRanking();
+RunRetrievalSignalScorer_Determinism();
 await RunPlanningSummary_ContextAnalysisRegression();
 await RunPlanningSummary_UiAnalysisRegression();
 await RunPlanningSummary_UnknownFallbackRegression();
@@ -3447,6 +3449,67 @@ static void RunProjectRetrievalPlanner_UnknownFallback()
     AssertTrue(plan.FallbackUsed, "Unknown task should fallback.");
     AssertTrue(plan.Confidence == 0.0, "Unknown task confidence should be 0.");
     Console.WriteLine("PASS ProjectRetrievalPlanner_UnknownFallback");
+}
+
+static void RunRetrievalSignalScorer_TargetedRanking()
+{
+    var snapshot = ProjectMapBuilder.Build("repo", new[]
+    {
+        "Security/PermissionGuard.cs",
+        "Tools/FileTool.cs",
+        "Execution/SafeProcessRunner.cs",
+        "Security/CommandRiskPolicy.cs",
+        "Context/ContextBuilder.cs",
+        "Core/Agent.ContextPreparation.cs",
+        "Core/Agent.RunResultPayloadBuilder.cs",
+        "vscode-extension/workspaceResolver.js",
+        "vscode-extension/workspaceTaskClassifier.js",
+        "scripts/devtools/Update-VSCodeExtension.cmd",
+        "vscode-extension/package.json",
+        "scripts/Create-SourceSnapshot.ps1",
+        "scripts/devtools/Create-SourceSnapshot.cmd",
+        ".editorconfig",
+        ".gitattributes",
+        "vscode-extension/encodingGuard.test.js",
+        "scripts/devtools/encoding-precommit-check.js",
+        "Docs/readme.md"
+    });
+
+    var approval = RetrievalSignalScorer.Score("Find approval token security issues in tooling", snapshot);
+    AssertTrue(approval.Take(4).Any(x => x.Path.Equals("Security/PermissionGuard.cs", StringComparison.OrdinalIgnoreCase) || x.Path.Equals("Tools/FileTool.cs", StringComparison.OrdinalIgnoreCase)), "Approval/security query should rank security/tooling files.");
+
+    var process = RetrievalSignalScorer.Score("Audit command process shell handling", snapshot);
+    AssertTrue(process.Take(4).Any(x => x.Path.EndsWith("SafeProcessRunner.cs", StringComparison.OrdinalIgnoreCase)), "Process query should rank SafeProcessRunner.");
+    AssertTrue(process.Take(4).Any(x => x.Path.EndsWith("CommandRiskPolicy.cs", StringComparison.OrdinalIgnoreCase)), "Process query should rank CommandRiskPolicy.");
+
+    var workspace = RetrievalSignalScorer.Score("Check workspace boundary guard behavior", snapshot);
+    AssertTrue(workspace.Take(4).Any(x => x.Path.EndsWith("workspaceResolver.js", StringComparison.OrdinalIgnoreCase) || x.Path.EndsWith("workspaceTaskClassifier.js", StringComparison.OrdinalIgnoreCase)), "Workspace query should rank workspace resolver/classifier files.");
+
+    var retrieval = RetrievalSignalScorer.Score("Improve retrieval context preparation", snapshot);
+    AssertTrue(retrieval.Take(5).Any(x => x.Path.StartsWith("Context/", StringComparison.OrdinalIgnoreCase) || x.Path.EndsWith("Agent.ContextPreparation.cs", StringComparison.OrdinalIgnoreCase)), "Retrieval query should rank context files.");
+
+    var update = RetrievalSignalScorer.Score("fix vsix update install issue", snapshot);
+    AssertTrue(update.Take(4).Any(x => x.Path.Equals("scripts/devtools/Update-VSCodeExtension.cmd", StringComparison.OrdinalIgnoreCase) || x.Path.Equals("vscode-extension/package.json", StringComparison.OrdinalIgnoreCase)), "Update query should rank update/package files.");
+
+    var unrelated = RetrievalSignalScorer.Score("refactor readme wording", snapshot);
+    AssertTrue(!(unrelated.FirstOrDefault()?.Path ?? string.Empty).StartsWith("Security/", StringComparison.OrdinalIgnoreCase), "Unrelated query should not over-boost security files to top rank.");
+    Console.WriteLine("PASS RetrievalSignalScorer_TargetedRanking");
+}
+
+static void RunRetrievalSignalScorer_Determinism()
+{
+    var snapshot = ProjectMapBuilder.Build("repo", new[]
+    {
+        "Execution/SafeProcessRunner.cs",
+        "Security/CommandRiskPolicy.cs",
+        "Core/Agent.ContextPreparation.cs",
+        "Context/ContextBuilder.cs"
+    });
+    var q = "Audit command process shell handling";
+    var first = RetrievalSignalScorer.Score(q, snapshot).Select(x => $"{x.Path}:{x.Score:F4}:{string.Join(",", x.Reasons)}").ToArray();
+    var second = RetrievalSignalScorer.Score(q, snapshot).Select(x => $"{x.Path}:{x.Score:F4}:{string.Join(",", x.Reasons)}").ToArray();
+    AssertTrue(first.SequenceEqual(second), "Retrieval scoring should be deterministic for same input.");
+    Console.WriteLine("PASS RetrievalSignalScorer_Determinism");
 }
 
 static async Task RunPlanningSummary_ContextAnalysisRegression()

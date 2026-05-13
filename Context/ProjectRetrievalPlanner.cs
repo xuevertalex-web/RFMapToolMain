@@ -6,6 +6,8 @@ namespace LocalCursorAgent.Context
     {
         public List<string> SelectedZones { get; init; } = new();
         public List<string> SelectedRoles { get; init; } = new();
+        public List<string> TopSignalFiles { get; init; } = new();
+        public List<string> TopSignalReasons { get; init; } = new();
         public string Reason { get; init; } = string.Empty;
         public double Confidence { get; init; }
         public bool FallbackUsed { get; init; }
@@ -30,12 +32,26 @@ namespace LocalCursorAgent.Context
             Match(text, zones, roles, reasons, new[] { "memory", "session", "recent" }, "Memory", "memory", "memory");
             Match(text, zones, roles, reasons, new[] { "diagnostics", "payload", "tracing" }, "Diagnostics", "diagnostics", "diagnostics");
 
+            // Augment with concept alias hints for natural-language queries
+            var conceptMatches = QueryConceptAliasMapper.Detect(text);
+            foreach (var match in conceptMatches)
+            {
+                bool added = false;
+                foreach (var z in match.ZoneHints) added |= zones.Add(z);
+                foreach (var r in match.RoleHints) added |= roles.Add(r);
+                if (added)
+                    reasons.Add("alias:" + match.Concept);
+            }
+
             if (zones.Count == 0 && roles.Count == 0)
             {
+                var scoredFallback = RetrievalSignalScorer.Score(text, snapshot).Take(6).ToList();
                 return new ProjectRetrievalPlan
                 {
                     SelectedZones = new List<string>(),
                     SelectedRoles = new List<string>(),
+                    TopSignalFiles = scoredFallback.Select(x => x.Path).ToList(),
+                    TopSignalReasons = scoredFallback.SelectMany(x => x.Reasons).Distinct(StringComparer.OrdinalIgnoreCase).Take(6).ToList(),
                     Reason = "no_keyword_match",
                     Confidence = 0.0,
                     FallbackUsed = true
@@ -48,11 +64,14 @@ namespace LocalCursorAgent.Context
             var selectedRoles = roles.OrderBy(r => r, StringComparer.OrdinalIgnoreCase).ToList();
 
             var confidence = Math.Min(0.95, 0.45 + (0.10 * reasons.Count));
+            var scored = RetrievalSignalScorer.Score(text, snapshot).Take(6).ToList();
             return new ProjectRetrievalPlan
             {
                 SelectedZones = selectedZones,
                 SelectedRoles = selectedRoles,
-                Reason = string.Join("+", reasons.Distinct(StringComparer.OrdinalIgnoreCase)),
+                TopSignalFiles = scored.Select(x => x.Path).ToList(),
+                TopSignalReasons = scored.SelectMany(x => x.Reasons).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).Take(6).ToList(),
+                Reason = string.Join("+", reasons.Distinct(StringComparer.OrdinalIgnoreCase)) + (scored.Count > 0 ? $"+signals:{string.Join(",", scored.SelectMany(x => x.Reasons).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).Take(4))}" : string.Empty),
                 Confidence = confidence,
                 FallbackUsed = selectedZones.Count == 0 && selectedRoles.Count == 0
             };
