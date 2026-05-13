@@ -3544,6 +3544,13 @@ static void RunRetrievalSignalScorer_TargetedRanking()
     AssertTrue(workspace.Take(8).Any(x => x.Path.EndsWith("workspaceTaskClassifier.js", StringComparison.OrdinalIgnoreCase)), "Workspace query should include workspaceTaskClassifier.");
     AssertTrue(workspace.Take(8).Any(x => x.Path.EndsWith("panelRunController.js", StringComparison.OrdinalIgnoreCase)), "Workspace query should include panelRunController.");
     AssertTrue(workspace.Take(8).Any(x => x.Path.EndsWith("commandHandlers.js", StringComparison.OrdinalIgnoreCase)), "Workspace query should include commandHandlers.");
+    var workspaceTop = workspace.Take(8).Select(x => x.Path).ToArray();
+    var workspaceHits = workspaceTop.Count(x =>
+        x.EndsWith("workspaceResolver.js", StringComparison.OrdinalIgnoreCase) ||
+        x.EndsWith("workspaceTaskClassifier.js", StringComparison.OrdinalIgnoreCase) ||
+        x.EndsWith("panelRunController.js", StringComparison.OrdinalIgnoreCase) ||
+        x.EndsWith("commandHandlers.js", StringComparison.OrdinalIgnoreCase));
+    AssertTrue(workspaceHits >= 3, "Workspace+approval query should rank at least 3 extension workspace files in top results.");
 
     var retrieval = RetrievalSignalScorer.Score("Improve retrieval context preparation", snapshot);
     AssertTrue(retrieval.Take(8).Any(x => x.Path.Equals("Context/ContextBuilder.cs", StringComparison.OrdinalIgnoreCase)), "Retrieval query should include ContextBuilder.cs.");
@@ -3555,6 +3562,7 @@ static void RunRetrievalSignalScorer_TargetedRanking()
 
     var unrelated = RetrievalSignalScorer.Score("refactor readme wording", snapshot);
     AssertTrue(!(unrelated.FirstOrDefault()?.Path ?? string.Empty).StartsWith("Security/", StringComparison.OrdinalIgnoreCase), "Unrelated query should not over-boost security files to top rank.");
+    AssertTrue(!unrelated.Take(5).Any(x => x.Path.Contains("workspaceResolver.js", StringComparison.OrdinalIgnoreCase) || x.Path.Contains("workspaceTaskClassifier.js", StringComparison.OrdinalIgnoreCase) || x.Path.Contains("panelRunController.js", StringComparison.OrdinalIgnoreCase) || x.Path.Contains("commandHandlers.js", StringComparison.OrdinalIgnoreCase)), "Unrelated query should not over-rank workspace extension files.");
     Console.WriteLine("PASS RetrievalSignalScorer_TargetedRanking");
 }
 

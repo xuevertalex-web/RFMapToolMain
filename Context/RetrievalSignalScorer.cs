@@ -98,6 +98,8 @@ namespace LocalCursorAgent.Context
         private static double GetTaskSpecificBoost(string text, string path, string fileName, string fileStem, HashSet<string> reasons)
         {
             var boost = 0.0;
+            var mixedWorkspaceApproval = ContainsAnyToken(text, "workspace", "boundary", "guard", "\u043e\u0431\u043e\u0439\u0442\u0438", "\u0440\u0430\u0431\u043e\u0447\u0430\u044f \u043e\u0431\u043b\u0430\u0441\u0442\u044c")
+                && ContainsAnyToken(text, "approval", "token", "permission", "security", "\u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043d\u0438\u0435");
             if (ContainsAnyToken(text, "approval", "token", "permission", "security", "destructive", "delete", "overwrite", "rename"))
             {
                 if (path.StartsWith("Security/", StringComparison.OrdinalIgnoreCase) || path.StartsWith("Tools/", StringComparison.OrdinalIgnoreCase) || fileName.Equals("FileTool.cs", StringComparison.OrdinalIgnoreCase) || path.StartsWith("Core/Agent.Tooling", StringComparison.OrdinalIgnoreCase) || path.Equals("SafetyTests/Program.cs", StringComparison.OrdinalIgnoreCase))
@@ -114,8 +116,11 @@ namespace LocalCursorAgent.Context
                                                 fileName.Equals("workspaceTaskClassifier.js", StringComparison.OrdinalIgnoreCase) ||
                                                 fileName.Equals("panelRunController.js", StringComparison.OrdinalIgnoreCase) ||
                                                 fileName.Equals("commandHandlers.js", StringComparison.OrdinalIgnoreCase);
-                    boost += exactWorkspaceSurface ? 2.6 : 1.8;
+                    var mixedBonus = mixedWorkspaceApproval && exactWorkspaceSurface ? 1.2 : 0.0;
+                    boost += (exactWorkspaceSurface ? 2.6 : 1.8) + mixedBonus;
                     reasons.Add("task-workspace-boundary");
+                    if (mixedBonus > 0)
+                        reasons.Add("task-mixed-workspace-approval");
                 }
             }
             if (ContainsAnyToken(text, "command", "process", "shell"))
