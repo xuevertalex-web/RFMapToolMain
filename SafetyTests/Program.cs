@@ -108,13 +108,23 @@ await RunMtimeAwareIndexingCacheRegression();
 RunDeepAnalysisDetectionRegression();
 RunDeepAnalysisContextFormatterRegression();
 RunDeepAnalysisPromptRegression();
+await RunDeepAnalysisDiagnosticsRegression();
 
 static void RunDeepAnalysisDetectionRegression()
 {
     var t = typeof(Agent).Assembly.GetType("LocalCursorAgent.Core.AnalysisPromptBuilder", throwOnError: true)!;
     var m = t.GetMethod("IsDeepAnalysisTask", new[] { typeof(string) })!;
+    var eval = t.GetMethod("EvaluateDeepAnalysisTask", new[] { typeof(string) })!;
     AssertTrue((bool)m.Invoke(null, new object[] { "Find security vulnerabilities and bypasses in the workspace guard and approval model" })!, "Expected deep analysis detection for security/audit task.");
     AssertTrue((bool)m.Invoke(null, new object[] { "Проведи аудит безопасности и найди уязвимости, обходы и дыры" })!, "Expected deep analysis detection for Russian security/audit task.");
+    var riskCombo = eval.Invoke(null, new object[] { "Find weak spots in workspace and command handling" })!;
+    var ruRiskCombo = eval.Invoke(null, new object[] { "Где слабые места в командах, файлах и разрешениях" })!;
+    var riskComboIsDeep = (bool)riskCombo.GetType().GetProperty("IsDeep")!.GetValue(riskCombo)!;
+    var riskComboTrigger = (string)riskCombo.GetType().GetProperty("Trigger")!.GetValue(riskCombo)!;
+    var ruRiskComboIsDeep = (bool)ruRiskCombo.GetType().GetProperty("IsDeep")!.GetValue(ruRiskCombo)!;
+    var ruRiskComboTrigger = (string)ruRiskCombo.GetType().GetProperty("Trigger")!.GetValue(ruRiskCombo)!;
+    AssertTrue(riskComboIsDeep && riskComboTrigger == "risk-combination", "Expected fallback risk-combination deep trigger.");
+    AssertTrue(ruRiskComboIsDeep && ruRiskComboTrigger == "risk-combination", "Expected Russian fallback risk-combination deep trigger.");
     AssertTrue(!(bool)m.Invoke(null, new object[] { "Explain this project" })!, "Expected simple overview to remain non-deep analysis.");
     Console.WriteLine("PASS DeepAnalysisDetectionRegression");
 }
@@ -154,6 +164,26 @@ static void RunDeepAnalysisPromptRegression()
     AssertTrue(prompt.Contains("Distinguish confirmed issues from hypotheses.", StringComparison.Ordinal), "Expected deep-analysis prompt instructions.");
     AssertTrue(!prompt.Contains("modify files", StringComparison.OrdinalIgnoreCase), "Prompt must not instruct mutation.");
     Console.WriteLine("PASS DeepAnalysisPromptRegression");
+}
+
+static async Task RunDeepAnalysisDiagnosticsRegression()
+{
+    var deepStructured = await RunIntentMatrixTask("Analyze failure modes in approval tokens and file operations", new FakeNoToolAnalysisClient(), registerFileTool: true);
+    var deepContext = deepStructured.GetProperty("contextDiagnostics");
+    AssertTrue(deepContext.GetProperty("deepAnalysisTask").GetBoolean(), "Expected deepAnalysisTask=true for risk-combination query.");
+    var deepTrigger = deepContext.GetProperty("deepAnalysisTrigger").GetString();
+    AssertTrue(deepTrigger == "risk-combination" || deepTrigger == "keyword", "Expected deterministic deep trigger in diagnostics.");
+    AssertTrue(deepContext.GetProperty("analysisFileBudgetCap").GetInt32() == 12, "Expected deep analysis budget cap=12.");
+    AssertTrue(deepContext.GetProperty("analysisContextIncludesFileContents").GetBoolean(), "Expected deep analysis to include file contents.");
+    AssertTrue(!deepContext.ToString().Contains("public static class WorkspaceGuard", StringComparison.Ordinal), "Diagnostics must not include source file contents.");
+
+    var compactStructured = await RunIntentMatrixTask("Explain this project", new FakeNoToolAnalysisClient(), registerFileTool: true);
+    var compactContext = compactStructured.GetProperty("contextDiagnostics");
+    AssertTrue(!compactContext.GetProperty("deepAnalysisTask").GetBoolean(), "Expected deepAnalysisTask=false for overview query.");
+    AssertTrue(compactContext.GetProperty("deepAnalysisTrigger").GetString() == "none", "Expected no deep trigger for overview query.");
+    AssertTrue(compactContext.GetProperty("analysisFileBudgetCap").GetInt32() == 4, "Expected compact analysis budget cap=4.");
+    AssertTrue(!compactContext.GetProperty("analysisContextIncludesFileContents").GetBoolean(), "Expected compact analysis not to include file contents.");
+    Console.WriteLine("PASS DeepAnalysisDiagnosticsRegression");
 }
 
 static async Task RunAnalysisFallbackTimeoutRegression()

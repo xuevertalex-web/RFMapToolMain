@@ -7,7 +7,7 @@ namespace LocalCursorAgent.Core
 {
     public partial class Agent
     {
-        private static AgentRunResultPayload BuildAgentRunResultPayload(
+        private AgentRunResultPayload BuildAgentRunResultPayload(
             bool ok,
             string message,
             string summary,
@@ -135,14 +135,14 @@ namespace LocalCursorAgent.Core
                 HostBoundaryPreserved = true,
                 ActionLifecycle = ActionLifecycleMapper.MapActionLifecycle(actionLifecycleEntries),
                 ApprovalStatusSummary = ApprovalStatusSummaryBuilder.Build(actionLifecycleEntries),
-                ContextDiagnostics = BuildContextDiagnosticsPayload(),
+                ContextDiagnostics = BuildContextDiagnosticsPayload(_analysisModeDiagnostics),
                 ProjectMapDiagnostics = BuildProjectMapDiagnosticsPayload(),
                 RetrievalPlanningDiagnostics = BuildRetrievalPlanningDiagnosticsPayload(),
                 IndexingDiagnostics = BuildIndexingDiagnosticsPayload()
             };
         }
 
-        private static ContextDiagnosticsPayload BuildContextDiagnosticsPayload()
+        private static ContextDiagnosticsPayload BuildContextDiagnosticsPayload(AnalysisModeDiagnostics analysisModeDiagnostics)
         {
             var diagnostics = Context.ContextBuilder.GetLatestDiagnostics();
             return new ContextDiagnosticsPayload
@@ -157,7 +157,11 @@ namespace LocalCursorAgent.Core
                 TotalFiles = diagnostics.TotalFiles,
                 TotalChars = diagnostics.TotalChars,
                 BudgetUsed = diagnostics.BudgetUsed,
-                BudgetLimit = diagnostics.BudgetLimit
+                BudgetLimit = diagnostics.BudgetLimit,
+                DeepAnalysisTask = analysisModeDiagnostics.DeepAnalysisTask,
+                DeepAnalysisTrigger = analysisModeDiagnostics.TriggerCategory,
+                AnalysisFileBudgetCap = analysisModeDiagnostics.BudgetCapUsed,
+                AnalysisContextIncludesFileContents = analysisModeDiagnostics.IncludesFileContents
             };
         }
 

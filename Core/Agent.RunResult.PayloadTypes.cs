@@ -281,6 +281,18 @@ namespace LocalCursorAgent.Core
 
             [JsonPropertyName("budgetLimit")]
             public int BudgetLimit { get; init; }
+
+            [JsonPropertyName("deepAnalysisTask")]
+            public bool DeepAnalysisTask { get; init; }
+
+            [JsonPropertyName("deepAnalysisTrigger")]
+            public string DeepAnalysisTrigger { get; init; } = string.Empty;
+
+            [JsonPropertyName("analysisFileBudgetCap")]
+            public int AnalysisFileBudgetCap { get; init; }
+
+            [JsonPropertyName("analysisContextIncludesFileContents")]
+            public bool AnalysisContextIncludesFileContents { get; init; }
         }
 
         private sealed class ContextDiagnosticsItemPayload

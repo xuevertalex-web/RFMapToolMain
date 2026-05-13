@@ -2,6 +2,15 @@ namespace LocalCursorAgent.Core
 {
     internal static class AnalysisPromptBuilder
     {
+        internal const int NormalAnalysisFileBudget = 4;
+        internal const int DeepAnalysisFileBudget = 12;
+
+        internal readonly struct DeepAnalysisDecision(bool isDeep, string trigger)
+        {
+            public bool IsDeep { get; } = isDeep;
+            public string Trigger { get; } = trigger;
+        }
+
         private static readonly string[] DeepAnalysisTerms = new[]
         {
             "security", "audit", "vulnerability", "exploit", "bypass", "permission", "approval",
@@ -15,17 +24,38 @@ namespace LocalCursorAgent.Core
             "\u0434\u044b\u0440\u0430" // дыра
         };
 
-        public static bool IsDeepAnalysisTask(string task)
+        private static readonly string[] RiskNouns = new[]
+        {
+            "risk", "unsafe", "break", "hole", "weak spot", "failure mode", "attack path", "abuse path",
+            "\u0441\u043b\u043e\u043c\u0430\u0442\u044c", "\u0440\u0438\u0441\u043a", "\u0434\u044b\u0440\u0430", "\u0441\u043b\u0430\u0431\u043e\u0435 \u043c\u0435\u0441\u0442\u043e", "\u0441\u043b\u0430\u0431", "\u0447\u0442\u043e \u043c\u043e\u0436\u043d\u043e \u043e\u0431\u043e\u0439\u0442\u0438", "\u043e\u0431\u043e\u0439\u0442\u0438"
+        };
+
+        private static readonly string[] SecuritySurfaceTerms = new[]
+        {
+            "command", "file", "workspace", "approval", "token", "permission", "sandbox", "path", "process", "shell", "guard",
+            "\u043a\u043e\u043c\u0430\u043d\u0434\u0430", "\u043a\u043e\u043c\u0430\u043d\u0434", "\u0444\u0430\u0439\u043b", "\u0440\u0430\u0431\u043e\u0447\u0430\u044f \u043e\u0431\u043b\u0430\u0441\u0442\u044c", "\u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043d\u0438\u0435", "\u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043d", "\u0442\u043e\u043a\u0435\u043d", "sandbox", "\u043f\u0443\u0442\u044c", "\u043f\u0440\u043e\u0446\u0435\u0441\u0441", "shell", "guard"
+        };
+
+        public static DeepAnalysisDecision EvaluateDeepAnalysisTask(string task)
         {
             var value = (task ?? string.Empty).Trim().ToLowerInvariant();
             if (string.IsNullOrWhiteSpace(value))
-                return false;
-            foreach (var term in DeepAnalysisTerms)
-            {
-                if (value.Contains(term, StringComparison.Ordinal))
-                    return true;
-            }
-            return false;
+                return new DeepAnalysisDecision(false, "none");
+
+            if (DeepAnalysisTerms.Any(term => value.Contains(term, StringComparison.Ordinal)))
+                return new DeepAnalysisDecision(true, "keyword");
+
+            var hasRiskNoun = RiskNouns.Any(term => value.Contains(term, StringComparison.Ordinal));
+            var hasSurfaceTerm = SecuritySurfaceTerms.Any(term => value.Contains(term, StringComparison.Ordinal));
+            if (hasRiskNoun && hasSurfaceTerm)
+                return new DeepAnalysisDecision(true, "risk-combination");
+
+            return new DeepAnalysisDecision(false, "none");
+        }
+
+        public static bool IsDeepAnalysisTask(string task)
+        {
+            return EvaluateDeepAnalysisTask(task).IsDeep;
         }
 
         public static string BuildAnalysisPromptWithContext(string task, int iteration, string previousResponse, string compactContext, string responseLanguageRule)

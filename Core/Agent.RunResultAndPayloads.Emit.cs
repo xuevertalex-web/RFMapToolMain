@@ -1,4 +1,4 @@
-﻿using LocalCursorAgent.Context;
+using LocalCursorAgent.Context;
 using LocalCursorAgent.Diagnostics;
 using LocalCursorAgent.Security;
 using System.Text.Json;
@@ -7,7 +7,7 @@ namespace LocalCursorAgent.Core
 {
     public partial class Agent
     {
-        private static string EmitAgentRunResult(
+        private string EmitAgentRunResult(
             bool ok,
             string message,
             string summary,

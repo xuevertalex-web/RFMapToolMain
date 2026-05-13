@@ -30,12 +30,22 @@ namespace LocalCursorAgent.Core
         private readonly RunRegressionAdvisor? _regressionAdvisor;
         private readonly AgentSessionContext? _sessionContext;
         private readonly WorkspaceResolutionResult? _workspaceResolution;
+        private AnalysisModeDiagnostics _analysisModeDiagnostics = AnalysisModeDiagnostics.Default;
         private int _lastLlmRetryCount;
         private string _lastLlmErrorType = string.Empty;
 
         private const int MAX_ITERATIONS = 3;
         private const int CONTEXT_WINDOW = 15;
         private const int CONTEXT_EXPANSION_BUFFER = 5;
+
+        private readonly struct AnalysisModeDiagnostics(bool deepAnalysisTask, string triggerCategory, int budgetCapUsed, bool includesFileContents)
+        {
+            public static AnalysisModeDiagnostics Default => new(false, "none", 0, false);
+            public bool DeepAnalysisTask { get; } = deepAnalysisTask;
+            public string TriggerCategory { get; } = triggerCategory ?? "none";
+            public int BudgetCapUsed { get; } = budgetCapUsed;
+            public bool IncludesFileContents { get; } = includesFileContents;
+        }
 
         public Agent(
             ILLMClient llmClient,

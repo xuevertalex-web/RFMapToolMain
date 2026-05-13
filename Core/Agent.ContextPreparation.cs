@@ -25,6 +25,10 @@ namespace LocalCursorAgent.Core
             List<string>? gatedTargetFiles,
             TargetResolutionGateResult targetResolution)
         {
+            var deepDecision = analysisOnlyTask
+                ? AnalysisPromptBuilder.EvaluateDeepAnalysisTask(task)
+                : new AnalysisPromptBuilder.DeepAnalysisDecision(false, "none");
+            var deepAnalysisTask = analysisOnlyTask && deepDecision.IsDeep;
             var semanticTopK = analysisOnlyTask ? 8 : 25 + CONTEXT_EXPANSION_BUFFER;
             var candidateFiles = gatedTargetFiles ?? await _projectIndexer.FindRelevantFiles(task, semanticTopK);
             if (candidateFiles.Count > 0 && gatedTargetFiles == null)
@@ -35,8 +39,11 @@ namespace LocalCursorAgent.Core
             var planningSignals = _contextBuilder.ComputeBudgetPlan(task, candidateFiles, new List<string>());
             if (analysisOnlyTask)
             {
-                planningSignals.Budget = Math.Min(planningSignals.Budget, 4);
-                planningSignals.MaxFiles = Math.Min(planningSignals.MaxFiles, 4);
+                var analysisFileBudget = deepAnalysisTask
+                    ? AnalysisPromptBuilder.DeepAnalysisFileBudget
+                    : AnalysisPromptBuilder.NormalAnalysisFileBudget;
+                planningSignals.Budget = Math.Min(planningSignals.Budget, analysisFileBudget);
+                planningSignals.MaxFiles = Math.Min(planningSignals.MaxFiles, analysisFileBudget);
             }
 
             _memory.Add("context_plan", $"{planningSignals.Complexity}:{planningSignals.Budget}:{planningSignals.Reason}");
@@ -66,8 +73,18 @@ namespace LocalCursorAgent.Core
 
             var contextInfo = _contextBuilder.BuildContext(task, resolvedFiles, new List<string>(), planningSignals.Budget);
             var contextString = analysisOnlyTask
-                ? AnalysisContextFormatter.BuildCompactAnalysisContext(contextInfo)
+                ? (deepAnalysisTask
+                    ? AnalysisContextFormatter.BuildDeepAnalysisContext(contextInfo)
+                    : AnalysisContextFormatter.BuildCompactAnalysisContext(contextInfo))
                 : _contextBuilder.FormatContext(contextInfo);
+
+            _analysisModeDiagnostics = analysisOnlyTask
+                ? new AnalysisModeDiagnostics(
+                    deepAnalysisTask,
+                    deepAnalysisTask ? deepDecision.Trigger : "none",
+                    deepAnalysisTask ? AnalysisPromptBuilder.DeepAnalysisFileBudget : AnalysisPromptBuilder.NormalAnalysisFileBudget,
+                    deepAnalysisTask)
+                : AnalysisModeDiagnostics.Default;
 
             return new IterationContextPreparationResult
             {
