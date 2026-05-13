@@ -66,6 +66,32 @@ function run() {
   });
   assert.strictEqual(spoofedAnalysisFlag.workspaceRoot, '', 'explicit mutation must remain blocked even when analysisOnlyTask=true');
   assert.strictEqual(spoofedAnalysisFlag.reason, 'backend_workspace_blocked');
+
+  const targetRoot = mkd('lca-target-');
+  const initNeeded = resolveWorkspaceRoot({
+    configuredWorkspaceRoot: targetRoot,
+    backendProjectPath,
+    allowBackendWorkspace: false,
+    initializeIfMissing: true,
+    projectNameHint: 'Create payment service',
+    taskText: 'create service'
+  });
+  assert.strictEqual(initNeeded.workspaceRoot, '', 'workspace should not be auto-created during normal task submission');
+  assert.strictEqual(initNeeded.reason, 'requires_explicit_initialization');
+  assert.strictEqual(initNeeded.workspaceInitializationRequired, true, 'expected explicit initialization requirement flag');
+  assert.ok(initNeeded.initializedProjectRoot && !fs.existsSync(initNeeded.initializedProjectRoot), 'expected suggested project path to remain non-created');
+
+  const existingProjectRoot = path.join(targetRoot, 'Existing-Project');
+  fs.mkdirSync(existingProjectRoot, { recursive: true });
+  const existing = resolveWorkspaceRoot({
+    configuredWorkspaceRoot: targetRoot,
+    backendProjectPath,
+    allowBackendWorkspace: false,
+    initializeIfMissing: true,
+    projectNameHint: 'Existing Project',
+    taskText: 'what can you do'
+  });
+  assert.strictEqual(path.resolve(existing.workspaceRoot).toLowerCase(), path.resolve(existingProjectRoot).toLowerCase(), 'existing initialized project folder should still resolve');
 }
 
 run();

@@ -41,6 +41,9 @@ function createExtensionCommandHandlers(options) {
     if (reason === 'backend_workspace_blocked') {
       return 'Backend workspace is blocked for execute/mutation tasks. Options: 1) Run as analysis-only, 2) Allow backend workspace for this run, 3) Open/choose target workspace.';
     }
+    if (reason === 'requires_explicit_initialization') {
+      return 'Workspace initialization is required but was not performed automatically. Create/select the project folder explicitly and retry.';
+    }
     if (reason === 'not_found') {
       return 'Workspace not found. Set localCursorAgent.targetWorkspacePath in settings for empty VS Code windows.';
     }
