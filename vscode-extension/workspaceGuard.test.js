@@ -61,7 +61,8 @@ function runGuardTests() {
       configuredWorkspaceRoot: backendRoot,
       backendProjectPath,
       allowBackendWorkspace: false,
-      analysisOnlyTask: isAnalysisOnlyTask(task)
+      analysisOnlyTask: isAnalysisOnlyTask(task),
+      taskText: task
     });
     assert.ok(result.workspaceRoot, `Task "${task}" should be allowed in backend workspace`);
   }
@@ -87,11 +88,22 @@ function runGuardTests() {
       configuredWorkspaceRoot: backendRoot,
       backendProjectPath,
       allowBackendWorkspace: false,
-      analysisOnlyTask: isAnalysisOnlyTask(task)
+      analysisOnlyTask: isAnalysisOnlyTask(task),
+      taskText: task
     });
     assert.strictEqual(result.workspaceRoot, '', `Task "${task}" should be blocked in backend workspace`);
     assert.strictEqual(result.reason, 'backend_workspace_blocked');
   }
+
+  const spoofed = resolveWorkspaceRoot({
+    configuredWorkspaceRoot: backendRoot,
+    backendProjectPath,
+    allowBackendWorkspace: false,
+    analysisOnlyTask: true,
+    taskText: 'fix ContextBuilder.cs'
+  });
+  assert.strictEqual(spoofed.workspaceRoot, '', 'explicit mutation must not bypass backend guard via analysisOnlyTask flag');
+  assert.strictEqual(spoofed.reason, 'backend_workspace_blocked');
 
   console.log('workspace guard tests passed');
 }

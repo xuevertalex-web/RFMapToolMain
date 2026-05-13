@@ -7,7 +7,7 @@ function resolveWorkspaceRoot(options = {}) {
   const configuredWorkspaceRoot = String(options.configuredWorkspaceRoot || '').trim();
   const backendProjectPath = String(options.backendProjectPath || '').trim();
   const allowBackendWorkspace = options.allowBackendWorkspace === true;
-  const analysisOnlyTask = options.analysisOnlyTask === true;
+  const taskText = String(options.taskText || '').trim();
 
   if (configuredWorkspaceRoot) {
     if (!fs.existsSync(configuredWorkspaceRoot) || !fs.statSync(configuredWorkspaceRoot).isDirectory()) {
@@ -22,7 +22,7 @@ function resolveWorkspaceRoot(options = {}) {
       { workspaceRoot: configuredWorkspaceRoot, reason: 'configured', targetWorkspacePath: configuredWorkspaceRoot },
       backendProjectPath,
       allowBackendWorkspace,
-      analysisOnlyTask
+      taskText
     );
     if (!guardedConfigured.workspaceRoot) {
       return guardedConfigured;
@@ -43,7 +43,7 @@ function resolveWorkspaceRoot(options = {}) {
       { workspaceRoot: folders[0].uri.fsPath, reason: 'single' },
       backendProjectPath,
       allowBackendWorkspace,
-      analysisOnlyTask
+      taskText
     );
   }
 
@@ -56,7 +56,7 @@ function resolveWorkspaceRoot(options = {}) {
         { workspaceRoot: workspaceFolder.uri.fsPath, reason: 'active_file' },
         backendProjectPath,
         allowBackendWorkspace,
-        analysisOnlyTask
+        taskText
       );
     }
   }
@@ -163,13 +163,42 @@ function applyProjectTemplate(projectRoot, taskHint) {
   return { projectTemplateApplied: false, templateType: 'none' };
 }
 
-function enforceBackendWorkspaceGuard(state, backendProjectPath, allowBackendWorkspace, analysisOnlyTask) {
-  if (allowBackendWorkspace || analysisOnlyTask || !state.workspaceRoot || !backendProjectPath) {
+function isBackendWorkspaceAllowedByTask(taskText) {
+  const value = String(taskText || '').trim().toLowerCase();
+  if (!value) return true;
+
+  const explicitMutationEn = /\b(create|delete|remove|rename|fix|edit|update|modify|change)\b/;
+  const explicitMutationRu = [
+    '\u0441\u043e\u0437\u0434\u0430\u0439',
+    '\u0443\u0434\u0430\u043b\u0438',
+    '\u043f\u0435\u0440\u0435\u0438\u043c\u0435\u043d\u0443\u0439',
+    '\u0438\u0441\u043f\u0440\u0430\u0432\u044c',
+    '\u043e\u0431\u043d\u043e\u0432\u0438',
+    '\u0438\u0437\u043c\u0435\u043d\u0438',
+    '\u043f\u043e\u043c\u0435\u043d\u044f\u0439',
+    '\u043e\u0442\u0440\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u0443\u0439'
+  ];
+  const hasExplicitMutation = explicitMutationEn.test(value) || explicitMutationRu.some(term => value.includes(term));
+  if (!hasExplicitMutation) return true;
+
+  const noTargetMutation = /\b(fix it|make it better)\b/;
+  if (noTargetMutation.test(value)) return true;
+
+  const hasFileTarget = /(^|[\s"'`])(?:[\w.-]+[\\/])*[\w.-]+\.(?:cs|js|ts|json|md|cmd|ps1|csproj|sln|html|css|yml|yaml|xml|txt|config)(?=$|[\s"'`.,;:!?])/i;
+  const hasGenericFileWord = /\b(file|files)\b/.test(value) || /\b\u0444\u0430\u0439\u043b|\u0444\u0430\u0439\u043b\u044b\b/.test(value);
+  return !(hasFileTarget.test(value) || hasGenericFileWord);
+}
+
+function enforceBackendWorkspaceGuard(state, backendProjectPath, allowBackendWorkspace, taskText) {
+  if (allowBackendWorkspace || !state.workspaceRoot || !backendProjectPath) {
     return state;
   }
 
   const backendRoot = path.dirname(backendProjectPath);
   if (samePath(state.workspaceRoot, backendRoot)) {
+    if (isBackendWorkspaceAllowedByTask(taskText)) {
+      return state;
+    }
     return {
       workspaceRoot: '',
       reason: 'backend_workspace_blocked',

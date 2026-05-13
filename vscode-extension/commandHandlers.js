@@ -75,7 +75,8 @@ function createExtensionCommandHandlers(options) {
       if (runtimeLogger) runtimeLogger.info('workspace-guard precheck', { source: 'command', task: trimmedTask, classifierAnalysisOnly, fallbackAnalysisOnly, analysisOnlyTask });
       const workspaceState = resolveWorkspaceRoot({
         initializeIfMissing: true,
-        analysisOnlyTask
+        analysisOnlyTask,
+        taskText: trimmedTask
       });
       if (!workspaceState.workspaceRoot) {
         output.appendLine(`[workspace-guard] blocked source=command reason=${String(workspaceState.reason || 'unknown')} targetWorkspacePath=${String(workspaceState.targetWorkspacePath || '')}`);
