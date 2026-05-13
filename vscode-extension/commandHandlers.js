@@ -1,15 +1,33 @@
+const { isAnalysisOnlyTask } = require('./workspaceTaskClassifier');
 const vscode = require('vscode');
-function isAnalysisOnlyTask(task) {
-  const value = String(task || '').toLowerCase();
-  const mutationKeywords = [
-    'создай', 'удали', 'исправь', 'обнови',
-    'create', 'delete', 'remove', 'rename', 'edit', 'update'
-  ];
-  return !mutationKeywords.some(k => value.includes(k));
+
+const MUTATION_RE = /\b(create|delete|remove|rename|fix|edit|update|modify|change|\u0441\u043e\u0437\u0434\u0430\u0439|\u0443\u0434\u0430\u043b\u0438|\u043f\u0435\u0440\u0435\u0438\u043c\u0435\u043d\u0443\u0439|\u0438\u0441\u043f\u0440\u0430\u0432\u044c|\u043e\u0431\u043d\u043e\u0432\u0438|\u0438\u0437\u043c\u0435\u043d\u0438|\u043f\u043e\u043c\u0435\u043d\u044f\u0439|\u043e\u0442\u0440\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u0443\u0439)\b/;
+const LOW_SIGNAL_RE = /^(\u0442\u0443\u0442\??|\u0430\u043b\u043e|\u0430\u043b\u043b\u043e|here\??|what can you do|explain this project|\u043e\u043f\u0438\u0448\u0438 \u043f\u0440\u043e\u0435\u043a\u0442\??|\u0447\u0442\u043e \u0442\u0443\u0442\??|debug|\u0432\u0432\u0443\u0438\u0433\u043f)$/;
+
+function isLowSignalChatFallback(task) {
+  const value = String(task || '').trim().toLowerCase();
+  if (!value) return true;
+  if (MUTATION_RE.test(value)) {
+    return false;
+  }
+  if (LOW_SIGNAL_RE.test(value)) {
+    return true;
+  }
+  const compact = value.replace(/[\s?!.,;:]+/g, '');
+  return compact.length > 0 && compact.length <= 8;
 }
 
+function buildLowSignalReply(task) {
+  const value = String(task || '').trim().toLowerCase();
+  const normalized = value.replace(/[?!.,;:]+$/g, '').trim();
+  if (normalized.startsWith('\u043e\u043f\u0438\u0448\u0438 \u043f\u0440\u043e\u0435\u043a\u0442') || normalized.startsWith('explain this project')) {
+    return '\u041c\u043e\u0433\u0443 \u043a\u0440\u0430\u0442\u043a\u043e \u043e\u043f\u0438\u0441\u0430\u0442\u044c \u043f\u0440\u043e\u0435\u043a\u0442. \u0423\u043a\u0430\u0436\u0438 \u043f\u0430\u043f\u043a\u0443/\u0440\u0435\u043f\u043e\u0437\u0438\u0442\u043e\u0440\u0438\u0439 \u0438\u043b\u0438 \u043e\u0442\u043a\u0440\u043e\u0439 \u043a\u043e\u0440\u0435\u043d\u044c workspace.';
+  }
+  return '\u042f \u043d\u0430 \u0441\u0432\u044f\u0437\u0438. \u0421\u0444\u043e\u0440\u043c\u0443\u043b\u0438\u0440\u0443\u0439 \u0437\u0430\u0434\u0430\u0447\u0443: \u0447\u0442\u043e \u0441\u043e\u0437\u0434\u0430\u0442\u044c, \u0438\u0437\u043c\u0435\u043d\u0438\u0442\u044c \u0438\u043b\u0438 \u043f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c.';
+}
 function createExtensionCommandHandlers(options) {
   const output = options.output;
+  const runtimeLogger = options.runtimeLogger;
   const extensionRoot = options.extensionRoot;
   const resolveWorkspaceRoot = options.resolveWorkspaceRoot;
   const runAgent = options.runAgent;
@@ -40,11 +58,28 @@ function createExtensionCommandHandlers(options) {
         vscode.window.showErrorMessage('Task is empty');
         return;
       }
+      const trimmedTask = task.trim();
+      const classifierAnalysisOnly = isAnalysisOnlyTask(trimmedTask);
+      const fallbackAnalysisOnly = isLowSignalChatFallback(trimmedTask);
+      if (fallbackAnalysisOnly) {
+        const reply = buildLowSignalReply(trimmedTask);
+        output.show(true);
+        output.appendLine(`[workspace-guard] low-signal short-circuit source=command task="${trimmedTask}"`);
+        output.appendLine(reply);
+        if (runtimeLogger) runtimeLogger.info('workspace-guard low-signal short-circuit', { source: 'command', task: trimmedTask });
+        vscode.window.showInformationMessage(reply);
+        return;
+      }
+      const analysisOnlyTask = classifierAnalysisOnly || fallbackAnalysisOnly;
+      output.appendLine(`[workspace-guard] precheck source=command task="${trimmedTask}" classifierAnalysisOnly=${classifierAnalysisOnly} fallbackAnalysisOnly=${fallbackAnalysisOnly} analysisOnlyTask=${analysisOnlyTask}`);
+      if (runtimeLogger) runtimeLogger.info('workspace-guard precheck', { source: 'command', task: trimmedTask, classifierAnalysisOnly, fallbackAnalysisOnly, analysisOnlyTask });
       const workspaceState = resolveWorkspaceRoot({
         initializeIfMissing: true,
-        analysisOnlyTask: isAnalysisOnlyTask(task.trim())
+        analysisOnlyTask
       });
       if (!workspaceState.workspaceRoot) {
+        output.appendLine(`[workspace-guard] blocked source=command reason=${String(workspaceState.reason || 'unknown')} targetWorkspacePath=${String(workspaceState.targetWorkspacePath || '')}`);
+        if (runtimeLogger) runtimeLogger.warn('workspace-guard blocked', { source: 'command', reason: String(workspaceState.reason || 'unknown'), targetWorkspacePath: String(workspaceState.targetWorkspacePath || '') });
         vscode.window.showErrorMessage(workspaceErrorText(workspaceState));
         return;
       }
@@ -60,7 +95,7 @@ function createExtensionCommandHandlers(options) {
       output.appendLine('Agent run started');
 
       try {
-        const result = await runAgent(null, workspaceState.workspaceRoot, task.trim(), output, extensionRoot);
+        const result = await runAgent(null, workspaceState.workspaceRoot, trimmedTask, output, extensionRoot);
         const resultText = (result.result && result.result.message) || result.text;
         output.appendLine('--- Agent result start ---');
         output.appendLine(resultText || 'No result text returned.');

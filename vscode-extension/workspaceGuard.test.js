@@ -3,7 +3,6 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 
-// Mock vscode to avoid actual UI
 const Module = require('module');
 const originalRequire = Module.prototype.require;
 Module.prototype.require = function patchedRequire(request) {
@@ -38,19 +37,22 @@ function runGuardTests() {
   fs.writeFileSync(backendProjectPath, '<Project />', 'utf8');
 
   const allowExamples = [
-    'тут?',
-    'тут',
-    '`тут?`',
+    '\u0442\u0443\u0442?',
+    '\u0442\u0443\u0442',
+    '`\u0442\u0443\u0442?`',
     'here?',
     'here',
-    'что тут?',
+    '\u0447\u0442\u043e \u0442\u0443\u0442?',
+    '\u043e\u043f\u0438\u0448\u0438 \u043f\u0440\u043e\u0435\u043a\u0442',
+    '\u0432\u0432\u0443\u0438\u0433\u043f',
+    'debug',
     'what can you do',
     'explain this project',
     'fix it',
     'make it better',
-    'почини',
-    'ало',
-    'агент'
+    '\u043f\u043e\u0447\u0438\u043d\u0438',
+    '\u0430\u043b\u043e',
+    '\u0430\u0433\u0435\u043d\u0442'
   ];
 
   for (const task of allowExamples) {
@@ -73,10 +75,10 @@ function runGuardTests() {
     'update package.json',
     'change this file',
     'modify commandHandlers.js',
-    'создай файл TEST.md',
-    'удали TEST.md',
-    'исправь ContextBuilder.cs',
-    'обнови package.json'
+    '\u0441\u043e\u0437\u0434\u0430\u0439 \u0444\u0430\u0439\u043b TEST.md',
+    '\u0443\u0434\u0430\u043b\u0438 \u0444\u0430\u0439\u043b TEST.md',
+    '\u0438\u0441\u043f\u0440\u0430\u0432\u044c ContextBuilder.cs',
+    '\u0438\u0437\u043c\u0435\u043d\u0438 package.json'
   ];
 
   for (const task of blockExamples) {
