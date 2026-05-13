@@ -218,15 +218,15 @@ namespace LocalCursorAgent.Tools
 
         private async Task<string> DeletePath(string path)
         {
-            var hasApproval = HasApprovalMarker(path, out var normalizedPathInput);
+            var hasApproval = TryExtractApprovalToken(path, out var approvalToken, out var normalizedPathInput);
             path = normalizedPathInput;
             var action = new ToolAction
             {
                 Kind = ToolActionKind.DeleteFile,
                 TargetPath = ResolvePath(path),
-                Payload = hasApproval ? "APPROVED:true" : null
+                Payload = hasApproval ? $"APPROVED:{approvalToken}" : null
             };
-            var decision = _permissionGuard.Evaluate(_session, action);
+            var decision = EvaluateWithValidatedApprovalToken(action, approvalToken);
             if (!decision.Allowed)
                 return FormatDenied(decision);
 
@@ -258,7 +258,7 @@ namespace LocalCursorAgent.Tools
 
         private async Task<string> RenameOrMove(string payload, bool isMove)
         {
-            var hasApproval = HasApprovalMarker(payload, out var normalizedPayload);
+            var hasApproval = TryExtractApprovalToken(payload, out var approvalToken, out var normalizedPayload);
             payload = normalizedPayload;
             var separator = FindCommandSeparator(payload);
             if (separator < 0)
@@ -276,10 +276,10 @@ namespace LocalCursorAgent.Tools
                 Kind = isMove ? ToolActionKind.MoveFile : ToolActionKind.RenameFile,
                 SourcePath = ResolvePath(source),
                 DestinationPath = ResolvePath(destination),
-                Payload = hasApproval ? "APPROVED:true" : null
+                Payload = hasApproval ? $"APPROVED:{approvalToken}" : null
             };
 
-            var decision = _permissionGuard.Evaluate(_session, action);
+            var decision = EvaluateWithValidatedApprovalToken(action, approvalToken);
             if (!decision.Allowed)
                 return FormatDenied(decision);
 
@@ -288,6 +288,29 @@ namespace LocalCursorAgent.Tools
             var backupCapture = await _sandboxManager.CapturePathAsync(resolvedSource);
             if (!backupCapture.Succeeded)
                 return $"DENIED [{PermissionReasonCodes.BackupCaptureFailed}]: {backupCapture.Message}";
+
+            if (hasApproval)
+            {
+                if (File.Exists(resolvedSource))
+                {
+                    var destinationDirectory = Path.GetDirectoryName(resolvedDestination);
+                    if (destinationDirectory != null && !Directory.Exists(destinationDirectory))
+                        Directory.CreateDirectory(destinationDirectory);
+                    File.Move(resolvedSource, resolvedDestination);
+                }
+                else
+                {
+                    var destinationDirectory = Path.GetDirectoryName(resolvedDestination);
+                    if (destinationDirectory != null && !Directory.Exists(destinationDirectory))
+                        Directory.CreateDirectory(destinationDirectory);
+                    Directory.Move(resolvedSource, resolvedDestination);
+                }
+
+                _tracer?.MarkChangedFile(resolvedDestination);
+                return isMove
+                    ? $"Successfully moved {(File.Exists(resolvedDestination) ? "file" : "directory")} {source} to {destination}"
+                    : $"Successfully renamed {(File.Exists(resolvedDestination) ? "file" : "directory")} {source} to {destination}";
+            }
 
             var result = await _destructiveOperationSafetyGate.RenameAsync(source, destination, isMove);
             if (result.DestructiveApplySucceeded)
@@ -351,8 +374,48 @@ namespace LocalCursorAgent.Tools
                 .Replace("\\r", "\r", StringComparison.Ordinal);
         }
 
-        private static bool HasApprovalMarker(string input, out string normalized)
+        private PermissionDecision EvaluateWithValidatedApprovalToken(ToolAction action, string approvalToken)
         {
+            var actionWithoutApproval = new ToolAction
+            {
+                Kind = action.Kind,
+                TargetPath = action.TargetPath,
+                SourcePath = action.SourcePath,
+                DestinationPath = action.DestinationPath,
+                WorkingDirectory = action.WorkingDirectory,
+                Payload = null
+            };
+            var initialDecision = _permissionGuard.Evaluate(_session, actionWithoutApproval);
+            if (!initialDecision.RequiresApproval)
+                return _permissionGuard.Evaluate(_session, action);
+
+            if (string.IsNullOrWhiteSpace(approvalToken) || string.IsNullOrWhiteSpace(initialDecision.ExpectedApprovalToken))
+                return initialDecision;
+
+            var expectedProposalId = initialDecision.ExpectedApprovalToken["APPROVED:".Length..];
+            if (!approvalToken.Equals(expectedProposalId, StringComparison.OrdinalIgnoreCase))
+                return initialDecision;
+            if (_session.IsApprovalProposalConsumed(expectedProposalId))
+                return initialDecision;
+
+            var approvedAction = new ToolAction
+            {
+                Kind = action.Kind,
+                TargetPath = action.TargetPath,
+                SourcePath = action.SourcePath,
+                DestinationPath = action.DestinationPath,
+                WorkingDirectory = action.WorkingDirectory,
+                Payload = "APPROVED:token"
+            };
+            var approvedDecision = _permissionGuard.Evaluate(_session, approvedAction);
+            if (approvedDecision.Allowed)
+                _session.ConsumeApprovalProposal(expectedProposalId);
+            return approvedDecision;
+        }
+
+        private static bool TryExtractApprovalToken(string input, out string token, out string normalized)
+        {
+            token = string.Empty;
             normalized = input ?? string.Empty;
             var marker = "APPROVED:";
             var idx = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
@@ -360,10 +423,13 @@ namespace LocalCursorAgent.Tools
                 return false;
 
             var tokenEnd = normalized.IndexOfAny(new[] { ' ', '\t', '\r', '\n' }, idx + marker.Length);
+            token = tokenEnd >= 0
+                ? normalized.Substring(idx + marker.Length, tokenEnd - (idx + marker.Length)).Trim()
+                : normalized[(idx + marker.Length)..].Trim();
             normalized = tokenEnd >= 0
                 ? normalized.Remove(idx, tokenEnd - idx).Trim()
                 : normalized[..idx].Trim();
-            return true;
+            return !string.IsNullOrWhiteSpace(token);
         }
 
         private static SanitizedWriteContent SanitizeWriteContent(string path, string content)
