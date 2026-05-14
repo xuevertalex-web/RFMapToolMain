@@ -59,6 +59,8 @@ await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
 await RunDestructiveFileApprovalMarkerRegression();
 await RunGuardedToolExplicitApprovalHandoffRegression();
 await RunApprovalTokenTtlLifecycleRegression();
+await RunApprovalLedgerReplayAcrossRestartRegression();
+await RunApprovalLedgerCorruptFailClosedRegression();
 RunCommandRiskPolicyTokenizationRegression();
 RunExtractRequestedNewFilePath_ExtensionRegression();
 RunExtractRequestedNewFilePath_NoCreateIntentRegression();
@@ -2728,6 +2730,146 @@ static async Task RunApprovalTokenTtlLifecycleRegression()
     AssertTrue(ttl == 600, "Expected ttlSeconds payload field.");
     AssertTrue(sessionBound, "Expected sessionBound payload field.");
     Console.WriteLine("PASS ApprovalTokenTtlLifecycleRegression");
+}
+
+static async Task RunApprovalLedgerReplayAcrossRestartRegression()
+{
+    var runtimeRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalLedgerReplay_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(runtimeRoot);
+    try
+    {
+        var workspaceRoot = Path.Combine(runtimeRoot, "workspace");
+        Directory.CreateDirectory(workspaceRoot);
+        var insidePath = Path.Combine(workspaceRoot, "approval-ledger-delete.txt");
+        await File.WriteAllTextAsync(insidePath, "seed");
+
+        AgentSessionContext CreateSession(string sessionId) => new()
+        {
+            SessionId = sessionId,
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+        };
+
+        var sessionId = Guid.NewGuid().ToString("N");
+        var session = CreateSession(sessionId);
+        var guard = new PermissionGuard();
+        var noApproval = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = insidePath
+        });
+        AssertTrue(noApproval.RequiresApproval, "Expected destructive delete to require approval.");
+        var proposalId = noApproval.ApprovalProposal?.ProposalId ?? string.Empty;
+        AssertTrue(!string.IsNullOrWhiteSpace(proposalId), "Expected proposal id.");
+
+        var approved = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = insidePath,
+            Payload = $"APPROVED:{proposalId}"
+        });
+        AssertTrue(approved.Allowed, "Expected exact token to allow once.");
+        AssertTrue(session.ConsumeApprovalProposal(proposalId), "Expected consumed proposal persistence.");
+        AssertTrue(!guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = insidePath,
+            Payload = $"APPROVED:{proposalId}"
+        }).Allowed, "Expected token reuse in same process to be denied.");
+
+        var restarted = CreateSession(sessionId);
+        var restartedGuard = new PermissionGuard();
+        var replayDecision = restartedGuard.Evaluate(restarted, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = insidePath,
+            Payload = $"APPROVED:{proposalId}"
+        });
+        AssertTrue(!replayDecision.Allowed && replayDecision.RequiresApproval, "Expected consumed token replay to be denied after restart.");
+
+        var freshPath = Path.Combine(workspaceRoot, "approval-ledger-fresh.txt");
+        await File.WriteAllTextAsync(freshPath, "fresh");
+        var issuedSession = CreateSession(sessionId);
+        var issuedGuard = new PermissionGuard();
+        var issuedDecision = issuedGuard.Evaluate(issuedSession, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = freshPath
+        });
+        AssertTrue(issuedDecision.RequiresApproval && issuedDecision.ApprovalProposal is not null, "Expected approval proposal before restart.");
+
+        var restartedBeforeConsume = CreateSession(sessionId);
+        var restartedBeforeConsumeGuard = new PermissionGuard();
+        var token = issuedDecision.ExpectedApprovalToken ?? string.Empty;
+        var preConsumeAfterRestart = restartedBeforeConsumeGuard.Evaluate(restartedBeforeConsume, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = freshPath,
+            Payload = token
+        });
+        AssertTrue(preConsumeAfterRestart.Allowed, "Expected unconsumed valid token to remain usable after restart.");
+        AssertTrue(restartedBeforeConsume.ConsumeApprovalProposal(token["APPROVED:".Length..]), "Expected consume persistence after restart use.");
+
+        var genericMarker = restartedBeforeConsumeGuard.Evaluate(restartedBeforeConsume, new ToolAction
+        {
+            Kind = ToolActionKind.RunCommand,
+            Payload = "nvidia-smi APPROVED:true",
+            WorkingDirectory = workspaceRoot
+        });
+        AssertTrue(!genericMarker.Allowed && genericMarker.RequiresApproval, "Expected generic APPROVED:true marker to remain denied.");
+        Console.WriteLine("PASS ApprovalLedgerReplayAcrossRestartRegression");
+    }
+    finally
+    {
+        if (Directory.Exists(runtimeRoot))
+            Directory.Delete(runtimeRoot, recursive: true);
+    }
+}
+
+static async Task RunApprovalLedgerCorruptFailClosedRegression()
+{
+    var runtimeRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalLedgerCorrupt_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(runtimeRoot);
+    try
+    {
+        var workspaceRoot = Path.Combine(runtimeRoot, "workspace");
+        Directory.CreateDirectory(workspaceRoot);
+        await File.WriteAllTextAsync(Path.Combine(runtimeRoot, "approval-ledger-v2.jsonl"), "{bad-json\n");
+        var session = new AgentSessionContext
+        {
+            SessionId = Guid.NewGuid().ToString("N"),
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+        };
+        var guard = new PermissionGuard();
+
+        var highRisk = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.RunCommand,
+            Payload = "nvidia-smi",
+            WorkingDirectory = workspaceRoot
+        });
+        AssertTrue(!highRisk.Allowed && highRisk.ReasonCodeString == PermissionReasonCodes.ApprovalStateUnavailable, "Expected fail-closed for approval-gated command when ledger is corrupt.");
+
+        var readTarget = Path.Combine(workspaceRoot, "read-ok.txt");
+        await File.WriteAllTextAsync(readTarget, "ok");
+        var readDecision = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.ReadFile,
+            TargetPath = readTarget
+        });
+        AssertTrue(readDecision.Allowed, "Expected read-only analysis path to remain unaffected by approval ledger corruption.");
+        Console.WriteLine("PASS ApprovalLedgerCorruptFailClosedRegression");
+    }
+    finally
+    {
+        if (Directory.Exists(runtimeRoot))
+            Directory.Delete(runtimeRoot, recursive: true);
+    }
 }
 
 static async Task RunProcessArgumentListPreservesArgumentsRegression()

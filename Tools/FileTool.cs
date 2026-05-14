@@ -424,7 +424,10 @@ namespace LocalCursorAgent.Tools
             };
             var approvedDecision = _permissionGuard.Evaluate(_session, approvedAction);
             if (approvedDecision.Allowed)
-                _session.ConsumeApprovalProposal(expectedProposalId);
+            {
+                if (!_session.ConsumeApprovalProposal(expectedProposalId))
+                    return PermissionDecision.Deny(PermissionReasonCode.ApprovalStateUnavailable, $"Approval state unavailable: {_session.ApprovalLedgerError}");
+            }
             return approvedDecision;
         }
 

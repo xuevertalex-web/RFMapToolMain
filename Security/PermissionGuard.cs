@@ -91,6 +91,8 @@ public sealed class PermissionGuard
         {
             if (CommandRiskPolicy.IsHighRiskCommand(action.Payload))
             {
+                if (!session.IsApprovalLedgerHealthy)
+                    return PermissionDecision.Deny(PermissionReasonCode.ApprovalStateUnavailable, $"Approval state unavailable: {session.ApprovalLedgerError}");
                 if (!IsBoundApprovalTokenValidForAction(session, action, PermissionReasonCode.HighRiskApprovalRequired, normalizedTarget ?? normalizedWorkspace, normalizedWorkspace))
                     return CreateApprovalRequired(session, action, PermissionReasonCode.HighRiskApprovalRequired, "High-risk host/system/network-impacting command requires explicit approval", normalizedTarget ?? normalizedWorkspace, normalizedWorkspace, CommandRiskPolicy.ResolveCommandRiskLevel(action.Payload));
             }
@@ -144,6 +146,8 @@ public sealed class PermissionGuard
         {
             if (IsDeleteLike(action.Kind) || IsRenameLike(action.Kind) || IsMoveLike(action.Kind))
             {
+                if (!session.IsApprovalLedgerHealthy)
+                    return PermissionDecision.Deny(PermissionReasonCode.ApprovalStateUnavailable, $"Approval state unavailable: {session.ApprovalLedgerError}");
                 var target = normalizedTarget ?? normalizedSource ?? normalizedDestination ?? normalizedWorkspace;
                 if (!CommandRiskPolicy.HasExplicitApprovalMarker(action.Payload))
                     return CreateApprovalRequired(session, action, PermissionReasonCode.WriteModeDeleteDenied, "Destructive operation requires explicit approval in WorkspaceWrite mode", normalizedTarget ?? normalizedSource ?? normalizedDestination ?? normalizedWorkspace, normalizedWorkspace, "high");
@@ -234,7 +238,8 @@ public sealed class PermissionGuard
             SessionId = session.SessionId,
             SessionBound = true
         };
-        session.RegisterApprovalProposal(proposal);
+        if (!session.RegisterApprovalProposal(proposal))
+            return PermissionDecision.Deny(PermissionReasonCode.ApprovalStateUnavailable, $"Approval state unavailable: {session.ApprovalLedgerError}", normalizedTarget, normalizedWorkspace);
 
         return PermissionDecision.ApprovalRequired(
             code,

@@ -44,7 +44,10 @@ public sealed class GuardedTool : ITool
         {
             var result = await _inner.Execute(input);
             if (!string.IsNullOrWhiteSpace(consumedProposalId))
-                _session.ConsumeApprovalProposal(consumedProposalId);
+            {
+                if (!_session.ConsumeApprovalProposal(consumedProposalId))
+                    return $"DENIED [{PermissionReasonCodes.ApprovalStateUnavailable}]: Approval state unavailable: {_session.ApprovalLedgerError}";
+            }
             _tracer?.LogActionExecution(_inner.Name, action, decision, succeeded: true, PermissionReasonCodes.Allowed, "Action executed.");
             return result;
         }

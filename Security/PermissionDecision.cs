@@ -27,6 +27,7 @@ public sealed class PermissionDecision
         PermissionReasonCode.InvalidWorkingDirectory => PermissionReasonCodes.InvalidWorkingDirectory,
         PermissionReasonCode.ProtectedRuntimeDiagnosticsPathDenied => PermissionReasonCodes.ProtectedRuntimeDiagnosticsPathDenied,
         PermissionReasonCode.ApprovalTokenExpired => PermissionReasonCodes.ApprovalTokenExpired,
+        PermissionReasonCode.ApprovalStateUnavailable => PermissionReasonCodes.ApprovalStateUnavailable,
         PermissionReasonCode.HighRiskApprovalRequired => PermissionReasonCodes.HighRiskApprovalRequired,
         PermissionReasonCode.ToolDeniedByPolicy => PermissionReasonCodes.ToolDeniedByPolicy,
         _ => PermissionReasonCodes.ToolDeniedByPolicy
