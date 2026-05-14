@@ -217,6 +217,20 @@ public sealed class PermissionGuard
         var ttlSeconds = AgentSessionContext.ApprovalTokenTtlSecondsDefault;
         var expiresAtUtc = issuedAtUtc.AddSeconds(ttlSeconds);
         var proposalId = ComputeProposalId(session, action, code, normalizedTarget, normalizedWorkspace);
+        var existing = session.GetApprovalProposal(proposalId);
+        if (existing is not null &&
+            !session.IsApprovalProposalConsumed(proposalId) &&
+            !session.IsApprovalProposalExpired(proposalId) &&
+            issuedAtUtc <= existing.ExpiresAtUtc)
+        {
+            return PermissionDecision.ApprovalRequired(
+                code,
+                message,
+                existing,
+                normalizedTarget,
+                normalizedWorkspace);
+        }
+
         var proposal = new ActionApprovalProposal
         {
             ProposalId = proposalId,

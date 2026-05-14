@@ -3038,11 +3038,9 @@ static async Task RunApprovalLedgerReplayAcrossRestartRegression()
         {
             Kind = ToolActionKind.DeleteFile,
             TargetPath = freshPath,
-            RunId = restartedBeforeConsume.GetApprovalProposal(token["APPROVED:".Length..])?.RunId,
             Payload = token
         });
-        AssertTrue(preConsumeAfterRestart.Allowed, "Expected unconsumed valid token to remain usable after restart.");
-        AssertTrue(restartedBeforeConsume.ConsumeApprovalProposal(token["APPROVED:".Length..], restartedBeforeConsume.GetApprovalProposal(token["APPROVED:".Length..])?.RunId), "Expected consume persistence after restart use.");
+        AssertTrue(!preConsumeAfterRestart.Allowed && preConsumeAfterRestart.ReasonCodeString == PermissionReasonCodes.ApprovalRunBindingUnavailable, "Expected unconsumed post-cutover token to require explicit run context after restart.");
 
         var genericMarker = restartedBeforeConsumeGuard.Evaluate(restartedBeforeConsume, new ToolAction
         {
@@ -3679,6 +3677,9 @@ static async Task RunGuardedToolExplicitApprovalHandoffRegression()
     var wrongProposalToken = await guarded.Execute($"delete:delete-inside-2.txt APPROVED:{proposalId}");
     AssertTrue(wrongProposalToken.StartsWith("DENIED", StringComparison.Ordinal), "Expected token for proposal A not to authorize proposal B.");
     AssertTrue(File.Exists(insidePathSecond), "Expected second inside file to remain for mismatched proposal token.");
+
+    var secondNoApproval = await guarded.Execute("delete:delete-inside-2.txt");
+    AssertTrue(secondNoApproval.StartsWith("DENIED", StringComparison.Ordinal), "Expected second destructive action to require explicit approval before applying its own token.");
 
     var secondApproved = await guarded.Execute($"delete:delete-inside-2.txt APPROVED:{secondProposalId}");
     AssertTrue(secondApproved.StartsWith("Successfully deleted", StringComparison.Ordinal), $"Expected second proposal token to authorize second delete. Actual: {secondApproved}");

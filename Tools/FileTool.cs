@@ -20,6 +20,8 @@ namespace LocalCursorAgent.Tools
         private readonly SandboxManager _sandboxManager;
         private readonly TextFileService _textFileService;
         private readonly ExecutionTracer? _tracer;
+        private readonly Dictionary<string, string> _proposalRunBindings = new(StringComparer.OrdinalIgnoreCase);
+        private readonly object _proposalRunBindingsLock = new();
 
         public FileTool(AgentSessionContext session, PermissionGuard permissionGuard, PatchSafetyGate patchSafetyGate, DestructiveOperationSafetyGate destructiveOperationSafetyGate, SandboxManager sandboxManager, ExecutionTracer? tracer = null)
         {
@@ -398,6 +400,7 @@ namespace LocalCursorAgent.Tools
                 Payload = null
             };
             var initialDecision = _permissionGuard.Evaluate(_session, actionWithoutApproval);
+            CacheRunBinding(initialDecision);
             if (!initialDecision.RequiresApproval)
                 return _permissionGuard.Evaluate(_session, action);
 
@@ -407,11 +410,7 @@ namespace LocalCursorAgent.Tools
             var expectedProposalId = initialDecision.ExpectedApprovalToken["APPROVED:".Length..];
             if (!approvalToken.Equals(expectedProposalId, StringComparison.OrdinalIgnoreCase))
                 return initialDecision;
-            var proposal = _session.GetApprovalProposal(expectedProposalId);
-            if (proposal is not null && _session.UtcNowProvider() > proposal.ExpiresAtUtc)
-                return PermissionDecision.Deny(PermissionReasonCode.ApprovalTokenExpired, "Approval token expired.");
-            if (_session.IsApprovalProposalConsumed(expectedProposalId))
-                return initialDecision;
+            var runId = TryGetRunBinding(expectedProposalId);
 
             var approvedAction = new ToolAction
             {
@@ -420,16 +419,31 @@ namespace LocalCursorAgent.Tools
                 SourcePath = action.SourcePath,
                 DestinationPath = action.DestinationPath,
                 WorkingDirectory = action.WorkingDirectory,
-                RunId = proposal?.RunId,
+                RunId = runId,
                 Payload = $"APPROVED:{expectedProposalId}"
             };
             var approvedDecision = _permissionGuard.Evaluate(_session, approvedAction);
             if (approvedDecision.Allowed)
             {
-                if (!_session.ConsumeApprovalProposal(expectedProposalId, proposal?.RunId))
+                if (!_session.ConsumeApprovalProposal(expectedProposalId, runId))
                     return PermissionDecision.Deny(PermissionReasonCode.ApprovalStateUnavailable, $"Approval state unavailable: {_session.ApprovalLedgerError}");
             }
             return approvedDecision;
+        }
+
+        private void CacheRunBinding(PermissionDecision decision)
+        {
+            var proposal = decision.ApprovalProposal;
+            if (proposal is null || string.IsNullOrWhiteSpace(proposal.ProposalId) || string.IsNullOrWhiteSpace(proposal.RunId))
+                return;
+            lock (_proposalRunBindingsLock)
+                _proposalRunBindings[proposal.ProposalId] = proposal.RunId;
+        }
+
+        private string? TryGetRunBinding(string proposalId)
+        {
+            lock (_proposalRunBindingsLock)
+                return _proposalRunBindings.TryGetValue(proposalId, out var runId) ? runId : null;
         }
 
         private static bool TryExtractApprovalToken(string input, out string token, out string normalized)
