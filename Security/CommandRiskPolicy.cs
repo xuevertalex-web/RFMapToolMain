@@ -81,13 +81,52 @@ internal static class CommandRiskPolicy
     {
         if (gitIndex + 2 < tokens.Count && tokens[gitIndex + 1] == "reset" && tokens[gitIndex + 2] == "--hard")
             return true;
-        if (gitIndex + 2 < tokens.Count && tokens[gitIndex + 1] == "clean" && tokens[gitIndex + 2].Contains("fd", StringComparison.Ordinal))
+        if (gitIndex + 2 < tokens.Count && tokens[gitIndex + 1] == "clean" && IsDestructiveGitCleanFlags(tokens[gitIndex + 2]))
+            return true;
+        if (gitIndex + 2 < tokens.Count && tokens[gitIndex + 1] == "checkout" && tokens[gitIndex + 2] == ".")
             return true;
         if (gitIndex + 3 < tokens.Count && tokens[gitIndex + 1] == "checkout" && tokens[gitIndex + 2] == "--" && tokens[gitIndex + 3] == ".")
             return true;
         if (gitIndex + 2 < tokens.Count && tokens[gitIndex + 1] == "restore" && tokens[gitIndex + 2] == ".")
             return true;
+        if (gitIndex + 2 < tokens.Count && tokens[gitIndex + 1] == "restore" && IsDestructiveGitRestoreFlags(tokens, gitIndex + 2))
+            return true;
         return false;
+    }
+
+    private static bool IsDestructiveGitCleanFlags(string flags)
+    {
+        if (string.IsNullOrWhiteSpace(flags))
+            return false;
+
+        var compact = flags.Trim().TrimStart('-').Replace("-", string.Empty, StringComparison.Ordinal);
+        return compact.Contains("f", StringComparison.Ordinal) && compact.Contains("d", StringComparison.Ordinal);
+    }
+
+    private static bool IsDestructiveGitRestoreFlags(IReadOnlyList<string> tokens, int flagsStartIndex)
+    {
+        var hasDotTarget = false;
+        var hasWorktree = false;
+        var hasStaged = false;
+
+        for (var i = flagsStartIndex; i < tokens.Count; i++)
+        {
+            var token = tokens[i];
+            if (token == ".")
+            {
+                hasDotTarget = true;
+                break;
+            }
+
+            if (token == "--worktree")
+                hasWorktree = true;
+            else if (token == "--staged")
+                hasStaged = true;
+            else if (!token.StartsWith("-", StringComparison.Ordinal))
+                break;
+        }
+
+        return hasDotTarget && (hasWorktree || hasStaged);
     }
 
     private static bool ContainsShellMeta(string lowered)
