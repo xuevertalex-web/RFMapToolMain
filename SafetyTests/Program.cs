@@ -62,6 +62,7 @@ await RunApprovalTokenTtlLifecycleRegression();
 await RunApprovalLedgerReplayAcrossRestartRegression();
 await RunApprovalLedgerCorruptFailClosedRegression();
 await RunApprovalLedgerExpiredAndDeniedEventsRegression();
+await RunApprovalLedgerDeniedAppendFailureFailClosedRegression();
 RunCommandRiskPolicyTokenizationRegression();
 RunExtractRequestedNewFilePath_ExtensionRegression();
 RunExtractRequestedNewFilePath_NoCreateIntentRegression();
@@ -2947,6 +2948,76 @@ static async Task RunApprovalLedgerExpiredAndDeniedEventsRegression()
         AssertTrue(ledger.Contains("\"event\":\"denied_invalid_token\"", StringComparison.Ordinal), "Expected denied_invalid_token event in ledger.");
         AssertTrue(!ledger.Contains("APPROVED:true", StringComparison.Ordinal), "Ledger must not persist raw approval token payload.");
         Console.WriteLine("PASS ApprovalLedgerExpiredAndDeniedEventsRegression");
+    }
+    finally
+    {
+        if (Directory.Exists(runtimeRoot))
+            Directory.Delete(runtimeRoot, recursive: true);
+    }
+}
+
+static async Task RunApprovalLedgerDeniedAppendFailureFailClosedRegression()
+{
+    var runtimeRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalLedgerDeniedAppendFail_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(runtimeRoot);
+    try
+    {
+        var workspaceRoot = Path.Combine(runtimeRoot, "workspace");
+        Directory.CreateDirectory(workspaceRoot);
+        var target = Path.Combine(workspaceRoot, "denied-append.txt");
+        await File.WriteAllTextAsync(target, "x");
+
+        var session = new AgentSessionContext
+        {
+            SessionId = Guid.NewGuid().ToString("N"),
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+        };
+        var guard = new PermissionGuard();
+        _ = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = target
+        });
+
+        var ledgerPath = Path.Combine(runtimeRoot, "approval-ledger-v2.jsonl");
+        File.SetAttributes(ledgerPath, FileAttributes.ReadOnly);
+        try
+        {
+            var denied = guard.Evaluate(session, new ToolAction
+            {
+                Kind = ToolActionKind.DeleteFile,
+                TargetPath = target,
+                Payload = "APPROVED:true"
+            });
+            AssertTrue(!denied.Allowed, "Expected invalid marker to remain denied.");
+            AssertTrue(!session.IsApprovalLedgerHealthy, "Expected ledger to become unhealthy when denied append fails.");
+
+            var highRisk = guard.Evaluate(session, new ToolAction
+            {
+                Kind = ToolActionKind.RunCommand,
+                Payload = "nvidia-smi",
+                WorkingDirectory = workspaceRoot
+            });
+            AssertTrue(!highRisk.Allowed && highRisk.ReasonCodeString == PermissionReasonCodes.ApprovalStateUnavailable, "Expected deterministic fail-closed behavior after denied append failure.");
+
+            var readPath = Path.Combine(workspaceRoot, "read-ok-after-denied-append.txt");
+            await File.WriteAllTextAsync(readPath, "ok");
+            var readDecision = guard.Evaluate(session, new ToolAction
+            {
+                Kind = ToolActionKind.ReadFile,
+                TargetPath = readPath
+            });
+            AssertTrue(readDecision.Allowed, "Expected read/analysis path to remain unaffected.");
+        }
+        finally
+        {
+            File.SetAttributes(ledgerPath, FileAttributes.Normal);
+        }
+
+        Console.WriteLine("PASS ApprovalLedgerDeniedAppendFailureFailClosedRegression");
     }
     finally
     {

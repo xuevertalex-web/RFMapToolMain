@@ -283,7 +283,11 @@ public sealed class PermissionGuard
         }, code, normalizedTarget, normalizedWorkspace);
         if (!token.Equals(expected, StringComparison.OrdinalIgnoreCase))
         {
-            session.RecordApprovalDeniedEvent(expected, "denied_invalid_token", PermissionReasonCodes.HighRiskApprovalRequired);
+            if (!session.RecordApprovalDeniedEvent(expected, "denied_invalid_token", PermissionReasonCodes.HighRiskApprovalRequired))
+            {
+                expired = false;
+                return false;
+            }
             return false;
         }
         if (session.IsApprovalProposalConsumed(expected))
@@ -298,13 +302,18 @@ public sealed class PermissionGuard
         if (session.IsApprovalProposalExpired(expected))
         {
             expired = true;
-            session.RecordApprovalDeniedEvent(expected, "denied_expired", PermissionReasonCodes.ApprovalTokenExpired);
+            if (!session.RecordApprovalDeniedEvent(expected, "denied_expired", PermissionReasonCodes.ApprovalTokenExpired))
+                return false;
             return false;
         }
         var proposal = session.GetApprovalProposal(expected);
         if (proposal is null)
         {
-            session.RecordApprovalDeniedEvent(expected, "denied_invalid_token", PermissionReasonCodes.HighRiskApprovalRequired);
+            if (!session.RecordApprovalDeniedEvent(expected, "denied_invalid_token", PermissionReasonCodes.HighRiskApprovalRequired))
+            {
+                expired = false;
+                return false;
+            }
             return false;
         }
         if (session.UtcNowProvider() > proposal.ExpiresAtUtc)
@@ -314,7 +323,8 @@ public sealed class PermissionGuard
                 expired = true;
                 return false;
             }
-            session.RecordApprovalDeniedEvent(expected, "denied_expired", PermissionReasonCodes.ApprovalTokenExpired);
+            if (!session.RecordApprovalDeniedEvent(expected, "denied_expired", PermissionReasonCodes.ApprovalTokenExpired))
+                return false;
             expired = true;
             return false;
         }
