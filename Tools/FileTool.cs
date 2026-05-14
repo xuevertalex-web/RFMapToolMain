@@ -407,6 +407,9 @@ namespace LocalCursorAgent.Tools
             var expectedProposalId = initialDecision.ExpectedApprovalToken["APPROVED:".Length..];
             if (!approvalToken.Equals(expectedProposalId, StringComparison.OrdinalIgnoreCase))
                 return initialDecision;
+            var proposal = _session.GetApprovalProposal(expectedProposalId);
+            if (proposal is not null && _session.UtcNowProvider() > proposal.ExpiresAtUtc)
+                return PermissionDecision.Deny(PermissionReasonCode.ApprovalTokenExpired, "Approval token expired.");
             if (_session.IsApprovalProposalConsumed(expectedProposalId))
                 return initialDecision;
 
@@ -417,7 +420,7 @@ namespace LocalCursorAgent.Tools
                 SourcePath = action.SourcePath,
                 DestinationPath = action.DestinationPath,
                 WorkingDirectory = action.WorkingDirectory,
-                Payload = "APPROVED:token"
+                Payload = $"APPROVED:{expectedProposalId}"
             };
             var approvedDecision = _permissionGuard.Evaluate(_session, approvedAction);
             if (approvedDecision.Allowed)

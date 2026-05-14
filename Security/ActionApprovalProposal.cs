@@ -25,4 +25,9 @@ public sealed class ActionApprovalProposal
     public string Reason { get; init; } = string.Empty;
     public bool RequiresApproval { get; init; }
     public ApprovalStatus ApprovalStatus { get; init; }
+    public DateTime IssuedAtUtc { get; init; }
+    public DateTime ExpiresAtUtc { get; init; }
+    public int TtlSeconds { get; init; }
+    public string SessionId { get; init; } = string.Empty;
+    public bool SessionBound { get; init; } = true;
 }

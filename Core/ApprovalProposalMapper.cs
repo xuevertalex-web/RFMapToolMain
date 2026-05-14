@@ -22,7 +22,11 @@ namespace LocalCursorAgent.Core
                 ExpectedEffect = p.ExpectedEffect,
                 Reason = p.Reason,
                 ApprovalStatus = p.ApprovalStatus.ToString(),
-                IsInsideSandbox = p.IsInsideSandbox
+                IsInsideSandbox = p.IsInsideSandbox,
+                IssuedAtUtc = p.IssuedAtUtc == default ? string.Empty : p.IssuedAtUtc.ToUniversalTime().ToString("O"),
+                ExpiresAtUtc = p.ExpiresAtUtc == default ? string.Empty : p.ExpiresAtUtc.ToUniversalTime().ToString("O"),
+                TtlSeconds = p.TtlSeconds,
+                SessionBound = p.SessionBound
             }).ToArray();
         }
     }

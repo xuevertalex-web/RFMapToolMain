@@ -65,6 +65,18 @@ namespace LocalCursorAgent.Core
 
             [JsonPropertyName("isInsideSandbox")]
             public bool IsInsideSandbox { get; init; }
+
+            [JsonPropertyName("issuedAtUtc")]
+            public string IssuedAtUtc { get; init; } = string.Empty;
+
+            [JsonPropertyName("expiresAtUtc")]
+            public string ExpiresAtUtc { get; init; } = string.Empty;
+
+            [JsonPropertyName("ttlSeconds")]
+            public int TtlSeconds { get; init; }
+
+            [JsonPropertyName("sessionBound")]
+            public bool SessionBound { get; init; }
         }
 
         internal sealed class ActionLifecyclePayload

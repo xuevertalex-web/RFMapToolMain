@@ -144,8 +144,15 @@ public sealed class PermissionGuard
         {
             if (IsDeleteLike(action.Kind) || IsRenameLike(action.Kind) || IsMoveLike(action.Kind))
             {
+                var target = normalizedTarget ?? normalizedSource ?? normalizedDestination ?? normalizedWorkspace;
                 if (!CommandRiskPolicy.HasExplicitApprovalMarker(action.Payload))
                     return CreateApprovalRequired(session, action, PermissionReasonCode.WriteModeDeleteDenied, "Destructive operation requires explicit approval in WorkspaceWrite mode", normalizedTarget ?? normalizedSource ?? normalizedDestination ?? normalizedWorkspace, normalizedWorkspace, "high");
+                if (!IsBoundApprovalTokenValidForAction(session, action, PermissionReasonCode.WriteModeDeleteDenied, target, normalizedWorkspace, out var expired))
+                {
+                    if (expired)
+                        return PermissionDecision.Deny(PermissionReasonCode.ApprovalTokenExpired, "Approval token expired.", target, normalizedWorkspace);
+                    return CreateApprovalRequired(session, action, PermissionReasonCode.WriteModeDeleteDenied, "Destructive operation requires explicit approval in WorkspaceWrite mode", target, normalizedWorkspace, "high");
+                }
             }
         }
 
@@ -200,6 +207,9 @@ public sealed class PermissionGuard
 
     private static PermissionDecision CreateApprovalRequired(AgentSessionContext session, ToolAction action, PermissionReasonCode code, string message, string normalizedTarget, string normalizedWorkspace, string riskLevel = "high")
     {
+        var issuedAtUtc = session.UtcNowProvider();
+        var ttlSeconds = AgentSessionContext.ApprovalTokenTtlSecondsDefault;
+        var expiresAtUtc = issuedAtUtc.AddSeconds(ttlSeconds);
         var proposalId = ComputeProposalId(session, action, code, normalizedTarget, normalizedWorkspace);
         var proposal = new ActionApprovalProposal
         {
@@ -217,8 +227,14 @@ public sealed class PermissionGuard
             ExpectedEffect = BuildExpectedEffect(action),
             Reason = message,
             RequiresApproval = true,
-            ApprovalStatus = ApprovalStatus.ApprovalRequired
+            ApprovalStatus = ApprovalStatus.ApprovalRequired,
+            IssuedAtUtc = issuedAtUtc,
+            ExpiresAtUtc = expiresAtUtc,
+            TtlSeconds = ttlSeconds,
+            SessionId = session.SessionId,
+            SessionBound = true
         };
+        session.RegisterApprovalProposal(proposal);
 
         return PermissionDecision.ApprovalRequired(
             code,
@@ -243,8 +259,12 @@ public sealed class PermissionGuard
             .ToLowerInvariant()[..16];
     }
 
-    private static bool IsBoundApprovalTokenValidForAction(AgentSessionContext session, ToolAction action, PermissionReasonCode code, string normalizedTarget, string normalizedWorkspace)
+    private static bool IsBoundApprovalTokenValidForAction(AgentSessionContext session, ToolAction action, PermissionReasonCode code, string normalizedTarget, string normalizedWorkspace) =>
+        IsBoundApprovalTokenValidForAction(session, action, code, normalizedTarget, normalizedWorkspace, out _);
+
+    private static bool IsBoundApprovalTokenValidForAction(AgentSessionContext session, ToolAction action, PermissionReasonCode code, string normalizedTarget, string normalizedWorkspace, out bool expired)
     {
+        expired = false;
         if (!CommandRiskPolicy.TryExtractApprovalToken(action.Payload, out var token))
             return false;
         var expected = ComputeProposalId(session, new ToolAction
@@ -260,6 +280,14 @@ public sealed class PermissionGuard
             return false;
         if (session.IsApprovalProposalConsumed(expected))
             return false;
+        var proposal = session.GetApprovalProposal(expected);
+        if (proposal is null)
+            return false;
+        if (session.UtcNowProvider() > proposal.ExpiresAtUtc)
+        {
+            expired = true;
+            return false;
+        }
         return true;
     }
 

@@ -58,6 +58,7 @@ await RunProcessArgumentListPreservesArgumentsRegression();
 await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
 await RunDestructiveFileApprovalMarkerRegression();
 await RunGuardedToolExplicitApprovalHandoffRegression();
+await RunApprovalTokenTtlLifecycleRegression();
 RunCommandRiskPolicyTokenizationRegression();
 RunExtractRequestedNewFilePath_ExtensionRegression();
 RunExtractRequestedNewFilePath_NoCreateIntentRegression();
@@ -2646,6 +2647,87 @@ static async Task RunProcessExecutionHardeningRegression()
     AssertTrue(!outside.Success && outside.ReasonCode == "BLOCKED_PROCESS_EXECUTION", "Expected out-of-workspace working directory to be blocked.");
 
     Console.WriteLine("PASS ProcessExecution_HardeningValidation");
+}
+
+static async Task RunApprovalTokenTtlLifecycleRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "ttl.txt"), "ok");
+
+    var now = DateTime.UtcNow;
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+        UtcNowProvider = () => now
+    };
+
+    var guard = new PermissionGuard();
+    var decision = guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.DeleteFile,
+        TargetPath = Path.Combine(workspaceRoot, "ttl.txt")
+    });
+    AssertTrue(decision.RequiresApproval, "Expected approval required for destructive delete.");
+    AssertTrue(decision.ApprovalProposal is not null, "Expected approval proposal metadata.");
+    var proposal = decision.ApprovalProposal!;
+    AssertTrue(proposal.TtlSeconds == 600, "Expected TTL=600 seconds.");
+    AssertTrue(proposal.SessionBound, "Expected session-bound metadata.");
+    AssertTrue(!string.IsNullOrWhiteSpace(proposal.SessionId), "Expected SessionId in proposal.");
+    AssertTrue(proposal.ExpiresAtUtc > proposal.IssuedAtUtc, "Expected ExpiresAtUtc > IssuedAtUtc.");
+
+    var tracer = new ExecutionTracer(runtimeRoot);
+    var sandbox = new SandboxManager(workspaceRoot, runtimeRoot);
+    var patchGate = new PatchSafetyGate(session, guard, tracer);
+    var destructiveGate = new DestructiveOperationSafetyGate(session, guard, tracer);
+    var fileTool = new FileTool(session, guard, patchGate, destructiveGate, sandbox, tracer);
+    var guarded = new GuardedTool(fileTool, guard, session, CreateFileActionFactory(workspaceRoot), tracer);
+
+    var expectedToken = decision.ExpectedApprovalToken ?? string.Empty;
+    var beforeExpiryDecision = guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.DeleteFile,
+        TargetPath = Path.Combine(workspaceRoot, "ttl.txt"),
+        Payload = expectedToken
+    });
+    AssertTrue(beforeExpiryDecision.Allowed, "Expected exact token before expiry to pass guard validation.");
+
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "ttl-expired.txt"), "ok");
+    var decisionExpired = guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.DeleteFile,
+        TargetPath = Path.Combine(workspaceRoot, "ttl-expired.txt")
+    });
+    var expiredToken = decisionExpired.ExpectedApprovalToken ?? string.Empty;
+    now = now.AddMinutes(11);
+    var expiredDecision = guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.DeleteFile,
+        TargetPath = Path.Combine(workspaceRoot, "ttl-expired.txt"),
+        Payload = expiredToken
+    });
+    AssertTrue(!expiredDecision.Allowed && expiredDecision.ReasonCodeString == PermissionReasonCodes.ApprovalTokenExpired, "Expected expired token denial.");
+
+    var mapperType = typeof(Agent).Assembly.GetType("LocalCursorAgent.Core.ApprovalProposalMapper", throwOnError: true)!;
+    var mapMethod = mapperType.GetMethod("MapApprovalProposals", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+    var mappedArray = (Array)mapMethod.Invoke(null, new object[] { new[] { decisionExpired.ApprovalProposal! } })!;
+    var mappedFirst = mappedArray.GetValue(0)!;
+    var issued = (string)(mappedFirst.GetType().GetProperty("IssuedAtUtc")?.GetValue(mappedFirst) ?? string.Empty);
+    var expires = (string)(mappedFirst.GetType().GetProperty("ExpiresAtUtc")?.GetValue(mappedFirst) ?? string.Empty);
+    var ttl = (int)(mappedFirst.GetType().GetProperty("TtlSeconds")?.GetValue(mappedFirst) ?? 0);
+    var sessionBound = (bool)(mappedFirst.GetType().GetProperty("SessionBound")?.GetValue(mappedFirst) ?? false);
+    AssertTrue(!string.IsNullOrWhiteSpace(issued), "Expected issuedAtUtc payload field.");
+    AssertTrue(!string.IsNullOrWhiteSpace(expires), "Expected expiresAtUtc payload field.");
+    AssertTrue(ttl == 600, "Expected ttlSeconds payload field.");
+    AssertTrue(sessionBound, "Expected sessionBound payload field.");
+    Console.WriteLine("PASS ApprovalTokenTtlLifecycleRegression");
 }
 
 static async Task RunProcessArgumentListPreservesArgumentsRegression()

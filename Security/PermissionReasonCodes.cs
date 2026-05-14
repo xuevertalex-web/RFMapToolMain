@@ -21,6 +21,7 @@ public static class PermissionReasonCodes
     public const string InvalidPathSyntaxDenied = "INVALID_PATH_SYNTAX_DENIED";
     public const string InvalidWorkingDirectory = "INVALID_WORKING_DIRECTORY";
     public const string ProtectedRuntimeDiagnosticsPathDenied = "PROTECTED_RUNTIME_DIAGNOSTICS_PATH";
+    public const string ApprovalTokenExpired = "APPROVAL_TOKEN_EXPIRED";
     public const string HighRiskApprovalRequired = "HIGH_RISK_APPROVAL_REQUIRED";
     public const string ToolDeniedByPolicy = "TOOL_DENIED_BY_POLICY";
     public const string WorkspaceRootProtected = "WORKSPACE_ROOT_PROTECTED";

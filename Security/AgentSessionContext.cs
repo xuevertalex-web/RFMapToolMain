@@ -2,7 +2,9 @@ namespace LocalCursorAgent.Security;
 
 public sealed class AgentSessionContext
 {
+    public const int ApprovalTokenTtlSecondsDefault = 600;
     private readonly HashSet<string> _consumedApprovalProposalIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ActionApprovalProposal> _approvalProposals = new(StringComparer.OrdinalIgnoreCase);
 
     public required string SessionId { get; init; }
     public required string RuntimeRoot { get; init; }
@@ -13,6 +15,7 @@ public sealed class AgentSessionContext
     public bool ActiveWorkspaceUsed { get; set; } = true;
     public required AgentAccessMode AccessMode { get; set; }
     public required ProtectedPathPolicy ProtectedPathPolicy { get; init; }
+    public Func<DateTime> UtcNowProvider { get; init; } = static () => DateTime.UtcNow;
 
     public bool IsApprovalProposalConsumed(string proposalId)
     {
@@ -30,5 +33,21 @@ public sealed class AgentSessionContext
 
         lock (_consumedApprovalProposalIds)
             _consumedApprovalProposalIds.Add(proposalId);
+    }
+
+    public void RegisterApprovalProposal(ActionApprovalProposal proposal)
+    {
+        if (proposal is null || string.IsNullOrWhiteSpace(proposal.ProposalId))
+            return;
+        lock (_approvalProposals)
+            _approvalProposals[proposal.ProposalId] = proposal;
+    }
+
+    public ActionApprovalProposal? GetApprovalProposal(string proposalId)
+    {
+        if (string.IsNullOrWhiteSpace(proposalId))
+            return null;
+        lock (_approvalProposals)
+            return _approvalProposals.TryGetValue(proposalId, out var proposal) ? proposal : null;
     }
 }

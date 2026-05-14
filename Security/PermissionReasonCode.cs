@@ -17,6 +17,7 @@ public enum PermissionReasonCode
     InvalidPathSyntaxDenied,
     InvalidWorkingDirectory,
     ProtectedRuntimeDiagnosticsPathDenied,
+    ApprovalTokenExpired,
     HighRiskApprovalRequired,
     ToolDeniedByPolicy
 }

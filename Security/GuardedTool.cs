@@ -70,10 +70,16 @@ public sealed class GuardedTool : ITool
         var expectedId = expectedToken["APPROVED:".Length..];
         if (!token.Equals(expectedId, StringComparison.OrdinalIgnoreCase))
             return false;
+        var proposal = _session.GetApprovalProposal(expectedId);
+        if (proposal is not null && _session.UtcNowProvider() > proposal.ExpiresAtUtc)
+        {
+            approvedDecision = PermissionDecision.Deny(PermissionReasonCode.ApprovalTokenExpired, "Approval token expired.");
+            return true;
+        }
         if (_session.IsApprovalProposalConsumed(expectedId))
             return false;
 
-        approvedAction = CreateApprovedAction(action);
+        approvedAction = CreateApprovedAction(action, expectedToken);
         approvedDecision = _guard.Evaluate(_session, approvedAction);
         if (!approvedDecision.Allowed)
             return false;
@@ -81,7 +87,7 @@ public sealed class GuardedTool : ITool
         return true;
     }
 
-    private static ToolAction CreateApprovedAction(ToolAction action) => new()
+    private static ToolAction CreateApprovedAction(ToolAction action, string expectedToken) => new()
     {
         Kind = action.Kind,
         TargetPath = action.TargetPath,
@@ -89,8 +95,8 @@ public sealed class GuardedTool : ITool
         DestinationPath = action.DestinationPath,
         WorkingDirectory = action.WorkingDirectory,
         Payload = string.IsNullOrWhiteSpace(action.Payload)
-            ? "APPROVED:token"
-            : $"{action.Payload} APPROVED:token"
+            ? expectedToken
+            : $"{action.Payload} {expectedToken}"
     };
 
     private static ToolAction SanitizeApprovalTokenFromPaths(ToolAction action) => new()
