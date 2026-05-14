@@ -26,11 +26,13 @@ public sealed class GuardedTool : ITool
     public async Task<string> Execute(string input)
     {
         var action = _actionFactory(input);
+        action = BindRunIdFromApprovalTokenIfAvailable(input, action);
         string consumedProposalId = string.Empty;
+        string? consumedRunId = null;
         if (CommandRiskPolicy.TryExtractApprovalToken(input, out _))
             action = SanitizeApprovalTokenFromPaths(action);
         var decision = _guard.Evaluate(_session, action);
-        if (!decision.Allowed && decision.RequiresApproval && TryApplyProposalBoundApproval(input, action, decision, out var approvedAction, out var approvedDecision, out consumedProposalId))
+        if (!decision.Allowed && decision.RequiresApproval && TryApplyProposalBoundApproval(input, action, decision, out var approvedAction, out var approvedDecision, out consumedProposalId, out consumedRunId))
         {
             action = approvedAction;
             decision = approvedDecision;
@@ -45,7 +47,7 @@ public sealed class GuardedTool : ITool
             var result = await _inner.Execute(input);
             if (!string.IsNullOrWhiteSpace(consumedProposalId))
             {
-                if (!_session.ConsumeApprovalProposal(consumedProposalId))
+                if (!_session.ConsumeApprovalProposal(consumedProposalId, consumedRunId))
                     return $"DENIED [{PermissionReasonCodes.ApprovalStateUnavailable}]: Approval state unavailable: {_session.ApprovalLedgerError}";
             }
             _tracer?.LogActionExecution(_inner.Name, action, decision, succeeded: true, PermissionReasonCodes.Allowed, "Action executed.");
@@ -58,11 +60,12 @@ public sealed class GuardedTool : ITool
         }
     }
 
-    private bool TryApplyProposalBoundApproval(string input, ToolAction action, PermissionDecision decision, out ToolAction approvedAction, out PermissionDecision approvedDecision, out string consumedProposalId)
+    private bool TryApplyProposalBoundApproval(string input, ToolAction action, PermissionDecision decision, out ToolAction approvedAction, out PermissionDecision approvedDecision, out string consumedProposalId, out string? consumedRunId)
     {
         approvedAction = action;
         approvedDecision = decision;
         consumedProposalId = string.Empty;
+        consumedRunId = null;
         if (!CommandRiskPolicy.TryExtractApprovalToken(input, out var token))
             return false;
 
@@ -82,17 +85,39 @@ public sealed class GuardedTool : ITool
         if (_session.IsApprovalProposalConsumed(expectedId))
             return false;
 
-        approvedAction = CreateApprovedAction(action, expectedToken);
+        approvedAction = CreateApprovedAction(action, expectedToken, proposal?.RunId);
         approvedDecision = _guard.Evaluate(_session, approvedAction);
         if (!approvedDecision.Allowed)
             return false;
         consumedProposalId = expectedId;
+        consumedRunId = proposal?.RunId;
         return true;
     }
 
-    private static ToolAction CreateApprovedAction(ToolAction action, string expectedToken) => new()
+    private ToolAction BindRunIdFromApprovalTokenIfAvailable(string input, ToolAction action)
+    {
+        if (!CommandRiskPolicy.TryExtractApprovalToken(input, out var token))
+            return action;
+        var proposal = _session.GetApprovalProposal(token);
+        var runId = proposal?.RunId;
+        if (string.IsNullOrWhiteSpace(runId))
+            return action;
+        return new ToolAction
+        {
+            Kind = action.Kind,
+            RunId = runId,
+            TargetPath = action.TargetPath,
+            SourcePath = action.SourcePath,
+            DestinationPath = action.DestinationPath,
+            WorkingDirectory = action.WorkingDirectory,
+            Payload = action.Payload
+        };
+    }
+
+    private static ToolAction CreateApprovedAction(ToolAction action, string expectedToken, string? runId) => new()
     {
         Kind = action.Kind,
+        RunId = string.IsNullOrWhiteSpace(runId) ? action.RunId : runId,
         TargetPath = action.TargetPath,
         SourcePath = action.SourcePath,
         DestinationPath = action.DestinationPath,
@@ -105,6 +130,7 @@ public sealed class GuardedTool : ITool
     private static ToolAction SanitizeApprovalTokenFromPaths(ToolAction action) => new()
     {
         Kind = action.Kind,
+        RunId = action.RunId,
         TargetPath = StripApprovalMarkerFromPath(action.TargetPath),
         SourcePath = StripApprovalMarkerFromPath(action.SourcePath),
         DestinationPath = StripApprovalMarkerFromPath(action.DestinationPath),

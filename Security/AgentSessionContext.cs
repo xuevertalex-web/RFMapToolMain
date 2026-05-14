@@ -3,6 +3,7 @@ namespace LocalCursorAgent.Security;
 public sealed class AgentSessionContext
 {
     public const int ApprovalTokenTtlSecondsDefault = 600;
+    public static readonly DateTime RunIdCutoverUtc = new(2026, 5, 14, 0, 0, 0, DateTimeKind.Utc);
     private readonly HashSet<string> _consumedApprovalProposalIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _expiredApprovalProposalIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ActionApprovalProposal> _approvalProposals = new(StringComparer.OrdinalIgnoreCase);
@@ -59,7 +60,9 @@ public sealed class AgentSessionContext
             return _expiredApprovalProposalIds.Contains(proposalId);
     }
 
-    public bool ConsumeApprovalProposal(string proposalId)
+    public static string CreateRunId() => Guid.NewGuid().ToString("N");
+
+    public bool ConsumeApprovalProposal(string proposalId, string? runId = null)
     {
         EnsureApprovalLedgerInitialized();
         if (string.IsNullOrWhiteSpace(proposalId))
@@ -68,7 +71,8 @@ public sealed class AgentSessionContext
         if (!_approvalLedgerHealthy || _approvalLedger is null)
             return false;
 
-        if (!_approvalLedger.TryAppendConsumed(SessionId, proposalId, UtcNowProvider(), out var appendError))
+        var effectiveRunId = ResolveRunIdForProposal(proposalId, runId);
+        if (!_approvalLedger.TryAppendConsumed(SessionId, proposalId, UtcNowProvider(), effectiveRunId, out var appendError))
         {
             _approvalLedgerHealthy = false;
             _approvalLedgerError = $"consume_append_failed: {appendError}";
@@ -82,7 +86,7 @@ public sealed class AgentSessionContext
         return true;
     }
 
-    public bool MarkApprovalProposalExpired(string proposalId, string reasonCode)
+    public bool MarkApprovalProposalExpired(string proposalId, string reasonCode, string? runId = null)
     {
         EnsureApprovalLedgerInitialized();
         if (string.IsNullOrWhiteSpace(proposalId))
@@ -93,7 +97,8 @@ public sealed class AgentSessionContext
             return true;
         if (IsApprovalProposalExpired(proposalId))
             return true;
-        if (!_approvalLedger.TryAppendExpired(SessionId, proposalId, UtcNowProvider(), reasonCode, out var appendError))
+        var effectiveRunId = ResolveRunIdForProposal(proposalId, runId);
+        if (!_approvalLedger.TryAppendExpired(SessionId, proposalId, UtcNowProvider(), reasonCode, effectiveRunId, out var appendError))
         {
             _approvalLedgerHealthy = false;
             _approvalLedgerError = $"expired_append_failed: {appendError}";
@@ -104,14 +109,15 @@ public sealed class AgentSessionContext
         return true;
     }
 
-    public bool RecordApprovalDeniedEvent(string proposalId, string eventName, string reasonCode)
+    public bool RecordApprovalDeniedEvent(string proposalId, string eventName, string reasonCode, string? runId = null)
     {
         EnsureApprovalLedgerInitialized();
         if (string.IsNullOrWhiteSpace(proposalId))
             return false;
         if (!_approvalLedgerHealthy || _approvalLedger is null)
             return false;
-        if (!_approvalLedger.TryAppendDenied(SessionId, proposalId, eventName, UtcNowProvider(), reasonCode, out var appendError))
+        var effectiveRunId = ResolveRunIdForProposal(proposalId, runId);
+        if (!_approvalLedger.TryAppendDenied(SessionId, proposalId, eventName, UtcNowProvider(), reasonCode, effectiveRunId, out var appendError))
         {
             _approvalLedgerHealthy = false;
             _approvalLedgerError = $"denied_append_failed: {appendError}";
@@ -147,6 +153,21 @@ public sealed class AgentSessionContext
             return null;
         lock (_approvalProposals)
             return _approvalProposals.TryGetValue(proposalId, out var proposal) ? proposal : null;
+    }
+
+    private string? ResolveRunIdForProposal(string proposalId, string? runId)
+    {
+        var normalized = NormalizeOptionalRunId(runId);
+        if (!string.IsNullOrWhiteSpace(normalized))
+            return normalized;
+        var proposal = GetApprovalProposal(proposalId);
+        return NormalizeOptionalRunId(proposal?.RunId);
+    }
+
+    private static string? NormalizeOptionalRunId(string? runId)
+    {
+        var normalized = runId?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 
     private void EnsureApprovalLedgerInitialized()

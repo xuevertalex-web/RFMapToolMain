@@ -59,6 +59,7 @@ await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
 await RunDestructiveFileApprovalMarkerRegression();
 await RunGuardedToolExplicitApprovalHandoffRegression();
 await RunApprovalTokenTtlLifecycleRegression();
+await RunApprovalRunIdBindingRegression();
 await RunApprovalLedgerReplayAcrossRestartRegression();
 await RunApprovalLedgerCorruptFailClosedRegression();
 await RunApprovalLedgerExpiredAndDeniedEventsRegression();
@@ -2545,7 +2546,7 @@ static async Task RunHostDiagnosticsCommandApprovalRegression()
         Payload = "nvidia-smi APPROVED:true"
     });
     AssertTrue(!genericMarkerDecision.Allowed, "Expected generic approval marker to be rejected for high-risk command.");
-    AssertTrue(genericMarkerDecision.RequiresApproval, "Expected approval requirement to remain for generic marker.");
+    AssertTrue(genericMarkerDecision.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, "Expected deterministic invalid-token denial reason for generic marker.");
 
     var expectedToken = decision.ExpectedApprovalToken ?? string.Empty;
     AssertTrue(expectedToken.StartsWith("APPROVED:", StringComparison.Ordinal), "Expected concrete proposal-bound token.");
@@ -2553,6 +2554,7 @@ static async Task RunHostDiagnosticsCommandApprovalRegression()
     {
         Kind = ToolActionKind.RunCommand,
         WorkingDirectory = workspaceRoot,
+        RunId = decision.ApprovalProposal?.RunId,
         Payload = $"nvidia-smi {expectedToken}"
     });
     AssertTrue(approvedDecision.Allowed, "Expected proposal-bound approval token to pass guard policy.");
@@ -2572,7 +2574,7 @@ static async Task RunHostDiagnosticsCommandApprovalRegression()
         WorkingDirectory = workspaceRoot,
         Payload = $"nvidia-smi {expectedToken}"
     });
-    AssertTrue(!staleTokenDecision.Allowed && staleTokenDecision.RequiresApproval, "Expected prior-session token to be rejected.");
+    AssertTrue(!staleTokenDecision.Allowed, "Expected prior-session token to be rejected.");
 
     var result = await runner.RunAsync(new SafeProcessRequest
     {
@@ -2700,6 +2702,7 @@ static async Task RunApprovalTokenTtlLifecycleRegression()
     {
         Kind = ToolActionKind.DeleteFile,
         TargetPath = Path.Combine(workspaceRoot, "ttl.txt"),
+        RunId = proposal.RunId,
         Payload = expectedToken
     });
     AssertTrue(beforeExpiryDecision.Allowed, "Expected exact token before expiry to pass guard validation.");
@@ -2716,6 +2719,7 @@ static async Task RunApprovalTokenTtlLifecycleRegression()
     {
         Kind = ToolActionKind.DeleteFile,
         TargetPath = Path.Combine(workspaceRoot, "ttl-expired.txt"),
+        RunId = decisionExpired.ApprovalProposal?.RunId,
         Payload = expiredToken
     });
     AssertTrue(!expiredDecision.Allowed && expiredDecision.ReasonCodeString == PermissionReasonCodes.ApprovalTokenExpired, "Expected expired token denial.");
@@ -2733,6 +2737,227 @@ static async Task RunApprovalTokenTtlLifecycleRegression()
     AssertTrue(ttl == 600, "Expected ttlSeconds payload field.");
     AssertTrue(sessionBound, "Expected sessionBound payload field.");
     Console.WriteLine("PASS ApprovalTokenTtlLifecycleRegression");
+}
+
+static async Task RunApprovalRunIdBindingRegression()
+{
+    var runtimeRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalRunIdBinding_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(runtimeRoot);
+    try
+    {
+        var workspaceRoot = Path.Combine(runtimeRoot, "workspace");
+        Directory.CreateDirectory(workspaceRoot);
+        var now = new DateTime(2040, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var deletePath = Path.Combine(workspaceRoot, "runid-delete.txt");
+        var mismatchPath = Path.Combine(workspaceRoot, "runid-mismatch.txt");
+        var readPath = Path.Combine(workspaceRoot, "runid-read.txt");
+        await File.WriteAllTextAsync(deletePath, "x");
+        await File.WriteAllTextAsync(mismatchPath, "y");
+        await File.WriteAllTextAsync(readPath, "z");
+
+        var session = new AgentSessionContext
+        {
+            SessionId = "runid-binding-main",
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        var guard = new PermissionGuard();
+
+        var issued = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = deletePath
+        });
+        AssertTrue(issued.RequiresApproval && issued.ApprovalProposal is not null, "Expected run-bound proposal to be issued.");
+        AssertTrue(!string.IsNullOrWhiteSpace(issued.ApprovalProposal!.RunId), "Expected non-empty runId on new issued proposal.");
+        var token = issued.ExpectedApprovalToken ?? string.Empty;
+        var boundAllowed = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = deletePath,
+            RunId = issued.ApprovalProposal.RunId,
+            Payload = token
+        });
+        AssertTrue(boundAllowed.Allowed, "Expected proposal token to be valid only for matching runId.");
+
+        var issuedMismatch = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = mismatchPath
+        });
+        AssertTrue(issuedMismatch.RequiresApproval && issuedMismatch.ApprovalProposal is not null, "Expected second run-bound proposal.");
+        var mismatchToken = issuedMismatch.ExpectedApprovalToken ?? string.Empty;
+        var mismatchDenied = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = mismatchPath,
+            RunId = "different-run",
+            Payload = mismatchToken
+        });
+        AssertTrue(!mismatchDenied.Allowed && mismatchDenied.ReasonCodeString == PermissionReasonCodes.ApprovalRunMismatch, "Expected runId mismatch denial.");
+
+        var missingRunIdDenied = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = mismatchPath,
+            Payload = mismatchToken
+        });
+        AssertTrue(!missingRunIdDenied.Allowed && missingRunIdDenied.ReasonCodeString == PermissionReasonCodes.ApprovalRunBindingUnavailable, "Expected missing current runId to fail closed.");
+
+        var ledgerPath = Path.Combine(runtimeRoot, "approval-ledger-v2.jsonl");
+        var ledgerText = await File.ReadAllTextAsync(ledgerPath);
+        AssertTrue(ledgerText.Contains("\"event\":\"denied_run_mismatch\"", StringComparison.Ordinal), "Expected denied_run_mismatch diagnostic event in ledger.");
+        AssertTrue(!ledgerText.Contains("APPROVED:", StringComparison.Ordinal), "Ledger must not persist raw approval tokens in mismatch diagnostics.");
+
+        var readAllowed = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.ReadFile,
+            TargetPath = readPath
+        });
+        AssertTrue(readAllowed.Allowed, "Expected read/analysis path to remain unaffected by runId binding failures.");
+
+        var postCutoverRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalRunIdPostCutover_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(postCutoverRoot);
+        try
+        {
+            var postWorkspace = Path.Combine(postCutoverRoot, "workspace");
+            Directory.CreateDirectory(postWorkspace);
+            var postPath = Path.Combine(postWorkspace, "post-cutover.txt");
+            await File.WriteAllTextAsync(postPath, "post");
+            var postSessionId = "runid-post-cutover";
+            var postIssue = new AgentSessionContext
+            {
+                SessionId = postSessionId,
+                RuntimeRoot = postCutoverRoot,
+                ActiveWorkspaceRoot = postWorkspace,
+                AccessMode = AgentAccessMode.WorkspaceWrite,
+                ProtectedPathPolicy = new ProtectedPathPolicy(new[] { postCutoverRoot }),
+                UtcNowProvider = () => now
+            };
+            var postGuard = new PermissionGuard();
+            var postIssued = postGuard.Evaluate(postIssue, new ToolAction
+            {
+                Kind = ToolActionKind.DeleteFile,
+                TargetPath = postPath
+            });
+            AssertTrue(postIssued.RequiresApproval && postIssued.ApprovalProposal is not null, "Expected post-cutover proposal for rewrite scenario.");
+            var postProposal = postIssued.ApprovalProposal!;
+            var postToken = postIssued.ExpectedApprovalToken ?? string.Empty;
+            var postLedgerPath = Path.Combine(postCutoverRoot, "approval-ledger-v2.jsonl");
+            var rewrittenPostCutover = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                schemaVersion = 2,
+                @event = "issued",
+                atUtc = postProposal.IssuedAtUtc,
+                sessionId = postProposal.SessionId,
+                proposalId = postProposal.ProposalId,
+                expiresAtUtc = postProposal.ExpiresAtUtc,
+                reasonCode = postProposal.ReasonCode,
+                actionType = postProposal.ActionType
+            });
+            await File.WriteAllTextAsync(postLedgerPath, rewrittenPostCutover + Environment.NewLine, new UTF8Encoding(false));
+
+            var postLoad = new AgentSessionContext
+            {
+                SessionId = postSessionId,
+                RuntimeRoot = postCutoverRoot,
+                ActiveWorkspaceRoot = postWorkspace,
+                AccessMode = AgentAccessMode.WorkspaceWrite,
+                ProtectedPathPolicy = new ProtectedPathPolicy(new[] { postCutoverRoot }),
+                UtcNowProvider = () => now
+            };
+            var postLoadGuard = new PermissionGuard();
+            var postDenied = postLoadGuard.Evaluate(postLoad, new ToolAction
+            {
+                Kind = ToolActionKind.DeleteFile,
+                TargetPath = postPath,
+                RunId = "attempt-post-cutover",
+                Payload = postToken
+            });
+            AssertTrue(!postDenied.Allowed && postDenied.ReasonCodeString == PermissionReasonCodes.ApprovalRunBindingUnavailable, "Expected post-cutover missing proposal runId to fail closed.");
+        }
+        finally
+        {
+            if (Directory.Exists(postCutoverRoot))
+                Directory.Delete(postCutoverRoot, recursive: true);
+        }
+
+        var legacyRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalRunIdLegacy_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(legacyRoot);
+        try
+        {
+            var legacyWorkspace = Path.Combine(legacyRoot, "workspace");
+            Directory.CreateDirectory(legacyWorkspace);
+            var legacyPath = Path.Combine(legacyWorkspace, "legacy.txt");
+            await File.WriteAllTextAsync(legacyPath, "legacy");
+            var preCutoverNow = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var legacySessionId = "runid-legacy";
+            var legacyIssue = new AgentSessionContext
+            {
+                SessionId = legacySessionId,
+                RuntimeRoot = legacyRoot,
+                ActiveWorkspaceRoot = legacyWorkspace,
+                AccessMode = AgentAccessMode.WorkspaceWrite,
+                ProtectedPathPolicy = new ProtectedPathPolicy(new[] { legacyRoot }),
+                UtcNowProvider = () => preCutoverNow
+            };
+            var legacyGuard = new PermissionGuard();
+            var legacyIssued = legacyGuard.Evaluate(legacyIssue, new ToolAction
+            {
+                Kind = ToolActionKind.DeleteFile,
+                TargetPath = legacyPath
+            });
+            AssertTrue(legacyIssued.RequiresApproval && legacyIssued.ApprovalProposal is not null, "Expected legacy proposal for compatibility scenario.");
+            var legacyProposal = legacyIssued.ApprovalProposal!;
+            var legacyToken = legacyIssued.ExpectedApprovalToken ?? string.Empty;
+            var legacyLedgerPath = Path.Combine(legacyRoot, "approval-ledger-v2.jsonl");
+            var rewrittenLegacy = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                schemaVersion = 2,
+                @event = "issued",
+                atUtc = legacyProposal.IssuedAtUtc,
+                sessionId = legacyProposal.SessionId,
+                proposalId = legacyProposal.ProposalId,
+                expiresAtUtc = legacyProposal.ExpiresAtUtc,
+                reasonCode = legacyProposal.ReasonCode,
+                actionType = legacyProposal.ActionType
+            });
+            await File.WriteAllTextAsync(legacyLedgerPath, rewrittenLegacy + Environment.NewLine, new UTF8Encoding(false));
+
+            var legacyLoad = new AgentSessionContext
+            {
+                SessionId = legacySessionId,
+                RuntimeRoot = legacyRoot,
+                ActiveWorkspaceRoot = legacyWorkspace,
+                AccessMode = AgentAccessMode.WorkspaceWrite,
+                ProtectedPathPolicy = new ProtectedPathPolicy(new[] { legacyRoot }),
+                UtcNowProvider = () => preCutoverNow.AddMinutes(1)
+            };
+            var legacyLoadGuard = new PermissionGuard();
+            var legacyAllowed = legacyLoadGuard.Evaluate(legacyLoad, new ToolAction
+            {
+                Kind = ToolActionKind.DeleteFile,
+                TargetPath = legacyPath,
+                Payload = legacyToken
+            });
+            AssertTrue(legacyAllowed.Allowed, "Expected pre-cutover runId-less proposal to remain legacy-compatible.");
+        }
+        finally
+        {
+            if (Directory.Exists(legacyRoot))
+                Directory.Delete(legacyRoot, recursive: true);
+        }
+
+        Console.WriteLine("PASS ApprovalRunIdBindingRegression");
+    }
+    finally
+    {
+        if (Directory.Exists(runtimeRoot))
+            Directory.Delete(runtimeRoot, recursive: true);
+    }
 }
 
 static async Task RunApprovalLedgerReplayAcrossRestartRegression()
@@ -2771,14 +2996,16 @@ static async Task RunApprovalLedgerReplayAcrossRestartRegression()
         {
             Kind = ToolActionKind.DeleteFile,
             TargetPath = insidePath,
+            RunId = noApproval.ApprovalProposal?.RunId,
             Payload = $"APPROVED:{proposalId}"
         });
         AssertTrue(approved.Allowed, "Expected exact token to allow once.");
-        AssertTrue(session.ConsumeApprovalProposal(proposalId), "Expected consumed proposal persistence.");
+        AssertTrue(session.ConsumeApprovalProposal(proposalId, noApproval.ApprovalProposal?.RunId), "Expected consumed proposal persistence.");
         AssertTrue(!guard.Evaluate(session, new ToolAction
         {
             Kind = ToolActionKind.DeleteFile,
             TargetPath = insidePath,
+            RunId = noApproval.ApprovalProposal?.RunId,
             Payload = $"APPROVED:{proposalId}"
         }).Allowed, "Expected token reuse in same process to be denied.");
 
@@ -2788,9 +3015,10 @@ static async Task RunApprovalLedgerReplayAcrossRestartRegression()
         {
             Kind = ToolActionKind.DeleteFile,
             TargetPath = insidePath,
+            RunId = restarted.GetApprovalProposal(proposalId)?.RunId,
             Payload = $"APPROVED:{proposalId}"
         });
-        AssertTrue(!replayDecision.Allowed && replayDecision.RequiresApproval, "Expected consumed token replay to be denied after restart.");
+        AssertTrue(!replayDecision.Allowed, "Expected consumed token replay to be denied after restart.");
 
         var freshPath = Path.Combine(workspaceRoot, "approval-ledger-fresh.txt");
         await File.WriteAllTextAsync(freshPath, "fresh");
@@ -2810,10 +3038,11 @@ static async Task RunApprovalLedgerReplayAcrossRestartRegression()
         {
             Kind = ToolActionKind.DeleteFile,
             TargetPath = freshPath,
+            RunId = restartedBeforeConsume.GetApprovalProposal(token["APPROVED:".Length..])?.RunId,
             Payload = token
         });
         AssertTrue(preConsumeAfterRestart.Allowed, "Expected unconsumed valid token to remain usable after restart.");
-        AssertTrue(restartedBeforeConsume.ConsumeApprovalProposal(token["APPROVED:".Length..]), "Expected consume persistence after restart use.");
+        AssertTrue(restartedBeforeConsume.ConsumeApprovalProposal(token["APPROVED:".Length..], restartedBeforeConsume.GetApprovalProposal(token["APPROVED:".Length..])?.RunId), "Expected consume persistence after restart use.");
 
         var genericMarker = restartedBeforeConsumeGuard.Evaluate(restartedBeforeConsume, new ToolAction
         {
@@ -2821,7 +3050,7 @@ static async Task RunApprovalLedgerReplayAcrossRestartRegression()
             Payload = "nvidia-smi APPROVED:true",
             WorkingDirectory = workspaceRoot
         });
-        AssertTrue(!genericMarker.Allowed && genericMarker.RequiresApproval, "Expected generic APPROVED:true marker to remain denied.");
+        AssertTrue(!genericMarker.Allowed, "Expected generic APPROVED:true marker to remain denied.");
         Console.WriteLine("PASS ApprovalLedgerReplayAcrossRestartRegression");
     }
     finally
@@ -2911,6 +3140,7 @@ static async Task RunApprovalLedgerExpiredAndDeniedEventsRegression()
         {
             Kind = ToolActionKind.DeleteFile,
             TargetPath = target,
+            RunId = issued.ApprovalProposal?.RunId,
             Payload = token
         });
         AssertTrue(!expiredDecision.Allowed && expiredDecision.ReasonCodeString == PermissionReasonCodes.ApprovalTokenExpired, "Expected expired token denial.");
@@ -2930,6 +3160,7 @@ static async Task RunApprovalLedgerExpiredAndDeniedEventsRegression()
         {
             Kind = ToolActionKind.DeleteFile,
             TargetPath = target,
+            RunId = restart.GetApprovalProposal(proposalId)?.RunId,
             Payload = $"APPROVED:{proposalId}"
         });
         AssertTrue(!restartExpired.Allowed && restartExpired.ReasonCodeString == PermissionReasonCodes.ApprovalTokenExpired, "Expected expired terminal state to survive restart.");
@@ -3037,12 +3268,12 @@ static async Task RunApprovalLedgerStartupCompactionDeterministicRegression()
         Directory.CreateDirectory(workspaceRoot);
         var now = new DateTime(2040, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-        var proposals = new List<(string Id, DateTime IssuedAt, DateTime ExpiresAt, string SessionId)>
+        var proposals = new List<(string Id, DateTime IssuedAt, DateTime ExpiresAt, string SessionId, string RunId)>
         {
-            ("p-consumed", now.AddHours(-2), now.AddHours(2), "s1"),
-            ("p-expired", now.AddHours(-3), now.AddHours(-2), "s1"),
-            ("p-active", now.AddMinutes(-10), now.AddHours(1), "s1"),
-            ("p-stale-consumed", now.AddDays(-3), now.AddDays(-2), "s0")
+            ("p-consumed", now.AddHours(-2), now.AddHours(2), "s1", "run-consumed"),
+            ("p-expired", now.AddHours(-3), now.AddHours(-2), "s1", "run-expired"),
+            ("p-active", now.AddMinutes(-10), now.AddHours(1), "s1", "run-active"),
+            ("p-stale-consumed", now.AddDays(-3), now.AddDays(-2), "s0", "run-stale")
         };
         var ledgerPath = Path.Combine(runtimeRoot, "approval-ledger-v2.jsonl");
         var lines = new List<string>();
@@ -3055,13 +3286,14 @@ static async Task RunApprovalLedgerStartupCompactionDeterministicRegression()
                 atUtc = p.IssuedAt,
                 sessionId = p.SessionId,
                 proposalId = p.Id,
+                runId = p.RunId,
                 expiresAtUtc = p.ExpiresAt,
                 reasonCode = "ACCESS_DENIED_DELETE_OPERATION",
                 actionType = "DeleteFile"
             }));
         }
-        lines.Add(System.Text.Json.JsonSerializer.Serialize(new { schemaVersion = 2, @event = "consumed", atUtc = now.AddMinutes(-30), sessionId = "s1", proposalId = "p-consumed" }));
-        lines.Add(System.Text.Json.JsonSerializer.Serialize(new { schemaVersion = 2, @event = "expired", atUtc = now.AddMinutes(-20), sessionId = "s1", proposalId = "p-expired", reasonCode = "APPROVAL_TOKEN_EXPIRED" }));
+        lines.Add(System.Text.Json.JsonSerializer.Serialize(new { schemaVersion = 2, @event = "consumed", atUtc = now.AddMinutes(-30), sessionId = "s1", proposalId = "p-consumed", runId = "run-consumed" }));
+        lines.Add(System.Text.Json.JsonSerializer.Serialize(new { schemaVersion = 2, @event = "expired", atUtc = now.AddMinutes(-20), sessionId = "s1", proposalId = "p-expired", reasonCode = "APPROVAL_TOKEN_EXPIRED", runId = "run-expired" }));
         for (var i = 0; i < 14; i++)
         {
             lines.Add(System.Text.Json.JsonSerializer.Serialize(new
@@ -3071,10 +3303,11 @@ static async Task RunApprovalLedgerStartupCompactionDeterministicRegression()
                 atUtc = now.AddMinutes(-i),
                 sessionId = "s1",
                 proposalId = "p-active",
-                reasonCode = "HIGH_RISK_APPROVAL_REQUIRED"
+                reasonCode = "HIGH_RISK_APPROVAL_REQUIRED",
+                runId = "run-active"
             }));
         }
-        lines.Add(System.Text.Json.JsonSerializer.Serialize(new { schemaVersion = 2, @event = "consumed", atUtc = now.AddDays(-2), sessionId = "s0", proposalId = "p-stale-consumed" }));
+        lines.Add(System.Text.Json.JsonSerializer.Serialize(new { schemaVersion = 2, @event = "consumed", atUtc = now.AddDays(-2), sessionId = "s0", proposalId = "p-stale-consumed", runId = "run-stale" }));
         // exceed startup compaction line threshold
         for (var i = 0; i < 500; i++)
         {
@@ -3085,7 +3318,8 @@ static async Task RunApprovalLedgerStartupCompactionDeterministicRegression()
                 atUtc = now.AddDays(-8).AddMinutes(i),
                 sessionId = "old",
                 proposalId = "old-" + i.ToString("D3"),
-                reasonCode = "HIGH_RISK_APPROVAL_REQUIRED"
+                reasonCode = "HIGH_RISK_APPROVAL_REQUIRED",
+                runId = "old-run-" + i.ToString("D3")
             }));
         }
         await File.WriteAllLinesAsync(ledgerPath, lines, new UTF8Encoding(false));
@@ -3104,13 +3338,15 @@ static async Task RunApprovalLedgerStartupCompactionDeterministicRegression()
         {
             Kind = ToolActionKind.DeleteFile,
             TargetPath = Path.Combine(workspaceRoot, "x.txt"),
+            RunId = "run-consumed",
             Payload = "APPROVED:p-consumed"
         });
-        AssertTrue(!consumedDenied.Allowed && consumedDenied.RequiresApproval, "Consumed replay must remain denied after startup compaction.");
+        AssertTrue(!consumedDenied.Allowed, "Consumed replay must remain denied after startup compaction.");
         var expiredDenied = guard.Evaluate(session, new ToolAction
         {
             Kind = ToolActionKind.DeleteFile,
             TargetPath = Path.Combine(workspaceRoot, "x.txt"),
+            RunId = "run-expired",
             Payload = "APPROVED:p-expired"
         });
         AssertTrue(!expiredDenied.Allowed, "Expired replay must remain denied after startup compaction.");
@@ -3121,6 +3357,7 @@ static async Task RunApprovalLedgerStartupCompactionDeterministicRegression()
         AssertTrue(compactedLines.Length < lines.Count, "Compaction should reduce ledger lines.");
         var activeDeniedCount = compactedLines.Count(x => x.Contains("\"proposalId\":\"p-active\"", StringComparison.Ordinal) && x.Contains("\"event\":\"denied_", StringComparison.Ordinal));
         AssertTrue(activeDeniedCount <= 10, "Denied diagnostics must be bounded per proposal.");
+        AssertTrue(compactedText.Contains("\"runId\":\"run-active\"", StringComparison.Ordinal), "Compaction must preserve runId for retained records.");
         var compactedSnapshot1 = await File.ReadAllTextAsync(ledgerPath);
         _ = new AgentSessionContext
         {
@@ -3366,6 +3603,7 @@ static async Task RunDestructiveFileApprovalMarkerRegression()
     {
         Kind = ToolActionKind.DeleteFile,
         TargetPath = filePath,
+        RunId = approvalProposal?.RunId,
         Payload = $"APPROVED:{approvalProposal!.ProposalId}"
     });
     AssertTrue(approvedDecision.Allowed, "Expected delete with approval marker to pass guard.");

@@ -11,6 +11,7 @@ public enum ApprovalStatus
 public sealed class ActionApprovalProposal
 {
     public string ProposalId { get; init; } = string.Empty;
+    public string RunId { get; init; } = string.Empty;
     public string ActionType { get; init; } = string.Empty;
     public string? Command { get; init; }
     public string? Path { get; init; }

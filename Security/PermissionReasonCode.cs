@@ -18,6 +18,8 @@ public enum PermissionReasonCode
     InvalidWorkingDirectory,
     ProtectedRuntimeDiagnosticsPathDenied,
     ApprovalTokenExpired,
+    ApprovalRunBindingUnavailable,
+    ApprovalRunMismatch,
     ApprovalStateUnavailable,
     HighRiskApprovalRequired,
     ToolDeniedByPolicy

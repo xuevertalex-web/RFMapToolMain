@@ -49,6 +49,7 @@ internal sealed class ApprovalLedgerV2
                 var evt = root.GetProperty("event").GetString() ?? string.Empty;
                 var proposalId = root.GetProperty("proposalId").GetString() ?? string.Empty;
                 var sessionId = root.GetProperty("sessionId").GetString() ?? string.Empty;
+                var runId = root.TryGetProperty("runId", out var runIdProp) ? (runIdProp.GetString() ?? string.Empty) : string.Empty;
                 if (string.IsNullOrWhiteSpace(proposalId))
                 {
                     error = "Approval ledger record is missing proposalId.";
@@ -70,7 +71,8 @@ internal sealed class ApprovalLedgerV2
                         RequiresApproval = true,
                         ApprovalStatus = ApprovalStatus.ApprovalRequired,
                         ReasonCode = reasonCode,
-                        ActionType = actionType
+                        ActionType = actionType,
+                        RunId = runId
                     };
                     continue;
                 }
@@ -148,6 +150,12 @@ internal sealed class ApprovalLedgerV2
 
     public bool TryAppendIssued(ActionApprovalProposal proposal, out string? error)
     {
+        if (proposal.IssuedAtUtc >= AgentSessionContext.RunIdCutoverUtc && string.IsNullOrWhiteSpace(proposal.RunId))
+        {
+            error = "Approval runId is required for post-cutover issued records.";
+            return false;
+        }
+
         var record = new
         {
             schemaVersion = SchemaVersion,
@@ -155,6 +163,7 @@ internal sealed class ApprovalLedgerV2
             atUtc = proposal.IssuedAtUtc,
             sessionId = proposal.SessionId,
             proposalId = proposal.ProposalId,
+            runId = NormalizeOptionalRunId(proposal.RunId),
             expiresAtUtc = proposal.ExpiresAtUtc,
             reasonCode = proposal.ReasonCode,
             actionType = proposal.ActionType
@@ -162,7 +171,7 @@ internal sealed class ApprovalLedgerV2
         return TryAppendRecord(record, out error);
     }
 
-    public bool TryAppendConsumed(string sessionId, string proposalId, DateTime atUtc, out string? error)
+    public bool TryAppendConsumed(string sessionId, string proposalId, DateTime atUtc, string? runId, out string? error)
     {
         var record = new
         {
@@ -170,12 +179,13 @@ internal sealed class ApprovalLedgerV2
             @event = "consumed",
             atUtc,
             sessionId,
-            proposalId
+            proposalId,
+            runId = NormalizeOptionalRunId(runId)
         };
         return TryAppendRecord(record, out error);
     }
 
-    public bool TryAppendExpired(string sessionId, string proposalId, DateTime atUtc, string reasonCode, out string? error)
+    public bool TryAppendExpired(string sessionId, string proposalId, DateTime atUtc, string reasonCode, string? runId, out string? error)
     {
         var record = new
         {
@@ -184,12 +194,13 @@ internal sealed class ApprovalLedgerV2
             atUtc,
             sessionId,
             proposalId,
-            reasonCode
+            reasonCode,
+            runId = NormalizeOptionalRunId(runId)
         };
         return TryAppendRecord(record, out error);
     }
 
-    public bool TryAppendDenied(string sessionId, string proposalId, string eventName, DateTime atUtc, string reasonCode, out string? error)
+    public bool TryAppendDenied(string sessionId, string proposalId, string eventName, DateTime atUtc, string reasonCode, string? runId, out string? error)
     {
         var record = new
         {
@@ -198,7 +209,8 @@ internal sealed class ApprovalLedgerV2
             atUtc,
             sessionId,
             proposalId,
-            reasonCode
+            reasonCode,
+            runId = NormalizeOptionalRunId(runId)
         };
         return TryAppendRecord(record, out error);
     }
@@ -269,7 +281,8 @@ internal sealed class ApprovalLedgerV2
                     expiresAtUtc = expiresProp.GetDateTime();
                 var reasonCode = root.TryGetProperty("reasonCode", out var reason) ? reason.GetString() ?? string.Empty : string.Empty;
                 var actionType = root.TryGetProperty("actionType", out var action) ? action.GetString() ?? string.Empty : string.Empty;
-                records.Add(new LedgerRecord(evt, atUtc, sessionId, proposalId, expiresAtUtc, reasonCode, actionType));
+                var runId = root.TryGetProperty("runId", out var runIdProp) ? runIdProp.GetString() : null;
+                records.Add(new LedgerRecord(evt, atUtc, sessionId, proposalId, expiresAtUtc, reasonCode, actionType, runId));
             }
             return true;
         }
@@ -354,6 +367,7 @@ internal sealed class ApprovalLedgerV2
                 atUtc = record.AtUtc,
                 sessionId = record.SessionId,
                 proposalId = record.ProposalId,
+                runId = NormalizeOptionalRunId(record.RunId),
                 expiresAtUtc = record.ExpiresAtUtc,
                 reasonCode = record.ReasonCode,
                 actionType = record.ActionType
@@ -364,7 +378,8 @@ internal sealed class ApprovalLedgerV2
                 @event = record.Event,
                 atUtc = record.AtUtc,
                 sessionId = record.SessionId,
-                proposalId = record.ProposalId
+                proposalId = record.ProposalId,
+                runId = NormalizeOptionalRunId(record.RunId)
             },
             _ => new
             {
@@ -373,7 +388,8 @@ internal sealed class ApprovalLedgerV2
                 atUtc = record.AtUtc,
                 sessionId = record.SessionId,
                 proposalId = record.ProposalId,
-                reasonCode = record.ReasonCode
+                reasonCode = record.ReasonCode,
+                runId = NormalizeOptionalRunId(record.RunId)
             }
         };
         return JsonSerializer.Serialize(payload);
@@ -408,5 +424,12 @@ internal sealed class ApprovalLedgerV2
         string ProposalId,
         DateTime? ExpiresAtUtc,
         string ReasonCode,
-        string ActionType);
+        string ActionType,
+        string? RunId);
+
+    private static string? NormalizeOptionalRunId(string? runId)
+    {
+        var normalized = runId?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
 }

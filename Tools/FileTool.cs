@@ -420,12 +420,13 @@ namespace LocalCursorAgent.Tools
                 SourcePath = action.SourcePath,
                 DestinationPath = action.DestinationPath,
                 WorkingDirectory = action.WorkingDirectory,
+                RunId = proposal?.RunId,
                 Payload = $"APPROVED:{expectedProposalId}"
             };
             var approvedDecision = _permissionGuard.Evaluate(_session, approvedAction);
             if (approvedDecision.Allowed)
             {
-                if (!_session.ConsumeApprovalProposal(expectedProposalId))
+                if (!_session.ConsumeApprovalProposal(expectedProposalId, proposal?.RunId))
                     return PermissionDecision.Deny(PermissionReasonCode.ApprovalStateUnavailable, $"Approval state unavailable: {_session.ApprovalLedgerError}");
             }
             return approvedDecision;

@@ -22,6 +22,8 @@ public static class PermissionReasonCodes
     public const string InvalidWorkingDirectory = "INVALID_WORKING_DIRECTORY";
     public const string ProtectedRuntimeDiagnosticsPathDenied = "PROTECTED_RUNTIME_DIAGNOSTICS_PATH";
     public const string ApprovalTokenExpired = "APPROVAL_TOKEN_EXPIRED";
+    public const string ApprovalRunBindingUnavailable = "APPROVAL_RUN_BINDING_UNAVAILABLE";
+    public const string ApprovalRunMismatch = "APPROVAL_RUN_MISMATCH";
     public const string ApprovalStateUnavailable = "APPROVAL_STATE_UNAVAILABLE";
     public const string HighRiskApprovalRequired = "HIGH_RISK_APPROVAL_REQUIRED";
     public const string ToolDeniedByPolicy = "TOOL_DENIED_BY_POLICY";

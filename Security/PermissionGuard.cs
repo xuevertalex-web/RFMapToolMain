@@ -93,8 +93,13 @@ public sealed class PermissionGuard
             {
                 if (!session.IsApprovalLedgerHealthy)
                     return PermissionDecision.Deny(PermissionReasonCode.ApprovalStateUnavailable, $"Approval state unavailable: {session.ApprovalLedgerError}");
-                if (!IsBoundApprovalTokenValidForAction(session, action, PermissionReasonCode.HighRiskApprovalRequired, normalizedTarget ?? normalizedWorkspace, normalizedWorkspace))
+                var highRiskValidation = ValidateBoundApprovalTokenForAction(session, action, PermissionReasonCode.HighRiskApprovalRequired, normalizedTarget ?? normalizedWorkspace, normalizedWorkspace);
+                if (!highRiskValidation.Allowed)
+                {
+                    if (CommandRiskPolicy.HasExplicitApprovalMarker(action.Payload))
+                        return PermissionDecision.Deny(highRiskValidation.ReasonCode, highRiskValidation.Message, normalizedTarget ?? normalizedWorkspace, normalizedWorkspace);
                     return CreateApprovalRequired(session, action, PermissionReasonCode.HighRiskApprovalRequired, "High-risk host/system/network-impacting command requires explicit approval", normalizedTarget ?? normalizedWorkspace, normalizedWorkspace, CommandRiskPolicy.ResolveCommandRiskLevel(action.Payload));
+                }
             }
 
             return PermissionDecision.Allow(normalizedTarget ?? normalizedWorkspace, normalizedWorkspace);
@@ -151,12 +156,9 @@ public sealed class PermissionGuard
                 var target = normalizedTarget ?? normalizedSource ?? normalizedDestination ?? normalizedWorkspace;
                 if (!CommandRiskPolicy.HasExplicitApprovalMarker(action.Payload))
                     return CreateApprovalRequired(session, action, PermissionReasonCode.WriteModeDeleteDenied, "Destructive operation requires explicit approval in WorkspaceWrite mode", normalizedTarget ?? normalizedSource ?? normalizedDestination ?? normalizedWorkspace, normalizedWorkspace, "high");
-                if (!IsBoundApprovalTokenValidForAction(session, action, PermissionReasonCode.WriteModeDeleteDenied, target, normalizedWorkspace, out var expired))
-                {
-                    if (expired)
-                        return PermissionDecision.Deny(PermissionReasonCode.ApprovalTokenExpired, "Approval token expired.", target, normalizedWorkspace);
-                    return CreateApprovalRequired(session, action, PermissionReasonCode.WriteModeDeleteDenied, "Destructive operation requires explicit approval in WorkspaceWrite mode", target, normalizedWorkspace, "high");
-                }
+                var destructiveValidation = ValidateBoundApprovalTokenForAction(session, action, PermissionReasonCode.WriteModeDeleteDenied, target, normalizedWorkspace);
+                if (!destructiveValidation.Allowed)
+                    return PermissionDecision.Deny(destructiveValidation.ReasonCode, destructiveValidation.Message, target, normalizedWorkspace);
             }
         }
 
@@ -218,6 +220,7 @@ public sealed class PermissionGuard
         var proposal = new ActionApprovalProposal
         {
             ProposalId = proposalId,
+            RunId = AgentSessionContext.CreateRunId(),
             ActionType = action.Kind.ToString(),
             Command = action.Kind == ToolActionKind.RunCommand ? action.Payload : null,
             Path = action.TargetPath ?? action.SourcePath ?? action.DestinationPath ?? action.WorkingDirectory,
@@ -264,17 +267,14 @@ public sealed class PermissionGuard
             .ToLowerInvariant()[..16];
     }
 
-    private static bool IsBoundApprovalTokenValidForAction(AgentSessionContext session, ToolAction action, PermissionReasonCode code, string normalizedTarget, string normalizedWorkspace) =>
-        IsBoundApprovalTokenValidForAction(session, action, code, normalizedTarget, normalizedWorkspace, out _);
-
-    private static bool IsBoundApprovalTokenValidForAction(AgentSessionContext session, ToolAction action, PermissionReasonCode code, string normalizedTarget, string normalizedWorkspace, out bool expired)
+    private static ApprovalValidationResult ValidateBoundApprovalTokenForAction(AgentSessionContext session, ToolAction action, PermissionReasonCode code, string normalizedTarget, string normalizedWorkspace)
     {
-        expired = false;
         if (!CommandRiskPolicy.TryExtractApprovalToken(action.Payload, out var token))
-            return false;
+            return ApprovalValidationResult.Denied(code, "Approval token is required.");
         var expected = ComputeProposalId(session, new ToolAction
         {
             Kind = action.Kind,
+            RunId = action.RunId,
             TargetPath = action.TargetPath,
             SourcePath = action.SourcePath,
             DestinationPath = action.DestinationPath,
@@ -283,52 +283,69 @@ public sealed class PermissionGuard
         }, code, normalizedTarget, normalizedWorkspace);
         if (!token.Equals(expected, StringComparison.OrdinalIgnoreCase))
         {
-            if (!session.RecordApprovalDeniedEvent(expected, "denied_invalid_token", PermissionReasonCodes.HighRiskApprovalRequired))
-            {
-                expired = false;
-                return false;
-            }
-            return false;
+            if (!session.RecordApprovalDeniedEvent(expected, "denied_invalid_token", PermissionDecision.ToReasonCodeString(code), action.RunId))
+                return ApprovalValidationResult.LedgerUnavailable(session);
+            return ApprovalValidationResult.Denied(code, "Approval token mismatch.");
         }
         if (session.IsApprovalProposalConsumed(expected))
         {
-            if (!session.RecordApprovalDeniedEvent(expected, "denied_consumed", PermissionReasonCodes.ApprovalTokenExpired))
-            {
-                expired = false;
-                return false;
-            }
-            return false;
+            if (!session.RecordApprovalDeniedEvent(expected, "denied_consumed", PermissionReasonCodes.ApprovalTokenExpired, action.RunId))
+                return ApprovalValidationResult.LedgerUnavailable(session);
+            return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalTokenExpired, "Approval token expired.");
         }
         if (session.IsApprovalProposalExpired(expected))
         {
-            expired = true;
-            if (!session.RecordApprovalDeniedEvent(expected, "denied_expired", PermissionReasonCodes.ApprovalTokenExpired))
-                return false;
-            return false;
+            if (!session.RecordApprovalDeniedEvent(expected, "denied_expired", PermissionReasonCodes.ApprovalTokenExpired, action.RunId))
+                return ApprovalValidationResult.LedgerUnavailable(session);
+            return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalTokenExpired, "Approval token expired.");
         }
         var proposal = session.GetApprovalProposal(expected);
         if (proposal is null)
         {
-            if (!session.RecordApprovalDeniedEvent(expected, "denied_invalid_token", PermissionReasonCodes.HighRiskApprovalRequired))
-            {
-                expired = false;
-                return false;
-            }
-            return false;
+            if (!session.RecordApprovalDeniedEvent(expected, "denied_invalid_token", PermissionDecision.ToReasonCodeString(code), action.RunId))
+                return ApprovalValidationResult.LedgerUnavailable(session);
+            return ApprovalValidationResult.Denied(code, "Approval token mismatch.");
         }
+        var currentRunId = NormalizeRunId(action.RunId);
+        var proposalRunId = NormalizeRunId(proposal.RunId);
+        var legacyRunIdless = string.IsNullOrWhiteSpace(proposalRunId) && proposal.IssuedAtUtc < AgentSessionContext.RunIdCutoverUtc;
+        if (string.IsNullOrWhiteSpace(currentRunId))
+        {
+            if (!legacyRunIdless)
+            {
+                if (!session.RecordApprovalDeniedEvent(expected, "denied_run_binding_unavailable", PermissionReasonCodes.ApprovalRunBindingUnavailable, proposalRunId))
+                    return ApprovalValidationResult.LedgerUnavailable(session);
+                return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalRunBindingUnavailable, "Approval run binding unavailable.");
+            }
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(proposalRunId))
+            {
+                if (!legacyRunIdless)
+                {
+                    if (!session.RecordApprovalDeniedEvent(expected, "denied_run_binding_unavailable", PermissionReasonCodes.ApprovalRunBindingUnavailable, currentRunId))
+                        return ApprovalValidationResult.LedgerUnavailable(session);
+                    return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalRunBindingUnavailable, "Approval run binding unavailable.");
+                }
+            }
+            else if (!currentRunId.Equals(proposalRunId, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!session.RecordApprovalDeniedEvent(expected, "denied_run_mismatch", PermissionReasonCodes.ApprovalRunMismatch, currentRunId))
+                    return ApprovalValidationResult.LedgerUnavailable(session);
+                return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalRunMismatch, "Approval is bound to a different execution attempt.");
+            }
+        }
+
         if (session.UtcNowProvider() > proposal.ExpiresAtUtc)
         {
-            if (!session.MarkApprovalProposalExpired(expected, PermissionReasonCodes.ApprovalTokenExpired))
-            {
-                expired = true;
-                return false;
-            }
-            if (!session.RecordApprovalDeniedEvent(expected, "denied_expired", PermissionReasonCodes.ApprovalTokenExpired))
-                return false;
-            expired = true;
-            return false;
+            if (!session.MarkApprovalProposalExpired(expected, PermissionReasonCodes.ApprovalTokenExpired, proposalRunId ?? currentRunId))
+                return ApprovalValidationResult.LedgerUnavailable(session);
+            if (!session.RecordApprovalDeniedEvent(expected, "denied_expired", PermissionReasonCodes.ApprovalTokenExpired, proposalRunId ?? currentRunId))
+                return ApprovalValidationResult.LedgerUnavailable(session);
+            return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalTokenExpired, "Approval token expired.");
         }
-        return true;
+        return ApprovalValidationResult.Valid();
     }
 
     private static string? StripApprovalToken(string? payload)
@@ -359,5 +376,19 @@ public sealed class PermissionGuard
             ToolActionKind.Test => "Runs project tests in the specified working directory.",
             _ => "Performs the requested tool action on the specified target."
         };
+    }
+
+    private static string? NormalizeRunId(string? runId)
+    {
+        var normalized = runId?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    private readonly record struct ApprovalValidationResult(bool Allowed, PermissionReasonCode ReasonCode, string Message)
+    {
+        public static ApprovalValidationResult Valid() => new(true, PermissionReasonCode.Allowed, "Allowed");
+        public static ApprovalValidationResult Denied(PermissionReasonCode code, string message) => new(false, code, message);
+        public static ApprovalValidationResult LedgerUnavailable(AgentSessionContext session) =>
+            new(false, PermissionReasonCode.ApprovalStateUnavailable, $"Approval state unavailable: {session.ApprovalLedgerError}");
     }
 }
