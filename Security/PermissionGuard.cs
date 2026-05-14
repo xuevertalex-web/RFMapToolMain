@@ -79,19 +79,21 @@ public sealed class PermissionGuard
             return PermissionDecision.Deny(PermissionReasonCode.NetworkPathDenied, "Destination is a network path", normalizedDestination, normalizedWorkspace);
 
         if (normalizedTarget is not null && !IsWithinWorkspace(normalizedTarget, normalizedWorkspace))
-            return CreateApprovalRequired(action, PermissionReasonCode.PathOutsideWorkspace, "Target is outside active workspace", normalizedTarget, normalizedWorkspace);
+            return CreateApprovalRequired(session, action, PermissionReasonCode.PathOutsideWorkspace, "Target is outside active workspace", normalizedTarget, normalizedWorkspace);
 
         if (normalizedSource is not null && !IsWithinWorkspace(normalizedSource, normalizedWorkspace))
-            return CreateApprovalRequired(action, PermissionReasonCode.PathOutsideWorkspace, "Source is outside active workspace", normalizedSource, normalizedWorkspace);
+            return CreateApprovalRequired(session, action, PermissionReasonCode.PathOutsideWorkspace, "Source is outside active workspace", normalizedSource, normalizedWorkspace);
 
         if (normalizedDestination is not null && !IsWithinWorkspace(normalizedDestination, normalizedWorkspace))
-            return CreateApprovalRequired(action, PermissionReasonCode.PathOutsideWorkspace, "Destination is outside active workspace", normalizedDestination, normalizedWorkspace);
+            return CreateApprovalRequired(session, action, PermissionReasonCode.PathOutsideWorkspace, "Destination is outside active workspace", normalizedDestination, normalizedWorkspace);
 
         if (action.Kind == ToolActionKind.RunCommand)
         {
-            var hasApprovalMarker = CommandRiskPolicy.HasExplicitApprovalMarker(action.Payload);
-            if (CommandRiskPolicy.IsHighRiskCommand(action.Payload) && !hasApprovalMarker)
-                return CreateApprovalRequired(action, PermissionReasonCode.HighRiskApprovalRequired, "High-risk host/system/network-impacting command requires explicit approval", normalizedTarget ?? normalizedWorkspace, normalizedWorkspace, CommandRiskPolicy.ResolveCommandRiskLevel(action.Payload));
+            if (CommandRiskPolicy.IsHighRiskCommand(action.Payload))
+            {
+                if (!IsBoundApprovalTokenValidForAction(session, action, PermissionReasonCode.HighRiskApprovalRequired, normalizedTarget ?? normalizedWorkspace, normalizedWorkspace))
+                    return CreateApprovalRequired(session, action, PermissionReasonCode.HighRiskApprovalRequired, "High-risk host/system/network-impacting command requires explicit approval", normalizedTarget ?? normalizedWorkspace, normalizedWorkspace, CommandRiskPolicy.ResolveCommandRiskLevel(action.Payload));
+            }
 
             return PermissionDecision.Allow(normalizedTarget ?? normalizedWorkspace, normalizedWorkspace);
         }
@@ -143,7 +145,7 @@ public sealed class PermissionGuard
             if (IsDeleteLike(action.Kind) || IsRenameLike(action.Kind) || IsMoveLike(action.Kind))
             {
                 if (!CommandRiskPolicy.HasExplicitApprovalMarker(action.Payload))
-                    return CreateApprovalRequired(action, PermissionReasonCode.WriteModeDeleteDenied, "Destructive operation requires explicit approval in WorkspaceWrite mode", normalizedTarget ?? normalizedSource ?? normalizedDestination ?? normalizedWorkspace, normalizedWorkspace, "high");
+                    return CreateApprovalRequired(session, action, PermissionReasonCode.WriteModeDeleteDenied, "Destructive operation requires explicit approval in WorkspaceWrite mode", normalizedTarget ?? normalizedSource ?? normalizedDestination ?? normalizedWorkspace, normalizedWorkspace, "high");
             }
         }
 
@@ -194,9 +196,9 @@ public sealed class PermissionGuard
     private static bool IsWithinRuntimeDiagnosticsPath(string path, string workspaceRoot) =>
         IsWithinWorkspace(path, Path.Combine(workspaceRoot, ".agent-runtime"));
 
-    private static PermissionDecision CreateApprovalRequired(ToolAction action, PermissionReasonCode code, string message, string normalizedTarget, string normalizedWorkspace, string riskLevel = "high")
+    private static PermissionDecision CreateApprovalRequired(AgentSessionContext session, ToolAction action, PermissionReasonCode code, string message, string normalizedTarget, string normalizedWorkspace, string riskLevel = "high")
     {
-        var proposalId = ComputeProposalId(action, code, normalizedTarget, normalizedWorkspace);
+        var proposalId = ComputeProposalId(session, action, code, normalizedTarget, normalizedWorkspace);
         var proposal = new ActionApprovalProposal
         {
             ProposalId = proposalId,
@@ -224,10 +226,11 @@ public sealed class PermissionGuard
             normalizedWorkspace);
     }
 
-    private static string ComputeProposalId(ToolAction action, PermissionReasonCode code, string normalizedTarget, string normalizedWorkspace)
+    private static string ComputeProposalId(AgentSessionContext session, ToolAction action, PermissionReasonCode code, string normalizedTarget, string normalizedWorkspace)
     {
         var signature = string.Join("|", new[]
         {
+            session.SessionId,
             action.Kind.ToString(),
             normalizedTarget,
             normalizedWorkspace,
@@ -236,6 +239,38 @@ public sealed class PermissionGuard
         });
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(signature)))
             .ToLowerInvariant()[..16];
+    }
+
+    private static bool IsBoundApprovalTokenValidForAction(AgentSessionContext session, ToolAction action, PermissionReasonCode code, string normalizedTarget, string normalizedWorkspace)
+    {
+        if (!CommandRiskPolicy.TryExtractApprovalToken(action.Payload, out var token))
+            return false;
+        var expected = ComputeProposalId(session, new ToolAction
+        {
+            Kind = action.Kind,
+            TargetPath = action.TargetPath,
+            SourcePath = action.SourcePath,
+            DestinationPath = action.DestinationPath,
+            WorkingDirectory = action.WorkingDirectory,
+            Payload = StripApprovalToken(action.Payload)
+        }, code, normalizedTarget, normalizedWorkspace);
+        if (!token.Equals(expected, StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (session.IsApprovalProposalConsumed(expected))
+            return false;
+        return true;
+    }
+
+    private static string? StripApprovalToken(string? payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return payload;
+        const string marker = "APPROVED:";
+        var idx = payload.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0)
+            return payload;
+        var tokenEnd = payload.IndexOfAny(new[] { ' ', '\t', '\r', '\n' }, idx + marker.Length);
+        return tokenEnd >= 0 ? payload.Remove(idx, tokenEnd - idx).Trim() : payload[..idx].Trim();
     }
 
     private static string BuildExpectedEffect(ToolAction action)

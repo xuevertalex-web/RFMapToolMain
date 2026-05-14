@@ -2428,14 +2428,41 @@ static async Task RunHostDiagnosticsCommandApprovalRegression()
     });
     AssertTrue(!packageInstallDecision.Allowed && packageInstallDecision.RequiresApproval, "Expected global package install command to require approval.");
 
-    var approvedDecision = guard.Evaluate(session, new ToolAction
+    var genericMarkerDecision = guard.Evaluate(session, new ToolAction
     {
         Kind = ToolActionKind.RunCommand,
         WorkingDirectory = workspaceRoot,
         Payload = "nvidia-smi APPROVED:true"
     });
-    AssertTrue(approvedDecision.Allowed, "Expected approved host diagnostics command to pass guard policy.");
-    AssertTrue(!approvedDecision.RequiresApproval, "Expected no approval requirement after explicit approval marker.");
+    AssertTrue(!genericMarkerDecision.Allowed, "Expected generic approval marker to be rejected for high-risk command.");
+    AssertTrue(genericMarkerDecision.RequiresApproval, "Expected approval requirement to remain for generic marker.");
+
+    var expectedToken = decision.ExpectedApprovalToken ?? string.Empty;
+    AssertTrue(expectedToken.StartsWith("APPROVED:", StringComparison.Ordinal), "Expected concrete proposal-bound token.");
+    var approvedDecision = guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.RunCommand,
+        WorkingDirectory = workspaceRoot,
+        Payload = $"nvidia-smi {expectedToken}"
+    });
+    AssertTrue(approvedDecision.Allowed, "Expected proposal-bound approval token to pass guard policy.");
+    AssertTrue(!approvedDecision.RequiresApproval, "Expected no approval requirement after bound approval marker.");
+
+    var session2 = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+    var staleTokenDecision = guard.Evaluate(session2, new ToolAction
+    {
+        Kind = ToolActionKind.RunCommand,
+        WorkingDirectory = workspaceRoot,
+        Payload = $"nvidia-smi {expectedToken}"
+    });
+    AssertTrue(!staleTokenDecision.Allowed && staleTokenDecision.RequiresApproval, "Expected prior-session token to be rejected.");
 
     var result = await runner.RunAsync(new SafeProcessRequest
     {
