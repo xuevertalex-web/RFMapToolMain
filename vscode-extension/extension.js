@@ -35,17 +35,18 @@ function activate(context) {
       vscode.workspace.getConfiguration('localCursorAgent').get('targetWorkspacePath') || ''
     ).trim();
     const getAllowBackendWorkspace = () => vscode.workspace.getConfiguration('localCursorAgent').get('allowBackendWorkspace') === true;
-    const runtimeLogger = createRuntimeLogger({
-      extensionRoot,
-      workspaceRoot: getTargetWorkspacePath(),
-      backendProjectPath: getBackendProjectPath()
-    });
-    runtimeLogger.info('Local Cursor Agent activation started');
     const resolveConfiguredWorkspaceRoot = () => resolveWorkspaceRoot({
       configuredWorkspaceRoot: getTargetWorkspacePath(),
       backendProjectPath: getBackendProjectPath(),
       allowBackendWorkspace: getAllowBackendWorkspace()
     });
+    const loggerWorkspaceState = resolveConfiguredWorkspaceRoot();
+    const runtimeLogger = createRuntimeLogger({
+      extensionRoot,
+      workspaceRoot: loggerWorkspaceState.workspaceRoot,
+      backendProjectPath: getBackendProjectPath()
+    });
+    runtimeLogger.info('Local Cursor Agent activation started');
 
     const editorNavigation = createEditorNavigationService({
       changedRangeDecoration,

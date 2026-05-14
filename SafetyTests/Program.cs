@@ -113,6 +113,7 @@ RunDeepAnalysisContextFormatterRegression();
 RunDeepAnalysisPromptRegression();
 await RunDeepAnalysisDiagnosticsRegression();
 await RunAuditRoutingAndCandidateSeedingRegression();
+RunAgentConfig_DefaultExcludesRuntimeDirectoryRegression();
 
 static void RunDeepAnalysisDetectionRegression()
 {
@@ -131,6 +132,30 @@ static void RunDeepAnalysisDetectionRegression()
     AssertTrue(ruRiskComboIsDeep && (ruRiskComboTrigger == "risk-combination" || ruRiskComboTrigger == "keyword"), "Expected Russian deep trigger.");
     AssertTrue(!(bool)m.Invoke(null, new object[] { "Explain this project" })!, "Expected simple overview to remain non-deep analysis.");
     Console.WriteLine("PASS DeepAnalysisDetectionRegression");
+}
+
+static void RunAgentConfig_DefaultExcludesRuntimeDirectoryRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "lca-agentconfig-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempRoot);
+    try
+    {
+        var runtimeDir = Path.Combine(tempRoot, ".agent-runtime");
+        Directory.CreateDirectory(runtimeDir);
+        var runtimeLog = Path.Combine(runtimeDir, "agent.jsonl");
+        File.WriteAllText(runtimeLog, "{\"ok\":true}");
+        var csproj = Path.Combine(tempRoot, "App.csproj");
+        File.WriteAllText(csproj, "<Project />");
+
+        var config = new AgentConfig(tempRoot);
+        AssertTrue(config.IsExcluded(runtimeLog), "Expected .agent-runtime files to be excluded by default.");
+        AssertTrue(!config.IsExcluded(csproj), "Expected .csproj to remain non-excluded.");
+        Console.WriteLine("PASS AgentConfig_DefaultExcludesRuntimeDirectoryRegression");
+    }
+    finally
+    {
+        try { Directory.Delete(tempRoot, true); } catch { }
+    }
 }
 
 static void RunDeepAnalysisContextFormatterRegression()

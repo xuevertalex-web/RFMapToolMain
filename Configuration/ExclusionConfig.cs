@@ -39,7 +39,7 @@ namespace LocalCursorAgent.Configuration
             {
                 _excludePatterns = new List<string> 
                 { 
-                    "bin/", "obj/", ".git/", ".vs/", "node_modules/", "packages/"
+                    "bin/", "obj/", ".git/", ".vs/", "node_modules/", "packages/", ".agent-runtime/"
                 };
                 _disableEmbeddings = false;
                 return;

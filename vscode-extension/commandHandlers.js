@@ -1,5 +1,6 @@
 const { isAnalysisOnlyTask } = require('./workspaceTaskClassifier');
 const vscode = require('vscode');
+const { buildTaskTelemetry } = require('./runtimeLogger');
 
 const MUTATION_RE = /\b(create|delete|remove|rename|fix|edit|update|modify|change|\u0441\u043e\u0437\u0434\u0430\u0439|\u0443\u0434\u0430\u043b\u0438|\u043f\u0435\u0440\u0435\u0438\u043c\u0435\u043d\u0443\u0439|\u0438\u0441\u043f\u0440\u0430\u0432\u044c|\u043e\u0431\u043d\u043e\u0432\u0438|\u0438\u0437\u043c\u0435\u043d\u0438|\u043f\u043e\u043c\u0435\u043d\u044f\u0439|\u043e\u0442\u0440\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u0443\u0439)\b/;
 const LOW_SIGNAL_RE = /^(\u0442\u0443\u0442\??|\u0430\u043b\u043e|\u0430\u043b\u043b\u043e|here\??|what can you do|explain this project|\u043e\u043f\u0438\u0448\u0438 \u043f\u0440\u043e\u0435\u043a\u0442\??|\u0447\u0442\u043e \u0442\u0443\u0442\??|debug|\u0432\u0432\u0443\u0438\u0433\u043f)$/;
@@ -69,13 +70,13 @@ function createExtensionCommandHandlers(options) {
         output.show(true);
         output.appendLine(`[workspace-guard] low-signal short-circuit source=command task="${trimmedTask}"`);
         output.appendLine(reply);
-        if (runtimeLogger) runtimeLogger.info('workspace-guard low-signal short-circuit', { source: 'command', task: trimmedTask });
+        if (runtimeLogger) runtimeLogger.info('workspace-guard low-signal short-circuit', { source: 'command', ...buildTaskTelemetry(trimmedTask) });
         vscode.window.showInformationMessage(reply);
         return;
       }
       const analysisOnlyTask = classifierAnalysisOnly || fallbackAnalysisOnly;
       output.appendLine(`[workspace-guard] precheck source=command task="${trimmedTask}" classifierAnalysisOnly=${classifierAnalysisOnly} fallbackAnalysisOnly=${fallbackAnalysisOnly} analysisOnlyTask=${analysisOnlyTask}`);
-      if (runtimeLogger) runtimeLogger.info('workspace-guard precheck', { source: 'command', task: trimmedTask, classifierAnalysisOnly, fallbackAnalysisOnly, analysisOnlyTask });
+      if (runtimeLogger) runtimeLogger.info('workspace-guard precheck', { source: 'command', ...buildTaskTelemetry(trimmedTask), classifierAnalysisOnly, fallbackAnalysisOnly, analysisOnlyTask });
       const workspaceState = resolveWorkspaceRoot({
         initializeIfMissing: true,
         analysisOnlyTask,
