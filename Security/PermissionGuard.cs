@@ -114,6 +114,18 @@ public sealed class PermissionGuard
         if (normalizedDestination is not null && PathSafetyPolicy.ContainsReparsePoint(normalizedDestination))
             return PermissionDecision.Deny(PermissionReasonCode.ReparsePointDenied, "Destination path contains a reparse point", normalizedDestination, normalizedWorkspace);
 
+        if (IsRuntimeDiagnosticsMutation(action.Kind))
+        {
+            if (normalizedTarget is not null && IsWithinRuntimeDiagnosticsPath(normalizedTarget, normalizedWorkspace))
+                return PermissionDecision.Deny(PermissionReasonCode.ProtectedRuntimeDiagnosticsPathDenied, "Mutation denied for protected runtime diagnostics path", normalizedTarget, normalizedWorkspace);
+
+            if (normalizedSource is not null && IsWithinRuntimeDiagnosticsPath(normalizedSource, normalizedWorkspace))
+                return PermissionDecision.Deny(PermissionReasonCode.ProtectedRuntimeDiagnosticsPathDenied, "Mutation denied for protected runtime diagnostics path", normalizedSource, normalizedWorkspace);
+
+            if (normalizedDestination is not null && IsWithinRuntimeDiagnosticsPath(normalizedDestination, normalizedWorkspace))
+                return PermissionDecision.Deny(PermissionReasonCode.ProtectedRuntimeDiagnosticsPathDenied, "Mutation denied for protected runtime diagnostics path", normalizedDestination, normalizedWorkspace);
+        }
+
         if (session.AccessMode == AgentAccessMode.ReadOnly)
         {
             if (IsWriteLike(action.Kind))
@@ -178,6 +190,9 @@ public sealed class PermissionGuard
     private static bool IsDeleteLike(ToolActionKind kind) => kind == ToolActionKind.DeleteFile;
     private static bool IsRenameLike(ToolActionKind kind) => kind == ToolActionKind.RenameFile;
     private static bool IsMoveLike(ToolActionKind kind) => kind == ToolActionKind.MoveFile;
+    private static bool IsRuntimeDiagnosticsMutation(ToolActionKind kind) => IsWriteLike(kind) || IsDeleteLike(kind) || IsRenameLike(kind) || IsMoveLike(kind);
+    private static bool IsWithinRuntimeDiagnosticsPath(string path, string workspaceRoot) =>
+        IsWithinWorkspace(path, Path.Combine(workspaceRoot, ".agent-runtime"));
 
     private static PermissionDecision CreateApprovalRequired(ToolAction action, PermissionReasonCode code, string message, string normalizedTarget, string normalizedWorkspace, string riskLevel = "high")
     {

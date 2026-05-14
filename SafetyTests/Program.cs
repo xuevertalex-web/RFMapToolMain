@@ -114,6 +114,7 @@ RunDeepAnalysisPromptRegression();
 await RunDeepAnalysisDiagnosticsRegression();
 await RunAuditRoutingAndCandidateSeedingRegression();
 RunAgentConfig_DefaultExcludesRuntimeDirectoryRegression();
+RunRuntimeDiagnosticsMutationProtectionRegression();
 
 static void RunDeepAnalysisDetectionRegression()
 {
@@ -156,6 +157,55 @@ static void RunAgentConfig_DefaultExcludesRuntimeDirectoryRegression()
     {
         try { Directory.Delete(tempRoot, true); } catch { }
     }
+}
+
+static void RunRuntimeDiagnosticsMutationProtectionRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    Directory.CreateDirectory(Path.Combine(workspaceRoot, ".agent-runtime"));
+    File.WriteAllText(Path.Combine(workspaceRoot, ".agent-runtime", "agent.jsonl"), "{}");
+    File.WriteAllText(Path.Combine(workspaceRoot, "a.txt"), "ok");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var guard = new PermissionGuard();
+    var runtimeFile = Path.Combine(workspaceRoot, ".agent-runtime", "agent.jsonl");
+    var runtimeFileNew = Path.Combine(workspaceRoot, ".agent-runtime", "agent-new.jsonl");
+
+    var writeDenied = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.WriteFile, TargetPath = runtimeFile });
+    AssertTrue(!writeDenied.Allowed, "Expected write under .agent-runtime to be denied.");
+    AssertTrue(writeDenied.ReasonCodeString == PermissionReasonCodes.ProtectedRuntimeDiagnosticsPathDenied, "Expected protected runtime diagnostics reason code for write denial.");
+
+    var deleteDenied = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.DeleteFile, TargetPath = runtimeFile });
+    AssertTrue(!deleteDenied.Allowed, "Expected delete under .agent-runtime to be denied.");
+    AssertTrue(deleteDenied.ReasonCodeString == PermissionReasonCodes.ProtectedRuntimeDiagnosticsPathDenied, "Expected protected runtime diagnostics reason code for delete denial.");
+
+    var renameDenied = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.RenameFile, SourcePath = runtimeFile, DestinationPath = runtimeFileNew });
+    AssertTrue(!renameDenied.Allowed, "Expected rename under .agent-runtime to be denied.");
+    AssertTrue(renameDenied.ReasonCodeString == PermissionReasonCodes.ProtectedRuntimeDiagnosticsPathDenied, "Expected protected runtime diagnostics reason code for rename denial.");
+
+    var moveDenied = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.MoveFile, SourcePath = runtimeFile, DestinationPath = Path.Combine(workspaceRoot, "agent-out.jsonl") });
+    AssertTrue(!moveDenied.Allowed, "Expected move from .agent-runtime to be denied.");
+    AssertTrue(moveDenied.ReasonCodeString == PermissionReasonCodes.ProtectedRuntimeDiagnosticsPathDenied, "Expected protected runtime diagnostics reason code for move denial.");
+
+    var readAllowed = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.ReadFile, TargetPath = runtimeFile });
+    AssertTrue(readAllowed.Allowed, "Expected read under .agent-runtime to remain allowed.");
+
+    var normalWrite = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.WriteFile, TargetPath = Path.Combine(workspaceRoot, "a.txt") });
+    AssertTrue(normalWrite.Allowed, "Expected normal workspace write outside .agent-runtime to remain allowed.");
+
+    Console.WriteLine("PASS RuntimeDiagnosticsMutationProtectionRegression");
 }
 
 static void RunDeepAnalysisContextFormatterRegression()
