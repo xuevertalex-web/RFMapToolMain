@@ -47,5 +47,54 @@ function run() {
   assert.strictEqual(entry.meta.targetWorkspacePath, '[redacted]');
 }
 
+function runRotation() {
+  const extensionRoot = mkd('lca-ext-');
+  const workspaceRoot = mkd('lca-ws-');
+  const logger = createRuntimeLogger({
+    extensionRoot,
+    workspaceRoot,
+    maxFileSizeBytes: 180,
+    maxGenerations: 3
+  });
+
+  for (let i = 0; i < 40; i++) {
+    logger.info(`event-${i}-` + 'x'.repeat(80), {
+      source: 'command',
+      taskCategory: 'analysis_or_chat',
+      taskLength: 10,
+      taskHash: `h${i}`
+    });
+  }
+
+  const runtimeDir = path.join(workspaceRoot, '.agent-runtime');
+  const textLogPath = path.join(runtimeDir, 'agent.log');
+  const jsonlLogPath = path.join(runtimeDir, 'agent.jsonl');
+  assert.ok(fs.existsSync(textLogPath), 'text log should exist after rotation');
+  assert.ok(fs.existsSync(jsonlLogPath), 'jsonl log should exist after rotation');
+  assert.ok(fs.existsSync(`${textLogPath}.1`), 'text log rotation .1 expected');
+  assert.ok(fs.existsSync(`${jsonlLogPath}.1`), 'jsonl log rotation .1 expected');
+
+  const textRotated = [1, 2, 3].filter(n => fs.existsSync(`${textLogPath}.${n}`));
+  const jsonRotated = [1, 2, 3].filter(n => fs.existsSync(`${jsonlLogPath}.${n}`));
+  assert.ok(textRotated.length <= 3, 'text log generations must be capped');
+  assert.ok(jsonRotated.length <= 3, 'jsonl log generations must be capped');
+  assert.ok(!fs.existsSync(`${textLogPath}.4`), 'text log .4 must not exist');
+  assert.ok(!fs.existsSync(`${jsonlLogPath}.4`), 'jsonl log .4 must not exist');
+
+  logger.warn('post-rotation-write', {
+    source: 'command',
+    task: 'DO_NOT_LEAK_TOKEN_123',
+    taskCategory: 'mutation',
+    taskLength: 22,
+    taskHash: 'cafebabefeed',
+    targetWorkspacePath: 'C:\\secret\\dir'
+  });
+  const latest = readJsonlLines(jsonlLogPath).pop();
+  const payload = JSON.stringify(latest);
+  assert.ok(!payload.includes('DO_NOT_LEAK_TOKEN_123'), 'redaction must hold after rotation');
+  assert.ok(!payload.includes('C:\\\\secret\\\\dir'), 'path redaction must hold after rotation');
+}
+
 run();
+runRotation();
 console.log('runtimeLogger tests passed');

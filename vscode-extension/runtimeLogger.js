@@ -12,6 +12,8 @@ function createRuntimeLogger(options = {}) {
   const runtimeDir = path.join(baseRoot, '.agent-runtime');
   const textLogPath = path.join(runtimeDir, 'agent.log');
   const jsonlLogPath = path.join(runtimeDir, 'agent.jsonl');
+  const maxFileSizeBytes = Number.isFinite(options.maxFileSizeBytes) ? Math.max(1024, Math.floor(options.maxFileSizeBytes)) : 1024 * 1024;
+  const maxGenerations = Number.isFinite(options.maxGenerations) ? Math.max(1, Math.floor(options.maxGenerations)) : 3;
 
   function ensureDir() {
     fs.mkdirSync(runtimeDir, { recursive: true });
@@ -20,6 +22,8 @@ function createRuntimeLogger(options = {}) {
   function writeLine(level, message, meta) {
     try {
       ensureDir();
+      rotateIfNeeded(textLogPath, maxFileSizeBytes, maxGenerations);
+      rotateIfNeeded(jsonlLogPath, maxFileSizeBytes, maxGenerations);
       const ts = new Date().toISOString();
       fs.appendFileSync(textLogPath, `[${ts}] [${level}] ${message}\n`, 'utf8');
       const entry = { ts, level, message, ...(meta && typeof meta === 'object' ? { meta: sanitizeMeta(meta) } : {}) };
@@ -34,6 +38,26 @@ function createRuntimeLogger(options = {}) {
     warn(message, meta) { writeLine('warn', String(message), meta); },
     error(message, meta) { writeLine('error', String(message), meta); }
   };
+}
+
+function rotateIfNeeded(filePath, maxFileSizeBytes, maxGenerations) {
+  try {
+    if (!fs.existsSync(filePath)) return;
+    const stat = fs.statSync(filePath);
+    if (stat.size < maxFileSizeBytes) return;
+    for (let i = maxGenerations; i >= 1; i--) {
+      const src = `${filePath}.${i}`;
+      if (i === maxGenerations) {
+        if (fs.existsSync(src)) fs.unlinkSync(src);
+      } else {
+        const dest = `${filePath}.${i + 1}`;
+        if (fs.existsSync(src)) fs.renameSync(src, dest);
+      }
+    }
+    fs.renameSync(filePath, `${filePath}.1`);
+  } catch (_) {
+    // Keep fail-open behavior.
+  }
 }
 
 function normalizeDirectory(value) {
