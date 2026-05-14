@@ -95,6 +95,40 @@ function runRotation() {
   assert.ok(!payload.includes('C:\\\\secret\\\\dir'), 'path redaction must hold after rotation');
 }
 
+function runErrorSanitizationAndFailureSignal() {
+  const extensionRoot = mkd('lca-ext-');
+  const workspaceRoot = mkd('lca-ws-');
+  let failureSignals = 0;
+  const logger = createRuntimeLogger({
+    extensionRoot,
+    workspaceRoot,
+    onLoggerFailure: () => { failureSignals++; }
+  });
+
+  const noisyError = new Error('X'.repeat(500));
+  noisyError.name = 'ActivationFailure';
+  noisyError.stack = `ActivationFailure: boom\n    at C:\\secret\\file.js:10`;
+  logger.error('activation failed', { error: noisyError });
+
+  const jsonlPath = path.join(workspaceRoot, '.agent-runtime', 'agent.jsonl');
+  const entry = readJsonlLines(jsonlPath).pop();
+  assert.strictEqual(entry.meta.error.name, 'ActivationFailure');
+  assert.ok(entry.meta.error.message.length <= 240, 'sanitized error message should be compact');
+  const payload = JSON.stringify(entry);
+  assert.ok(!payload.includes('at C:\\\\secret\\\\file.js:10'), 'full stack must not be persisted');
+
+  const originalMkdirSync = fs.mkdirSync;
+  fs.mkdirSync = () => { throw new Error('mkdir blocked for test'); };
+  try {
+    logger.info('first fail');
+    logger.info('second fail');
+  } finally {
+    fs.mkdirSync = originalMkdirSync;
+  }
+  assert.strictEqual(failureSignals, 1, 'logger failure callback should fire once');
+}
+
 run();
 runRotation();
+runErrorSanitizationAndFailureSignal();
 console.log('runtimeLogger tests passed');

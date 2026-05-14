@@ -44,7 +44,12 @@ function activate(context) {
     const runtimeLogger = createRuntimeLogger({
       extensionRoot,
       workspaceRoot: loggerWorkspaceState.workspaceRoot,
-      backendProjectPath: getBackendProjectPath()
+      backendProjectPath: getBackendProjectPath(),
+      onLoggerFailure: error => {
+        const raw = error && error.message ? error.message : String(error || 'logger_write_failed');
+        const compact = raw.replace(/\s+/g, ' ').trim().slice(0, 200);
+        output.appendLine(`Runtime logger degraded: ${compact || 'logger_write_failed'}`);
+      }
     });
     runtimeLogger.info('Local Cursor Agent activation started');
 
@@ -190,7 +195,7 @@ function activate(context) {
         workspaceRoot: '',
         backendProjectPath: ''
       });
-      fallbackLogger.error('Local Cursor Agent activation failed', { message });
+      fallbackLogger.error('Local Cursor Agent activation failed', { error: err });
     } catch (_) {}
     output.show(true);
     vscode.window.showErrorMessage(`Local Cursor Agent activation failed: ${err instanceof Error ? err.message : String(err)}`);
