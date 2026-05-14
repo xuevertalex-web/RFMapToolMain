@@ -282,14 +282,39 @@ public sealed class PermissionGuard
             Payload = StripApprovalToken(action.Payload)
         }, code, normalizedTarget, normalizedWorkspace);
         if (!token.Equals(expected, StringComparison.OrdinalIgnoreCase))
+        {
+            session.RecordApprovalDeniedEvent(expected, "denied_invalid_token", PermissionReasonCodes.HighRiskApprovalRequired);
             return false;
+        }
         if (session.IsApprovalProposalConsumed(expected))
+        {
+            if (!session.RecordApprovalDeniedEvent(expected, "denied_consumed", PermissionReasonCodes.ApprovalTokenExpired))
+            {
+                expired = false;
+                return false;
+            }
             return false;
+        }
+        if (session.IsApprovalProposalExpired(expected))
+        {
+            expired = true;
+            session.RecordApprovalDeniedEvent(expected, "denied_expired", PermissionReasonCodes.ApprovalTokenExpired);
+            return false;
+        }
         var proposal = session.GetApprovalProposal(expected);
         if (proposal is null)
+        {
+            session.RecordApprovalDeniedEvent(expected, "denied_invalid_token", PermissionReasonCodes.HighRiskApprovalRequired);
             return false;
+        }
         if (session.UtcNowProvider() > proposal.ExpiresAtUtc)
         {
+            if (!session.MarkApprovalProposalExpired(expected, PermissionReasonCodes.ApprovalTokenExpired))
+            {
+                expired = true;
+                return false;
+            }
+            session.RecordApprovalDeniedEvent(expected, "denied_expired", PermissionReasonCodes.ApprovalTokenExpired);
             expired = true;
             return false;
         }

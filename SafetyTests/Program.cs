@@ -61,6 +61,7 @@ await RunGuardedToolExplicitApprovalHandoffRegression();
 await RunApprovalTokenTtlLifecycleRegression();
 await RunApprovalLedgerReplayAcrossRestartRegression();
 await RunApprovalLedgerCorruptFailClosedRegression();
+await RunApprovalLedgerExpiredAndDeniedEventsRegression();
 RunCommandRiskPolicyTokenizationRegression();
 RunExtractRequestedNewFilePath_ExtensionRegression();
 RunExtractRequestedNewFilePath_NoCreateIntentRegression();
@@ -2864,6 +2865,88 @@ static async Task RunApprovalLedgerCorruptFailClosedRegression()
         });
         AssertTrue(readDecision.Allowed, "Expected read-only analysis path to remain unaffected by approval ledger corruption.");
         Console.WriteLine("PASS ApprovalLedgerCorruptFailClosedRegression");
+    }
+    finally
+    {
+        if (Directory.Exists(runtimeRoot))
+            Directory.Delete(runtimeRoot, recursive: true);
+    }
+}
+
+static async Task RunApprovalLedgerExpiredAndDeniedEventsRegression()
+{
+    var runtimeRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalLedgerEvents_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(runtimeRoot);
+    try
+    {
+        var workspaceRoot = Path.Combine(runtimeRoot, "workspace");
+        Directory.CreateDirectory(workspaceRoot);
+        var target = Path.Combine(workspaceRoot, "ttl-ledger.txt");
+        await File.WriteAllTextAsync(target, "x");
+
+        var now = new DateTime(2035, 01, 01, 12, 00, 00, DateTimeKind.Utc);
+        var session = new AgentSessionContext
+        {
+            SessionId = Guid.NewGuid().ToString("N"),
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        var guard = new PermissionGuard();
+
+        var issued = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = target
+        });
+        AssertTrue(issued.RequiresApproval && issued.ApprovalProposal is not null, "Expected issued approval proposal.");
+        var token = issued.ExpectedApprovalToken ?? string.Empty;
+
+        now = now.AddSeconds(AgentSessionContext.ApprovalTokenTtlSecondsDefault + 1);
+        var expiredDecision = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = target,
+            Payload = token
+        });
+        AssertTrue(!expiredDecision.Allowed && expiredDecision.ReasonCodeString == PermissionReasonCodes.ApprovalTokenExpired, "Expected expired token denial.");
+
+        var proposalId = token["APPROVED:".Length..];
+        var restart = new AgentSessionContext
+        {
+            SessionId = session.SessionId,
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        var restartGuard = new PermissionGuard();
+        var restartExpired = restartGuard.Evaluate(restart, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = target,
+            Payload = $"APPROVED:{proposalId}"
+        });
+        AssertTrue(!restartExpired.Allowed && restartExpired.ReasonCodeString == PermissionReasonCodes.ApprovalTokenExpired, "Expected expired terminal state to survive restart.");
+
+        var invalidTokenDecision = restartGuard.Evaluate(restart, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = target,
+            Payload = "APPROVED:true"
+        });
+        AssertTrue(!invalidTokenDecision.Allowed, "Expected invalid generic marker to remain denied.");
+
+        var ledgerPath = Path.Combine(runtimeRoot, "approval-ledger-v2.jsonl");
+        var ledger = await File.ReadAllTextAsync(ledgerPath);
+        AssertTrue(ledger.Contains("\"event\":\"expired\"", StringComparison.Ordinal), "Expected expired event in ledger.");
+        AssertTrue(ledger.Contains("\"event\":\"denied_expired\"", StringComparison.Ordinal), "Expected denied_expired event in ledger.");
+        AssertTrue(ledger.Contains("\"event\":\"denied_invalid_token\"", StringComparison.Ordinal), "Expected denied_invalid_token event in ledger.");
+        AssertTrue(!ledger.Contains("APPROVED:true", StringComparison.Ordinal), "Ledger must not persist raw approval token payload.");
+        Console.WriteLine("PASS ApprovalLedgerExpiredAndDeniedEventsRegression");
     }
     finally
     {

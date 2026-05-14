@@ -15,10 +15,11 @@ internal sealed class ApprovalLedgerV2
 
     public string LedgerPath => _ledgerPath;
 
-    public bool TryLoad(out Dictionary<string, ActionApprovalProposal> proposals, out HashSet<string> consumed, out string? error)
+    public bool TryLoad(out Dictionary<string, ActionApprovalProposal> proposals, out HashSet<string> consumed, out HashSet<string> expired, out string? error)
     {
         proposals = new Dictionary<string, ActionApprovalProposal>(StringComparer.OrdinalIgnoreCase);
         consumed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        expired = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         error = null;
 
         try
@@ -75,6 +76,18 @@ internal sealed class ApprovalLedgerV2
                     continue;
                 }
 
+                if (evt.Equals("expired", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!consumed.Contains(proposalId))
+                        expired.Add(proposalId);
+                    continue;
+                }
+
+                if (evt.StartsWith("denied_", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 error = $"Unsupported approval ledger event: {evt}";
                 return false;
             }
@@ -113,6 +126,34 @@ internal sealed class ApprovalLedgerV2
             atUtc,
             sessionId,
             proposalId
+        };
+        return TryAppendRecord(record, out error);
+    }
+
+    public bool TryAppendExpired(string sessionId, string proposalId, DateTime atUtc, string reasonCode, out string? error)
+    {
+        var record = new
+        {
+            schemaVersion = SchemaVersion,
+            @event = "expired",
+            atUtc,
+            sessionId,
+            proposalId,
+            reasonCode
+        };
+        return TryAppendRecord(record, out error);
+    }
+
+    public bool TryAppendDenied(string sessionId, string proposalId, string eventName, DateTime atUtc, string reasonCode, out string? error)
+    {
+        var record = new
+        {
+            schemaVersion = SchemaVersion,
+            @event = eventName,
+            atUtc,
+            sessionId,
+            proposalId,
+            reasonCode
         };
         return TryAppendRecord(record, out error);
     }

@@ -4,6 +4,7 @@ public sealed class AgentSessionContext
 {
     public const int ApprovalTokenTtlSecondsDefault = 600;
     private readonly HashSet<string> _consumedApprovalProposalIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _expiredApprovalProposalIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ActionApprovalProposal> _approvalProposals = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _approvalLedgerLock = new();
     private bool _approvalLedgerInitialized;
@@ -48,6 +49,16 @@ public sealed class AgentSessionContext
             return _consumedApprovalProposalIds.Contains(proposalId);
     }
 
+    public bool IsApprovalProposalExpired(string proposalId)
+    {
+        EnsureApprovalLedgerInitialized();
+        if (string.IsNullOrWhiteSpace(proposalId))
+            return false;
+
+        lock (_expiredApprovalProposalIds)
+            return _expiredApprovalProposalIds.Contains(proposalId);
+    }
+
     public bool ConsumeApprovalProposal(string proposalId)
     {
         EnsureApprovalLedgerInitialized();
@@ -66,6 +77,46 @@ public sealed class AgentSessionContext
 
         lock (_consumedApprovalProposalIds)
             _consumedApprovalProposalIds.Add(proposalId);
+        lock (_expiredApprovalProposalIds)
+            _expiredApprovalProposalIds.Remove(proposalId);
+        return true;
+    }
+
+    public bool MarkApprovalProposalExpired(string proposalId, string reasonCode)
+    {
+        EnsureApprovalLedgerInitialized();
+        if (string.IsNullOrWhiteSpace(proposalId))
+            return false;
+        if (!_approvalLedgerHealthy || _approvalLedger is null)
+            return false;
+        if (IsApprovalProposalConsumed(proposalId))
+            return true;
+        if (IsApprovalProposalExpired(proposalId))
+            return true;
+        if (!_approvalLedger.TryAppendExpired(SessionId, proposalId, UtcNowProvider(), reasonCode, out var appendError))
+        {
+            _approvalLedgerHealthy = false;
+            _approvalLedgerError = $"expired_append_failed: {appendError}";
+            return false;
+        }
+        lock (_expiredApprovalProposalIds)
+            _expiredApprovalProposalIds.Add(proposalId);
+        return true;
+    }
+
+    public bool RecordApprovalDeniedEvent(string proposalId, string eventName, string reasonCode)
+    {
+        EnsureApprovalLedgerInitialized();
+        if (string.IsNullOrWhiteSpace(proposalId))
+            return false;
+        if (!_approvalLedgerHealthy || _approvalLedger is null)
+            return false;
+        if (!_approvalLedger.TryAppendDenied(SessionId, proposalId, eventName, UtcNowProvider(), reasonCode, out var appendError))
+        {
+            _approvalLedgerHealthy = false;
+            _approvalLedgerError = $"denied_append_failed: {appendError}";
+            return false;
+        }
         return true;
     }
 
@@ -111,7 +162,7 @@ public sealed class AgentSessionContext
             try
             {
                 _approvalLedger = new ApprovalLedgerV2(RuntimeRoot);
-                if (!_approvalLedger.TryLoad(out var proposals, out var consumed, out var loadError))
+                if (!_approvalLedger.TryLoad(out var proposals, out var consumed, out var expired, out var loadError))
                 {
                     _approvalLedgerHealthy = false;
                     _approvalLedgerError = $"load_failed: {loadError}";
@@ -122,6 +173,8 @@ public sealed class AgentSessionContext
                     _approvalProposals[pair.Key] = pair.Value;
                 foreach (var id in consumed)
                     _consumedApprovalProposalIds.Add(id);
+                foreach (var id in expired)
+                    _expiredApprovalProposalIds.Add(id);
             }
             catch (Exception ex)
             {
