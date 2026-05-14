@@ -1,4 +1,4 @@
-﻿const webviewClientRecentRuns = `function openDialogsListView() {
+const webviewClientRecentRuns = `function openDialogsListView() {
         dialogViewMode = 'list';
         selectedDialogId = '';
         if (sessionsStrip) sessionsStrip.style.display = 'block';
