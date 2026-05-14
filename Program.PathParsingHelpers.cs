@@ -1,13 +1,31 @@
-internal static class ProgramPathParsingHelpers
+public static class ProgramPathParsingHelpers
 {
     public static string ResolveTargetPath(string workspaceRoot, string path)
     {
-        if (string.IsNullOrWhiteSpace(path))
-            return workspaceRoot;
+        return TryResolveTargetPath(workspaceRoot, path, out var resolved) ? resolved : string.Empty;
+    }
 
-        return Path.IsPathFullyQualified(path)
+    public static bool TryResolveTargetPath(string workspaceRoot, string path, out string resolved)
+    {
+        resolved = string.Empty;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            resolved = workspaceRoot;
+            return true;
+        }
+
+        if (HasAmbiguousWindowsPathForm(path))
+            return false;
+        if (HasTrailingDotOrSpaceComponent(path))
+            return false;
+
+        var full = Path.IsPathFullyQualified(path)
             ? Path.GetFullPath(path)
             : Path.GetFullPath(Path.Combine(workspaceRoot, path));
+        if (HasTrailingDotOrSpaceComponent(full))
+            return false;
+        resolved = full;
+        return true;
     }
 
     public static int FindWriteSeparator(string payload)
@@ -30,5 +48,27 @@ internal static class ProgramPathParsingHelpers
             return payload.IndexOf(':', 3);
 
         return payload.IndexOf(':');
+    }
+
+    private static bool HasAmbiguousWindowsPathForm(string path)
+    {
+        var value = path.TrimStart();
+        return value.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase) ||
+               value.StartsWith(@"\\.\", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasTrailingDotOrSpaceComponent(string path)
+    {
+        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var components = trimmed.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var component in components)
+        {
+            if (component.Length == 0)
+                continue;
+            var last = component[component.Length - 1];
+            if (last == '.' || last == ' ')
+                return true;
+        }
+        return false;
     }
 }

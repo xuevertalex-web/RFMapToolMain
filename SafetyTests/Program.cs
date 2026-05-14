@@ -70,6 +70,7 @@ RunExtractRequestedNewFilePath_RelativeDotSlashRegression();
 RunExtractRequestedNewFilePath_MultiDotFileNameRegression();
 RunExtractRequestedNewFilePath_UrlNegativeRegression();
 RunExtractRequestedNewFilePath_RussianIntentRegression();
+RunPathParsingHelpers_AmbiguousWindowsPathFormsRegression();
 RunMemoryProjectScopeResolverRegression();
 RunMemoryGovernanceRecalibrationRegression();
 RunMemoryScopedRetrievalRegression();
@@ -134,6 +135,24 @@ static void RunDeepAnalysisDetectionRegression()
     AssertTrue(ruRiskComboIsDeep && (ruRiskComboTrigger == "risk-combination" || ruRiskComboTrigger == "keyword"), "Expected Russian deep trigger.");
     AssertTrue(!(bool)m.Invoke(null, new object[] { "Explain this project" })!, "Expected simple overview to remain non-deep analysis.");
     Console.WriteLine("PASS DeepAnalysisDetectionRegression");
+}
+
+static void RunPathParsingHelpers_AmbiguousWindowsPathFormsRegression()
+{
+    var workspaceRoot = Path.Combine(Path.GetTempPath(), "lca-path-helpers", Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(workspaceRoot);
+    var okDocs = ProgramPathParsingHelpers.TryResolveTargetPath(workspaceRoot, "docs/file.md", out var docsResolved);
+    AssertTrue(okDocs && docsResolved.EndsWith(Path.Combine("docs", "file.md"), StringComparison.OrdinalIgnoreCase), "Expected normal docs/file.md path to be accepted.");
+    var okDotfile = ProgramPathParsingHelpers.TryResolveTargetPath(workspaceRoot, ".editorconfig", out var dotfileResolved);
+    AssertTrue(okDotfile && dotfileResolved.EndsWith(".editorconfig", StringComparison.OrdinalIgnoreCase), "Expected .editorconfig to be accepted.");
+    var okReadme = ProgramPathParsingHelpers.TryResolveTargetPath(workspaceRoot, "docs/readme.md", out _);
+    AssertTrue(okReadme, "Expected docs/readme.md to be accepted.");
+
+    AssertTrue(!ProgramPathParsingHelpers.TryResolveTargetPath(workspaceRoot, @"\\?\C:\temp\file.txt", out _), "Expected \\\\?\\ device namespace path to be rejected.");
+    AssertTrue(!ProgramPathParsingHelpers.TryResolveTargetPath(workspaceRoot, @"\\.\C:\temp\file.txt", out _), "Expected \\\\.\\ device namespace path to be rejected.");
+    AssertTrue(!ProgramPathParsingHelpers.TryResolveTargetPath(workspaceRoot, @"folder.\file.txt", out _), "Expected trailing-dot component to be rejected.");
+    AssertTrue(!ProgramPathParsingHelpers.TryResolveTargetPath(workspaceRoot, @"folder \file.txt", out _), "Expected trailing-space component to be rejected.");
+    Console.WriteLine("PASS PathParsingHelpers_AmbiguousWindowsPathFormsRegression");
 }
 
 static void RunAgentConfig_DefaultExcludesRuntimeDirectoryRegression()
