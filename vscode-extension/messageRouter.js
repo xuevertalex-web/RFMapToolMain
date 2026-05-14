@@ -4,7 +4,6 @@ const { createPanelCommandHandlers } = require('./panelCommandHandlers');
 function createPanelMessageHandler(options) {
   const panel = options.panel;
   const output = options.output;
-  const runtimeLogger = options.runtimeLogger;
   const extensionRoot = options.extensionRoot;
   const resolveWorkspaceRoot = options.resolveWorkspaceRoot;
   const runAgent = options.runAgent;
@@ -15,7 +14,6 @@ function createPanelMessageHandler(options) {
   const panelRunController = createPanelRunController({
     panel,
     output,
-    runtimeLogger,
     extensionRoot,
     resolveWorkspaceRoot,
     runAgent,
