@@ -66,6 +66,7 @@ await RunApprovalLedgerExpiredAndDeniedEventsRegression();
 await RunApprovalLedgerDeniedAppendFailureFailClosedRegression();
 await RunApprovalLedgerStartupCompactionDeterministicRegression();
 RunCommandRiskPolicyTokenizationRegression();
+RunCanonicalCommandPolicyDecisionRegression();
 RunExtractRequestedNewFilePath_ExtensionRegression();
 RunExtractRequestedNewFilePath_NoCreateIntentRegression();
 RunExtractRequestedNewFilePath_NoExtensionRegression();
@@ -3564,6 +3565,95 @@ static void RunCommandRiskPolicyTokenizationRegression()
     AssertTrue(Risk("git reset --hard") == "high", "Expected destructive git reset to resolve as high.");
     AssertTrue(High("nvidia-smi APPROVED:true"), "Expected generic approval marker not to bypass high-risk classification.");
     Console.WriteLine("PASS RunCommandRiskPolicy_TokenizationRegression");
+}
+
+static void RunCanonicalCommandPolicyDecisionRegression()
+{
+    var asm = typeof(Agent).Assembly;
+    var policyType = asm.GetType("LocalCursorAgent.Security.CommandRiskPolicy", throwOnError: true)!;
+    var inputType = asm.GetType("LocalCursorAgent.Security.CommandPolicyInput", throwOnError: true)!;
+    var evaluate = policyType.GetMethod("Evaluate", new[] { inputType })!;
+
+    object CreateInput(string? executable = null, string[]? args = null, string? rawCommand = null)
+    {
+        var input = Activator.CreateInstance(inputType)!;
+        inputType.GetProperty("Executable")!.SetValue(input, executable);
+        inputType.GetProperty("Args")!.SetValue(input, args);
+        inputType.GetProperty("RawCommandText")!.SetValue(input, rawCommand);
+        inputType.GetProperty("Source")!.SetValue(input, "safety_test");
+        return input;
+    }
+
+    object Decide(string? executable = null, string[]? args = null, string? rawCommand = null)
+    {
+        var input = CreateInput(executable, args, rawCommand);
+        return evaluate.Invoke(null, new[] { input })!;
+    }
+
+    static string DecisionString(object decision, string propertyName)
+        => (string)decision.GetType().GetProperty(propertyName)!.GetValue(decision)!;
+    static bool DecisionBool(object decision, string propertyName)
+        => (bool)decision.GetType().GetProperty(propertyName)!.GetValue(decision)!;
+
+    const string allowed = "allowed";
+    const string highRiskApprovalRequired = "high_risk_approval_required";
+    const string hardBlocked = "hard_blocked";
+    const string unsupportedShellMetaSyntax = "unsupported_shell_meta_syntax";
+
+    var safe = Decide("dotnet", new[] { "--version" });
+    AssertTrue(DecisionString(safe, "Category") == allowed, "Expected safe command to be allowed.");
+    AssertTrue(!DecisionBool(safe, "ApprovalRequired"), "Expected safe command not to require approval.");
+    AssertTrue(!DecisionBool(safe, "HardBlocked"), "Expected safe command not to be hard-blocked.");
+
+    var gitResetHard = Decide("git", new[] { "reset", "--hard" });
+    AssertTrue(DecisionString(gitResetHard, "Category") == highRiskApprovalRequired, "Expected git reset --hard to require approval.");
+    AssertTrue(DecisionBool(gitResetHard, "ApprovalRequired"), "Expected git reset --hard approval flag.");
+
+    var gitCleanXdf = Decide("git", new[] { "clean", "-xdf" });
+    AssertTrue(DecisionString(gitCleanXdf, "Category") == highRiskApprovalRequired, "Expected git clean -xdf to require approval.");
+
+    var gitRestoreBoth = Decide("git", new[] { "restore", "--worktree", "--staged", "." });
+    AssertTrue(DecisionString(gitRestoreBoth, "Category") == highRiskApprovalRequired, "Expected git restore --worktree --staged . to require approval.");
+
+    var gitCheckoutDot = Decide("git", new[] { "checkout", "--", "." });
+    AssertTrue(DecisionString(gitCheckoutDot, "Category") == highRiskApprovalRequired, "Expected git checkout -- . to require approval.");
+
+    var npmRunBuild = Decide("npm", new[] { "run", "build" });
+    AssertTrue(DecisionString(npmRunBuild, "Category") == highRiskApprovalRequired, "Expected npm run build to require approval.");
+
+    var npxAny = Decide("npx", new[] { "something" });
+    AssertTrue(DecisionString(npxAny, "Category") == highRiskApprovalRequired, "Expected npx invocation to require approval.");
+
+    var encodedPs = Decide("powershell", new[] { "-EncodedCommand", "SQBlAHgA" });
+    var encodedPsCategory = DecisionString(encodedPs, "Category");
+    AssertTrue(
+        encodedPsCategory == highRiskApprovalRequired || encodedPsCategory == hardBlocked,
+        "Expected PowerShell encoded command to be blocked or approval-gated.");
+
+    string? shellCategory = null;
+    foreach (var candidate in new[]
+    {
+        "echo ok && whoami",
+        "echo ok || whoami",
+        "echo ok ; whoami",
+        "echo ok | whoami",
+        "echo ok > out.txt",
+        "echo ok < in.txt",
+        "echo `whoami`",
+        "echo $(whoami)"
+    })
+    {
+        var shellDecision = Decide(rawCommand: candidate);
+        var category = DecisionString(shellDecision, "Category");
+        AssertTrue(
+            category == unsupportedShellMetaSyntax || category == hardBlocked,
+            $"Expected '{candidate}' to be classified as unsupported shell/meta syntax.");
+        AssertTrue(DecisionBool(shellDecision, "HardBlocked"), $"Expected '{candidate}' to be hard-blocked.");
+        shellCategory ??= category;
+        AssertTrue(category == shellCategory, "Expected shell/meta token classification category to stay deterministic.");
+    }
+
+    Console.WriteLine("PASS RunCanonicalCommandPolicyDecisionRegression");
 }
 
 static async Task RunDestructiveFileApprovalMarkerRegression()

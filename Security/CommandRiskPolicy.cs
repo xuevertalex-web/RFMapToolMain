@@ -1,37 +1,216 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+
 namespace LocalCursorAgent.Security;
 
 internal static class CommandRiskPolicy
 {
+    private const string ReasonAllowed = "COMMAND_ALLOWED";
+    private const string ReasonHighRiskApprovalRequired = "HIGH_RISK_APPROVAL_REQUIRED";
+    private const string ReasonHardBlockedCommand = "HARD_BLOCKED_COMMAND";
+    private const string ReasonInvalidCommand = "INVALID_COMMAND";
+    private const string ReasonUnsupportedShellMetaSyntax = "UNSUPPORTED_SHELL_META_SYNTAX";
+
+    public static CommandPolicyDecision Evaluate(CommandPolicyInput input)
+    {
+        var normalized = NormalizeInput(input);
+        if (normalized.Tokens.Count == 0)
+        {
+            return CreateDecision(
+                CommandPolicyCategory.InvalidMalformed,
+                ReasonInvalidCommand,
+                "Command is missing executable and arguments.",
+                "medium",
+                approvalRequired: false,
+                hardBlocked: false,
+                normalized.Executable,
+                normalized.Args);
+        }
+
+        if (normalized.ContainsShellMetaSyntax)
+        {
+            return CreateDecision(
+                CommandPolicyCategory.UnsupportedShellMetaSyntax,
+                ReasonUnsupportedShellMetaSyntax,
+                "Shell/meta syntax is not supported in canonical command execution.",
+                "high",
+                approvalRequired: false,
+                hardBlocked: true,
+                normalized.Executable,
+                normalized.Args);
+        }
+
+        if (ContainsHighRiskPattern(normalized.Tokens))
+        {
+            return CreateDecision(
+                CommandPolicyCategory.HighRiskApprovalRequired,
+                ReasonHighRiskApprovalRequired,
+                "Command requires explicit approval due to high-risk side effects.",
+                "high",
+                approvalRequired: true,
+                hardBlocked: false,
+                normalized.Executable,
+                normalized.Args);
+        }
+
+        return CreateDecision(
+            CommandPolicyCategory.Allowed,
+            ReasonAllowed,
+            "Command is allowed by canonical policy.",
+            "medium",
+            approvalRequired: false,
+            hardBlocked: false,
+            normalized.Executable,
+            normalized.Args);
+    }
+
     public static bool IsHighRiskCommand(string? payload)
     {
-        var text = NormalizeCommandPayload(payload);
-        if (text.Length == 0)
-            return false;
+        var decision = Evaluate(new CommandPolicyInput
+        {
+            RawCommandText = payload,
+            Source = "legacy_payload"
+        });
 
-        var lowered = text.ToLowerInvariant();
-        if (ContainsShellMeta(lowered))
-            return true;
-
-        var tokens = Tokenize(lowered);
-        if (tokens.Count == 0)
-            return false;
-
-        return ContainsHighRiskPattern(tokens);
+        return decision.Category == CommandPolicyCategory.HighRiskApprovalRequired ||
+               decision.Category == CommandPolicyCategory.HardBlocked ||
+               decision.Category == CommandPolicyCategory.UnsupportedShellMetaSyntax;
     }
 
     public static string ResolveCommandRiskLevel(string? payload)
     {
-        var text = NormalizeCommandPayload(payload);
-        if (text.Length == 0)
-            return "medium";
-
-        var lowered = text.ToLowerInvariant();
-        if (ContainsCriticalPattern(Tokenize(lowered)) || ContainsShellMeta(lowered))
+        return Evaluate(new CommandPolicyInput
         {
-            return "high";
+            RawCommandText = payload,
+            Source = "legacy_payload"
+        }).RiskLevel;
+    }
+
+    private static CommandPolicyDecision CreateDecision(
+        string category,
+        string reasonCode,
+        string reasonMessage,
+        string riskLevel,
+        bool approvalRequired,
+        bool hardBlocked,
+        string normalizedExecutable,
+        IReadOnlyList<string> normalizedArgs)
+    {
+        return new CommandPolicyDecision
+        {
+            Category = category,
+            ReasonCode = reasonCode,
+            ReasonMessage = reasonMessage,
+            RiskLevel = riskLevel,
+            ApprovalRequired = approvalRequired,
+            HardBlocked = hardBlocked,
+            NormalizedExecutable = normalizedExecutable,
+            NormalizedArgs = normalizedArgs
+        };
+    }
+
+    private static NormalizedIntent NormalizeInput(CommandPolicyInput input)
+    {
+        var normalizedExecutable = NormalizeExecutable(input.Executable);
+        var normalizedArgs = NormalizeArgs(input.Args);
+        var normalizedRaw = NormalizeCommandPayload(input.RawCommandText);
+        var loweredRaw = normalizedRaw.ToLowerInvariant();
+
+        var tokens = new List<string>();
+        if (normalizedExecutable.Length > 0)
+        {
+            tokens.Add(normalizedExecutable);
         }
 
-        return "medium";
+        foreach (var arg in normalizedArgs)
+        {
+            tokens.Add(arg);
+        }
+
+        if (tokens.Count == 0 && loweredRaw.Length > 0)
+        {
+            tokens.AddRange(Tokenize(loweredRaw));
+        }
+
+        var containsShellMeta = ContainsShellMeta(loweredRaw) || TokensContainShellMeta(tokens);
+        return new NormalizedIntent(normalizedExecutable, normalizedArgs, tokens, containsShellMeta);
+    }
+
+    private static string NormalizeExecutable(string? executable)
+    {
+        var value = NormalizeToken(executable);
+        if (value.Length == 0)
+            return string.Empty;
+
+        if (value.Contains('\\', StringComparison.Ordinal) || value.Contains('/', StringComparison.Ordinal))
+        {
+            value = Path.GetFileName(value);
+        }
+
+        if (value.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
+            value.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) ||
+            value.EndsWith(".bat", StringComparison.OrdinalIgnoreCase) ||
+            value.EndsWith(".com", StringComparison.OrdinalIgnoreCase) ||
+            value.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase))
+        {
+            value = Path.GetFileNameWithoutExtension(value);
+        }
+
+        value = value.ToLowerInvariant();
+        return value switch
+        {
+            "pwsh" => "powershell",
+            "powershell_ise" => "powershell",
+            _ => value
+        };
+    }
+
+    private static IReadOnlyList<string> NormalizeArgs(IReadOnlyList<string>? args)
+    {
+        if (args is null || args.Count == 0)
+            return Array.Empty<string>();
+
+        var normalized = new List<string>(args.Count);
+        foreach (var rawArg in args)
+        {
+            var token = NormalizeToken(rawArg);
+            if (token.Length == 0)
+                continue;
+
+            normalized.Add(token.ToLowerInvariant());
+        }
+
+        return normalized;
+    }
+
+    private static string NormalizeToken(string? token)
+    {
+        return token?.Trim().Trim('"', '\'') ?? string.Empty;
+    }
+
+    private static bool TokensContainShellMeta(IReadOnlyList<string> tokens)
+    {
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            if (TokenContainsShellMeta(tokens[i]))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool TokenContainsShellMeta(string token)
+    {
+        return token.Contains("&&", StringComparison.Ordinal) ||
+               token.Contains("||", StringComparison.Ordinal) ||
+               token.Contains(';', StringComparison.Ordinal) ||
+               token.Contains('|', StringComparison.Ordinal) ||
+               token.Contains('>', StringComparison.Ordinal) ||
+               token.Contains('<', StringComparison.Ordinal) ||
+               token.Contains('`', StringComparison.Ordinal) ||
+               token.Contains("$(", StringComparison.Ordinal);
     }
 
     private static bool ContainsHighRiskPattern(IReadOnlyList<string> tokens)
@@ -135,10 +314,11 @@ internal static class CommandRiskPolicy
                lowered.Contains("||", StringComparison.Ordinal) ||
                lowered.Contains(';', StringComparison.Ordinal) ||
                lowered.Contains('|', StringComparison.Ordinal) ||
-               lowered.Contains('`', StringComparison.Ordinal) ||
-               lowered.Contains("$(", StringComparison.Ordinal) ||
                lowered.Contains(">>", StringComparison.Ordinal) ||
-               lowered.Contains('>', StringComparison.Ordinal);
+               lowered.Contains('>', StringComparison.Ordinal) ||
+               lowered.Contains('<', StringComparison.Ordinal) ||
+               lowered.Contains('`', StringComparison.Ordinal) ||
+               lowered.Contains("$(", StringComparison.Ordinal);
     }
 
     private static List<string> Tokenize(string text)
@@ -202,5 +382,21 @@ internal static class CommandRiskPolicy
         }
 
         return text;
+    }
+
+    private sealed class NormalizedIntent
+    {
+        public NormalizedIntent(string executable, IReadOnlyList<string> args, IReadOnlyList<string> tokens, bool containsShellMetaSyntax)
+        {
+            Executable = executable;
+            Args = args;
+            Tokens = tokens;
+            ContainsShellMetaSyntax = containsShellMetaSyntax;
+        }
+
+        public string Executable { get; }
+        public IReadOnlyList<string> Args { get; }
+        public IReadOnlyList<string> Tokens { get; }
+        public bool ContainsShellMetaSyntax { get; }
     }
 }
