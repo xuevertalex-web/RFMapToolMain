@@ -303,6 +303,41 @@ const webviewStyles = `
         line-height: 1.45;
       }
 
+      .message-content,
+      .thread-message-body {
+        font-family: var(--vscode-editor-font-family, Consolas, 'Courier New', monospace);
+        font-size: calc(var(--vscode-editor-font-size, 13px) * 0.98);
+      }
+
+      .message-content code,
+      .thread-message-body code {
+        font-family: var(--vscode-editor-font-family, Consolas, 'Courier New', monospace);
+        color: var(--vscode-textPreformat-foreground, var(--vscode-editor-foreground));
+        background: var(--vscode-textBlockQuote-background, rgba(127, 127, 127, 0.12));
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 4px;
+        padding: 0 4px;
+      }
+
+      .message-content pre,
+      .thread-message-body pre {
+        margin: 8px 0;
+        padding: 10px;
+        border-radius: 6px;
+        border: 1px solid var(--vscode-panel-border);
+        background: var(--vscode-textCodeBlock-background, var(--vscode-editorWidget-background, rgba(127, 127, 127, 0.10)));
+        overflow-x: auto;
+      }
+
+      .message-content pre code,
+      .thread-message-body pre code {
+        border: none;
+        background: transparent;
+        padding: 0;
+        border-radius: 0;
+        color: inherit;
+      }
+
       .muted, .empty-state {
         color: var(--vscode-descriptionForeground);
       }

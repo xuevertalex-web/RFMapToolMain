@@ -341,7 +341,7 @@ function composeTaskWithContinuation(task, previousResult) {
     normalized === 'resume' ||
     asciiNormalized === 'go on' ||
     asciiNormalized === 'continue' ||
-    normalized === 'продолжай' || // backward-compat for existing mojibake input
+    normalized === 'продолжай' ||
     normalized === 'продолжай.' ||
     normalized === 'давай дальше' ||
     normalized === 'дальше';
