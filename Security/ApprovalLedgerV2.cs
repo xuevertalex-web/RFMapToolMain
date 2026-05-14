@@ -104,13 +104,13 @@ internal sealed class ApprovalLedgerV2
         return TryAppendRecord(record, out error);
     }
 
-    public bool TryAppendConsumed(string sessionId, string proposalId, out string? error)
+    public bool TryAppendConsumed(string sessionId, string proposalId, DateTime atUtc, out string? error)
     {
         var record = new
         {
             schemaVersion = SchemaVersion,
             @event = "consumed",
-            atUtc = DateTime.UtcNow,
+            atUtc,
             sessionId,
             proposalId
         };
@@ -136,4 +136,3 @@ internal sealed class ApprovalLedgerV2
         }
     }
 }
-

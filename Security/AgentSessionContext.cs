@@ -57,7 +57,7 @@ public sealed class AgentSessionContext
         if (!_approvalLedgerHealthy || _approvalLedger is null)
             return false;
 
-        if (!_approvalLedger.TryAppendConsumed(SessionId, proposalId, out var appendError))
+        if (!_approvalLedger.TryAppendConsumed(SessionId, proposalId, UtcNowProvider(), out var appendError))
         {
             _approvalLedgerHealthy = false;
             _approvalLedgerError = $"consume_append_failed: {appendError}";
