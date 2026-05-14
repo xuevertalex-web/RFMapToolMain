@@ -115,6 +115,7 @@ await RunDeepAnalysisDiagnosticsRegression();
 await RunAuditRoutingAndCandidateSeedingRegression();
 RunAgentConfig_DefaultExcludesRuntimeDirectoryRegression();
 RunRuntimeDiagnosticsMutationProtectionRegression();
+await RunCanonicalContainment_JunctionEscapeRegression();
 
 static void RunDeepAnalysisDetectionRegression()
 {
@@ -206,6 +207,90 @@ static void RunRuntimeDiagnosticsMutationProtectionRegression()
     AssertTrue(normalWrite.Allowed, "Expected normal workspace write outside .agent-runtime to remain allowed.");
 
     Console.WriteLine("PASS RuntimeDiagnosticsMutationProtectionRegression");
+}
+
+static async Task RunCanonicalContainment_JunctionEscapeRegression()
+{
+    if (!OperatingSystem.IsWindows())
+    {
+        Console.WriteLine("PASS CanonicalContainment_JunctionEscapeRegression (skipped: non-Windows)");
+        return;
+    }
+
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    var outsideRoot = Path.Combine(tempRoot, "outside");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    Directory.CreateDirectory(outsideRoot);
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "inside.txt"), "ok");
+    await File.WriteAllTextAsync(Path.Combine(outsideRoot, "escape.txt"), "escape");
+
+    var linkPath = Path.Combine(workspaceRoot, "link-out");
+    var mklink = new ProcessStartInfo
+    {
+        FileName = "cmd.exe",
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        CreateNoWindow = true
+    };
+    mklink.ArgumentList.Add("/c");
+    mklink.ArgumentList.Add("mklink");
+    mklink.ArgumentList.Add("/J");
+    mklink.ArgumentList.Add(linkPath);
+    mklink.ArgumentList.Add(outsideRoot);
+    using (var p = Process.Start(mklink))
+    {
+        if (p is null)
+            throw new InvalidOperationException("Failed to start mklink process.");
+        await p.WaitForExitAsync();
+        if (p.ExitCode != 0)
+        {
+            Console.WriteLine("PASS CanonicalContainment_JunctionEscapeRegression (skipped: junction unavailable)");
+            return;
+        }
+    }
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+    var guard = new PermissionGuard();
+    var tracer = new ExecutionTracer(runtimeRoot);
+    var sandbox = new SandboxManager(workspaceRoot, runtimeRoot);
+    var patchGate = new PatchSafetyGate(session, guard, tracer);
+    var destructiveGate = new DestructiveOperationSafetyGate(session, guard, tracer);
+    var fileTool = new FileTool(session, guard, patchGate, destructiveGate, sandbox, tracer);
+    var guarded = new GuardedTool(fileTool, guard, session, CreateFileActionFactory(workspaceRoot), tracer);
+    var runner = new SafeProcessRunner(session, guard, tracer);
+
+    var viaLinkTarget = Path.Combine(linkPath, "escape.txt");
+    var writeResult = await guarded.Execute($"write:{viaLinkTarget}:pwn");
+    AssertTrue(writeResult.StartsWith("DENIED", StringComparison.Ordinal), "Expected write via junction to be denied.");
+
+    var deleteResult = await guarded.Execute($"delete:{viaLinkTarget}");
+    AssertTrue(deleteResult.StartsWith("DENIED", StringComparison.Ordinal), "Expected delete via junction to be denied.");
+
+    var moveResult = await guarded.Execute($"move:{viaLinkTarget}:{Path.Combine(workspaceRoot, "moved.txt")}");
+    AssertTrue(moveResult.StartsWith("DENIED", StringComparison.Ordinal), "Expected move via junction to be denied.");
+
+    var processResult = await runner.RunAsync(new SafeProcessRequest
+    {
+        Kind = ToolActionKind.RunCommand,
+        Command = "dotnet",
+        Args = new[] { "--info" },
+        WorkingDirectory = linkPath,
+        Timeout = TimeSpan.FromSeconds(5)
+    });
+    AssertTrue(!processResult.Success && processResult.ReasonCode == "BLOCKED_PROCESS_EXECUTION", "Expected process working directory via junction to be denied.");
+
+    Console.WriteLine("PASS CanonicalContainment_JunctionEscapeRegression");
 }
 
 static void RunDeepAnalysisContextFormatterRegression()

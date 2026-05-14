@@ -256,10 +256,7 @@ public sealed class SafeProcessRunner
     private bool IsWithinExecutionRoot(string path)
     {
         var root = _session.ExecutionWorkspaceRoot ?? _session.ActiveWorkspaceRoot;
-        var normalizedRoot = Path.GetFullPath(root);
-        var normalizedPath = Path.GetFullPath(path);
-        return normalizedPath.Equals(normalizedRoot, StringComparison.OrdinalIgnoreCase) ||
-               normalizedPath.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        return CanonicalPathPolicy.IsCanonicallyContained(root, path);
     }
 
     private static bool ContainsForbiddenShellTokens(string? value)

@@ -78,13 +78,13 @@ public sealed class PermissionGuard
         if (normalizedDestination is not null && PathSafetyPolicy.IsUncPath(normalizedDestination))
             return PermissionDecision.Deny(PermissionReasonCode.NetworkPathDenied, "Destination is a network path", normalizedDestination, normalizedWorkspace);
 
-        if (normalizedTarget is not null && !IsWithinWorkspace(normalizedTarget, normalizedWorkspace))
+        if (normalizedTarget is not null && !IsWithinCanonicalWorkspace(normalizedTarget, normalizedWorkspace))
             return CreateApprovalRequired(session, action, PermissionReasonCode.PathOutsideWorkspace, "Target is outside active workspace", normalizedTarget, normalizedWorkspace);
 
-        if (normalizedSource is not null && !IsWithinWorkspace(normalizedSource, normalizedWorkspace))
+        if (normalizedSource is not null && !IsWithinCanonicalWorkspace(normalizedSource, normalizedWorkspace))
             return CreateApprovalRequired(session, action, PermissionReasonCode.PathOutsideWorkspace, "Source is outside active workspace", normalizedSource, normalizedWorkspace);
 
-        if (normalizedDestination is not null && !IsWithinWorkspace(normalizedDestination, normalizedWorkspace))
+        if (normalizedDestination is not null && !IsWithinCanonicalWorkspace(normalizedDestination, normalizedWorkspace))
             return CreateApprovalRequired(session, action, PermissionReasonCode.PathOutsideWorkspace, "Destination is outside active workspace", normalizedDestination, normalizedWorkspace);
 
         if (action.Kind == ToolActionKind.RunCommand)
@@ -175,6 +175,8 @@ public sealed class PermissionGuard
     private static bool IsWithinWorkspace(string path, string workspaceRoot) =>
         path.Equals(workspaceRoot, StringComparison.OrdinalIgnoreCase) ||
         path.StartsWith(workspaceRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    private static bool IsWithinCanonicalWorkspace(string path, string workspaceRoot) =>
+        IsWithinWorkspace(path, workspaceRoot) && CanonicalPathPolicy.IsCanonicallyContained(workspaceRoot, path);
 
     private bool IsWithinExecutionWorkspace(string path, AgentSessionContext session)
     {

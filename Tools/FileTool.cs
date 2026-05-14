@@ -109,6 +109,8 @@ namespace LocalCursorAgent.Tools
                 return FormatDenied(decision);
 
             var resolvedPath = action.TargetPath!;
+            if (!IsCanonicallyWithinExecutionWorkspace(resolvedPath))
+                return $"DENIED [{PermissionReasonCodes.AccessDeniedOutsideWorkspace}]: Target is outside active workspace";
             var backupCapture = await _sandboxManager.CapturePathAsync(resolvedPath);
             if (!backupCapture.Succeeded)
                 return $"DENIED [{PermissionReasonCodes.BackupCaptureFailed}]: {backupCapture.Message}";
@@ -116,6 +118,8 @@ namespace LocalCursorAgent.Tools
             var directory = Path.GetDirectoryName(resolvedPath);
             if (directory != null && !Directory.Exists(directory))
                 Directory.CreateDirectory(directory);
+            if (!IsCanonicallyWithinExecutionWorkspace(resolvedPath))
+                return $"DENIED [{PermissionReasonCodes.AccessDeniedOutsideWorkspace}]: Target is outside active workspace";
 
             _tracer?.LogActionEvent("FileAction", "FileTool", ExecutionTracer.ActionLogLevel.Info, "started", metadata: new Dictionary<string, object?>
             {
@@ -231,6 +235,8 @@ namespace LocalCursorAgent.Tools
                 return FormatDenied(decision);
 
             var resolvedPath = action.TargetPath!;
+            if (!IsCanonicallyWithinExecutionWorkspace(resolvedPath))
+                return $"DENIED [{PermissionReasonCodes.AccessDeniedOutsideWorkspace}]: Target is outside active workspace";
             var backupCapture = await _sandboxManager.CapturePathAsync(resolvedPath);
             if (!backupCapture.Succeeded)
                 return $"DENIED [{PermissionReasonCodes.BackupCaptureFailed}]: {backupCapture.Message}";
@@ -285,6 +291,8 @@ namespace LocalCursorAgent.Tools
 
             var resolvedSource = action.SourcePath!;
             var resolvedDestination = action.DestinationPath!;
+            if (!IsCanonicallyWithinExecutionWorkspace(resolvedSource) || !IsCanonicallyWithinExecutionWorkspace(resolvedDestination))
+                return $"DENIED [{PermissionReasonCodes.AccessDeniedOutsideWorkspace}]: Source or destination is outside active workspace";
             var backupCapture = await _sandboxManager.CapturePathAsync(resolvedSource);
             if (!backupCapture.Succeeded)
                 return $"DENIED [{PermissionReasonCodes.BackupCaptureFailed}]: {backupCapture.Message}";
@@ -296,6 +304,8 @@ namespace LocalCursorAgent.Tools
                     var destinationDirectory = Path.GetDirectoryName(resolvedDestination);
                     if (destinationDirectory != null && !Directory.Exists(destinationDirectory))
                         Directory.CreateDirectory(destinationDirectory);
+                    if (!IsCanonicallyWithinExecutionWorkspace(resolvedSource) || !IsCanonicallyWithinExecutionWorkspace(resolvedDestination))
+                        return $"DENIED [{PermissionReasonCodes.AccessDeniedOutsideWorkspace}]: Source or destination is outside active workspace";
                     File.Move(resolvedSource, resolvedDestination);
                 }
                 else
@@ -303,6 +313,8 @@ namespace LocalCursorAgent.Tools
                     var destinationDirectory = Path.GetDirectoryName(resolvedDestination);
                     if (destinationDirectory != null && !Directory.Exists(destinationDirectory))
                         Directory.CreateDirectory(destinationDirectory);
+                    if (!IsCanonicallyWithinExecutionWorkspace(resolvedSource) || !IsCanonicallyWithinExecutionWorkspace(resolvedDestination))
+                        return $"DENIED [{PermissionReasonCodes.AccessDeniedOutsideWorkspace}]: Source or destination is outside active workspace";
                     Directory.Move(resolvedSource, resolvedDestination);
                 }
 
@@ -468,6 +480,12 @@ namespace LocalCursorAgent.Tools
         {
             public static SanitizedWriteContent Valid(string content) => new(content, true, string.Empty);
             public static SanitizedWriteContent Invalid(string reason) => new(string.Empty, false, reason);
+        }
+
+        private bool IsCanonicallyWithinExecutionWorkspace(string path)
+        {
+            var root = _session.ExecutionWorkspaceRoot ?? _session.ActiveWorkspaceRoot;
+            return CanonicalPathPolicy.IsCanonicallyContained(root, path);
         }
     }
 }
