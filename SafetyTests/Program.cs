@@ -63,6 +63,7 @@ await RunApprovalLedgerReplayAcrossRestartRegression();
 await RunApprovalLedgerCorruptFailClosedRegression();
 await RunApprovalLedgerExpiredAndDeniedEventsRegression();
 await RunApprovalLedgerDeniedAppendFailureFailClosedRegression();
+await RunApprovalLedgerStartupCompactionDeterministicRegression();
 RunCommandRiskPolicyTokenizationRegression();
 RunExtractRequestedNewFilePath_ExtensionRegression();
 RunExtractRequestedNewFilePath_NoCreateIntentRegression();
@@ -3018,6 +3019,185 @@ static async Task RunApprovalLedgerDeniedAppendFailureFailClosedRegression()
         }
 
         Console.WriteLine("PASS ApprovalLedgerDeniedAppendFailureFailClosedRegression");
+    }
+    finally
+    {
+        if (Directory.Exists(runtimeRoot))
+            Directory.Delete(runtimeRoot, recursive: true);
+    }
+}
+
+static async Task RunApprovalLedgerStartupCompactionDeterministicRegression()
+{
+    var runtimeRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalLedgerCompaction_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(runtimeRoot);
+    try
+    {
+        var workspaceRoot = Path.Combine(runtimeRoot, "workspace");
+        Directory.CreateDirectory(workspaceRoot);
+        var now = new DateTime(2040, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        var proposals = new List<(string Id, DateTime IssuedAt, DateTime ExpiresAt, string SessionId)>
+        {
+            ("p-consumed", now.AddHours(-2), now.AddHours(2), "s1"),
+            ("p-expired", now.AddHours(-3), now.AddHours(-2), "s1"),
+            ("p-active", now.AddMinutes(-10), now.AddHours(1), "s1"),
+            ("p-stale-consumed", now.AddDays(-3), now.AddDays(-2), "s0")
+        };
+        var ledgerPath = Path.Combine(runtimeRoot, "approval-ledger-v2.jsonl");
+        var lines = new List<string>();
+        foreach (var p in proposals)
+        {
+            lines.Add(System.Text.Json.JsonSerializer.Serialize(new
+            {
+                schemaVersion = 2,
+                @event = "issued",
+                atUtc = p.IssuedAt,
+                sessionId = p.SessionId,
+                proposalId = p.Id,
+                expiresAtUtc = p.ExpiresAt,
+                reasonCode = "ACCESS_DENIED_DELETE_OPERATION",
+                actionType = "DeleteFile"
+            }));
+        }
+        lines.Add(System.Text.Json.JsonSerializer.Serialize(new { schemaVersion = 2, @event = "consumed", atUtc = now.AddMinutes(-30), sessionId = "s1", proposalId = "p-consumed" }));
+        lines.Add(System.Text.Json.JsonSerializer.Serialize(new { schemaVersion = 2, @event = "expired", atUtc = now.AddMinutes(-20), sessionId = "s1", proposalId = "p-expired", reasonCode = "APPROVAL_TOKEN_EXPIRED" }));
+        for (var i = 0; i < 14; i++)
+        {
+            lines.Add(System.Text.Json.JsonSerializer.Serialize(new
+            {
+                schemaVersion = 2,
+                @event = "denied_invalid_token",
+                atUtc = now.AddMinutes(-i),
+                sessionId = "s1",
+                proposalId = "p-active",
+                reasonCode = "HIGH_RISK_APPROVAL_REQUIRED"
+            }));
+        }
+        lines.Add(System.Text.Json.JsonSerializer.Serialize(new { schemaVersion = 2, @event = "consumed", atUtc = now.AddDays(-2), sessionId = "s0", proposalId = "p-stale-consumed" }));
+        // exceed startup compaction line threshold
+        for (var i = 0; i < 500; i++)
+        {
+            lines.Add(System.Text.Json.JsonSerializer.Serialize(new
+            {
+                schemaVersion = 2,
+                @event = "denied_invalid_token",
+                atUtc = now.AddDays(-8).AddMinutes(i),
+                sessionId = "old",
+                proposalId = "old-" + i.ToString("D3"),
+                reasonCode = "HIGH_RISK_APPROVAL_REQUIRED"
+            }));
+        }
+        await File.WriteAllLinesAsync(ledgerPath, lines, new UTF8Encoding(false));
+
+        var session = new AgentSessionContext
+        {
+            SessionId = "s1",
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        var guard = new PermissionGuard();
+        var consumedDenied = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = Path.Combine(workspaceRoot, "x.txt"),
+            Payload = "APPROVED:p-consumed"
+        });
+        AssertTrue(!consumedDenied.Allowed && consumedDenied.RequiresApproval, "Consumed replay must remain denied after startup compaction.");
+        var expiredDenied = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = Path.Combine(workspaceRoot, "x.txt"),
+            Payload = "APPROVED:p-expired"
+        });
+        AssertTrue(!expiredDenied.Allowed, "Expired replay must remain denied after startup compaction.");
+        var compactedText = await File.ReadAllTextAsync(ledgerPath);
+        AssertTrue(!compactedText.Contains("APPROVED:", StringComparison.Ordinal), "Compacted ledger must not persist raw approval token payload.");
+        AssertTrue(compactedText.Contains("\"event\":\"issued\"", StringComparison.Ordinal) && compactedText.Contains("\"proposalId\":\"p-active\"", StringComparison.Ordinal), "Active issued record must be retained after startup compaction.");
+        var compactedLines = (await File.ReadAllLinesAsync(ledgerPath)).Where(x => !string.IsNullOrWhiteSpace(x)).ToArray();
+        AssertTrue(compactedLines.Length < lines.Count, "Compaction should reduce ledger lines.");
+        var activeDeniedCount = compactedLines.Count(x => x.Contains("\"proposalId\":\"p-active\"", StringComparison.Ordinal) && x.Contains("\"event\":\"denied_", StringComparison.Ordinal));
+        AssertTrue(activeDeniedCount <= 10, "Denied diagnostics must be bounded per proposal.");
+        var compactedSnapshot1 = await File.ReadAllTextAsync(ledgerPath);
+        _ = new AgentSessionContext
+        {
+            SessionId = "s1-repeat",
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        var compactedSnapshot2 = await File.ReadAllTextAsync(ledgerPath);
+        AssertTrue(string.Equals(compactedSnapshot1, compactedSnapshot2, StringComparison.Ordinal), "Compacted ledger output ordering must be deterministic.");
+
+        var runtimeRootBad = Path.Combine(Path.GetTempPath(), "LcaApprovalLedgerCompactionBad_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(runtimeRootBad);
+        try
+        {
+            var badLedger = Path.Combine(runtimeRootBad, "approval-ledger-v2.jsonl");
+            await File.WriteAllTextAsync(badLedger, "{bad-json\n");
+            var badSession = new AgentSessionContext
+            {
+                SessionId = "bad",
+                RuntimeRoot = runtimeRootBad,
+                ActiveWorkspaceRoot = workspaceRoot,
+                AccessMode = AgentAccessMode.WorkspaceWrite,
+                ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRootBad }),
+                UtcNowProvider = () => now
+            };
+            var badGuard = new PermissionGuard();
+            var badHighRisk = badGuard.Evaluate(badSession, new ToolAction
+            {
+                Kind = ToolActionKind.RunCommand,
+                Payload = "nvidia-smi",
+                WorkingDirectory = workspaceRoot
+            });
+            AssertTrue(!badHighRisk.Allowed && badHighRisk.ReasonCodeString == PermissionReasonCodes.ApprovalStateUnavailable, "Corrupt source ledger must keep approval-gated fail-closed.");
+        }
+        finally
+        {
+            if (Directory.Exists(runtimeRootBad))
+                Directory.Delete(runtimeRootBad, recursive: true);
+        }
+
+        var runtimeRootReplaceFail = Path.Combine(Path.GetTempPath(), "LcaApprovalLedgerCompactionReplaceFail_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(runtimeRootReplaceFail);
+        try
+        {
+            var replaceLedger = Path.Combine(runtimeRootReplaceFail, "approval-ledger-v2.jsonl");
+            await File.WriteAllLinesAsync(replaceLedger, lines, new UTF8Encoding(false));
+            File.SetAttributes(replaceLedger, FileAttributes.ReadOnly);
+            var replaceSession = new AgentSessionContext
+            {
+                SessionId = "replace-fail",
+                RuntimeRoot = runtimeRootReplaceFail,
+                ActiveWorkspaceRoot = workspaceRoot,
+                AccessMode = AgentAccessMode.WorkspaceWrite,
+                ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRootReplaceFail }),
+                UtcNowProvider = () => now
+            };
+            var replaceGuard = new PermissionGuard();
+            var denied = replaceGuard.Evaluate(replaceSession, new ToolAction
+            {
+                Kind = ToolActionKind.RunCommand,
+                Payload = "nvidia-smi",
+                WorkingDirectory = workspaceRoot
+            });
+            AssertTrue(!denied.Allowed && denied.ReasonCodeString == PermissionReasonCodes.ApprovalStateUnavailable, "Compaction replace failure must fail closed for approval-gated actions.");
+            AssertTrue(File.Exists(replaceLedger), "Original ledger must remain present after replace failure.");
+            File.SetAttributes(replaceLedger, FileAttributes.Normal);
+        }
+        finally
+        {
+            if (Directory.Exists(runtimeRootReplaceFail))
+                Directory.Delete(runtimeRootReplaceFail, recursive: true);
+        }
+
+        Console.WriteLine("PASS ApprovalLedgerStartupCompactionDeterministicRegression");
     }
     finally
     {

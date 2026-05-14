@@ -162,6 +162,12 @@ public sealed class AgentSessionContext
             try
             {
                 _approvalLedger = new ApprovalLedgerV2(RuntimeRoot);
+                if (!_approvalLedger.TryCompactForStartup(UtcNowProvider(), ApprovalTokenTtlSecondsDefault, out _, out var compactError))
+                {
+                    _approvalLedgerHealthy = false;
+                    _approvalLedgerError = $"compact_failed: {compactError}";
+                    return;
+                }
                 if (!_approvalLedger.TryLoad(out var proposals, out var consumed, out var expired, out var loadError))
                 {
                     _approvalLedgerHealthy = false;
