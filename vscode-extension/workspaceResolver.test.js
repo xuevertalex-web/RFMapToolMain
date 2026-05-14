@@ -15,7 +15,7 @@ Module.prototype.require = function patchedRequire(request) {
   return originalRequire.apply(this, arguments);
 };
 
-const { resolveWorkspaceRoot } = require('./workspaceResolver');
+const { resolveWorkspaceRoot, canonicalPath } = require('./workspaceResolver');
 Module.prototype.require = originalRequire;
 
 function mkd(name) {
@@ -92,6 +92,22 @@ function run() {
     taskText: 'what can you do'
   });
   assert.strictEqual(path.resolve(existing.workspaceRoot).toLowerCase(), path.resolve(existingProjectRoot).toLowerCase(), 'existing initialized project folder should still resolve');
+
+  const sameCanonical = canonicalPath(existingProjectRoot);
+  const sameLexical = canonicalPath(path.join(existingProjectRoot, '.'));
+  assert.strictEqual(sameCanonical, sameLexical, 'canonical path should match lexical same-path variants');
+
+  const missingPath = path.join(existingProjectRoot, 'missing', 'child');
+  assert.strictEqual(canonicalPath(missingPath), path.resolve(missingPath).toLowerCase(), 'missing path should fallback to lexical canonicalization');
+
+  const symlinkRoot = mkd('lca-link-');
+  const symlinkPath = path.join(symlinkRoot, 'alias');
+  try {
+    fs.symlinkSync(existingProjectRoot, symlinkPath, 'junction');
+    assert.strictEqual(canonicalPath(symlinkPath), canonicalPath(existingProjectRoot), 'symlink/junction path should canonicalize to real target when available');
+  } catch (_) {
+    // Environment may disallow creating symlink/junction without privileges.
+  }
 }
 
 run();

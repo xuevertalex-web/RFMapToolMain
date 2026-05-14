@@ -172,7 +172,25 @@ function enforceBackendWorkspaceGuard(state, backendProjectPath, allowBackendWor
 }
 
 function samePath(left, right) {
-  return path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase();
+  return canonicalPath(left) === canonicalPath(right);
 }
 
-module.exports = { resolveWorkspaceRoot };
+function canonicalPath(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const resolved = path.resolve(raw);
+  try {
+    const nativeRealpath = fs.realpathSync && typeof fs.realpathSync.native === 'function'
+      ? fs.realpathSync.native(resolved)
+      : fs.realpathSync(resolved);
+    return path.resolve(nativeRealpath).toLowerCase();
+  } catch (_) {
+    try {
+      return path.resolve(fs.realpathSync(resolved)).toLowerCase();
+    } catch (_) {
+      return resolved.toLowerCase();
+    }
+  }
+}
+
+module.exports = { resolveWorkspaceRoot, canonicalPath };
