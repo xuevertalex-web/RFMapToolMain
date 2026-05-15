@@ -246,10 +246,7 @@ internal sealed class ApprovalLedgerV2
                 return false;
 
             var json = ToJsonLine(record, previousHash, out var currentHash);
-            var dir = Path.GetDirectoryName(_ledgerPath);
-            if (!string.IsNullOrWhiteSpace(dir))
-                Directory.CreateDirectory(dir);
-            File.AppendAllText(_ledgerPath, json + Environment.NewLine, Encoding.UTF8);
+            AppendLineDurably(_ledgerPath, json);
             if (!TryWriteAnchor(currentHash, out error))
                 return false;
             error = null;
@@ -478,6 +475,20 @@ internal sealed class ApprovalLedgerV2
         return JsonSerializer.Serialize(payload);
     }
 
+    private static void AppendLineDurably(string path, string line)
+    {
+        var dir = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(dir))
+            Directory.CreateDirectory(dir);
+
+        using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
+        using var writer = new StreamWriter(stream, Encoding.UTF8, bufferSize: 1024, leaveOpen: true);
+        writer.Write(line);
+        writer.Write(Environment.NewLine);
+        writer.Flush();
+        stream.Flush(true);
+    }
+
     private void WriteValidatedTemp(IEnumerable<string> lines)
     {
         var dir = Path.GetDirectoryName(CompactTempPath);
@@ -495,6 +506,8 @@ internal sealed class ApprovalLedgerV2
     {
         if (File.Exists(CompactBackupPath))
             File.Delete(CompactBackupPath);
+        // File.Replace is atomic for path visibility, but power-loss durability after replace
+        // remains dependent on OS/filesystem/cache behavior.
         File.Replace(CompactTempPath, _ledgerPath, CompactBackupPath, ignoreMetadataErrors: true);
         if (File.Exists(CompactBackupPath))
             File.Delete(CompactBackupPath);

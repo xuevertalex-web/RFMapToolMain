@@ -4139,9 +4139,53 @@ static async Task RunApprovalLedgerIntegrityChainRegression()
             Directory.Delete(compactRoot, recursive: true);
     }
 
+    // compaction failure after ledger replace but before anchor update must fail closed
+    var compactAnchorFailRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalLedgerIntegrityCompactionAnchorFail_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(compactAnchorFailRoot);
+    try
+    {
+        var workspace = Path.Combine(compactAnchorFailRoot, "workspace");
+        Directory.CreateDirectory(workspace);
+        var probePath = Path.Combine(workspace, "probe.txt");
+        await File.WriteAllTextAsync(probePath, "probe");
+        var now = new DateTime(2043, 1, 4, 12, 0, 0, DateTimeKind.Utc);
+        var generated = await WriteIntegrityLedgerAsync(compactAnchorFailRoot, now);
+        AssertTrue(generated.LineCount > 400, "Expected generated integrity ledger to exceed startup compaction threshold.");
+
+        var anchorPath = Path.Combine(compactAnchorFailRoot, "approval-ledger-v2.anchor.json");
+        using (new FileStream(anchorPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            using var failSession = CreateSession(compactAnchorFailRoot, workspace, "compact-anchor-fail", () => now);
+            var failGuard = new PermissionGuard();
+            var denied = failGuard.Evaluate(failSession, new ToolAction
+            {
+                Kind = ToolActionKind.RunCommand,
+                CommandExecutable = "nvidia-smi",
+                CommandArgs = Array.Empty<string>(),
+                Payload = "nvidia-smi",
+                WorkingDirectory = workspace
+            });
+            AssertTrue(!denied.Allowed && denied.ReasonCodeString == PermissionReasonCodes.ApprovalStateUnavailable, "Compaction anchor-update failure must fail closed for approval-gated actions.");
+            AssertTrue(!failSession.IsApprovalLedgerHealthy, "Compaction anchor-update failure must mark ledger unhealthy.");
+            var readDecision = failGuard.Evaluate(failSession, new ToolAction
+            {
+                Kind = ToolActionKind.ReadFile,
+                TargetPath = probePath
+            });
+            AssertTrue(readDecision.Allowed, "Compaction anchor-update failure must not impact read/analysis paths.");
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(compactAnchorFailRoot))
+            Directory.Delete(compactAnchorFailRoot, recursive: true);
+    }
+
     // append/update failure fail-closed
     var appendFailRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalLedgerIntegrityAppendFail_" + Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(appendFailRoot);
+    AgentSessionContext? appendSession = null;
+    AgentSessionContext? appendReplay = null;
     try
     {
         var appendWorkspace = Path.Combine(appendFailRoot, "workspace");
@@ -4150,7 +4194,7 @@ static async Task RunApprovalLedgerIntegrityChainRegression()
         await File.WriteAllTextAsync(appendTarget, "append-fail");
         var now = new DateTime(2043, 1, 5, 0, 0, 0, DateTimeKind.Utc);
 
-        var appendSession = CreateSession(appendFailRoot, appendWorkspace, "integrity-append-fail", () => now);
+        appendSession = CreateSession(appendFailRoot, appendWorkspace, "integrity-append-fail", () => now);
         var appendGuard = new PermissionGuard();
         var appendIssued = appendGuard.Evaluate(appendSession, new ToolAction
         {
@@ -4160,7 +4204,7 @@ static async Task RunApprovalLedgerIntegrityChainRegression()
         AssertTrue(appendIssued.RequiresApproval && appendIssued.ApprovalProposal is not null, "Expected proposal for append-failure simulation.");
         var appendProposal = appendIssued.ApprovalProposal!;
         var anchorPath = Path.Combine(appendFailRoot, "approval-ledger-v2.anchor.json");
-        using (new FileStream(anchorPath, FileMode.Open, FileAccess.Read, FileShare.None))
+        using (new FileStream(anchorPath, FileMode.Open, FileAccess.Read, FileShare.Read))
         {
             var appendDenied = appendGuard.Evaluate(appendSession, new ToolAction
             {
@@ -4179,9 +4223,34 @@ static async Task RunApprovalLedgerIntegrityChainRegression()
             TargetPath = appendTarget
         });
         AssertTrue(appendRead.Allowed, "Append failure fail-closed must not impact read/analysis paths.");
+
+        appendSession.Dispose();
+        appendSession = null;
+
+        appendReplay = CreateSession(appendFailRoot, appendWorkspace, "integrity-append-fail", () => now.AddMinutes(1));
+        var appendReplayGuard = new PermissionGuard();
+        var replayDenied = appendReplayGuard.Evaluate(appendReplay, new ToolAction
+        {
+            Kind = ToolActionKind.RunCommand,
+            CommandExecutable = "nvidia-smi",
+            CommandArgs = Array.Empty<string>(),
+            Payload = "nvidia-smi",
+            WorkingDirectory = appendWorkspace
+        });
+        AssertTrue(!replayDenied.Allowed && replayDenied.ReasonCodeString == PermissionReasonCodes.ApprovalStateUnavailable, "Append success with anchor update failure must fail closed on next load.");
+        var replayRead = appendReplayGuard.Evaluate(appendReplay, new ToolAction
+        {
+            Kind = ToolActionKind.ReadFile,
+            TargetPath = appendTarget
+        });
+        AssertTrue(replayRead.Allowed, "Replay fail-closed state after append/anchor split must not impact read/analysis paths.");
+        appendReplay.Dispose();
+        appendReplay = null;
     }
     finally
     {
+        appendReplay?.Dispose();
+        appendSession?.Dispose();
         if (Directory.Exists(appendFailRoot))
             Directory.Delete(appendFailRoot, recursive: true);
     }
