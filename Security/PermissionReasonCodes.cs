@@ -26,6 +26,9 @@ public static class PermissionReasonCodes
     public const string ApprovalRunMismatch = "APPROVAL_RUN_MISMATCH";
     public const string ApprovalStateUnavailable = "APPROVAL_STATE_UNAVAILABLE";
     public const string HighRiskApprovalRequired = "HIGH_RISK_APPROVAL_REQUIRED";
+    public const string CommandUnsupportedShellSyntax = "COMMAND_UNSUPPORTED_SHELL_SYNTAX";
+    public const string CommandHardBlocked = "COMMAND_HARD_BLOCKED";
+    public const string CommandMalformed = "COMMAND_MALFORMED";
     public const string ToolDeniedByPolicy = "TOOL_DENIED_BY_POLICY";
     public const string WorkspaceRootProtected = "WORKSPACE_ROOT_PROTECTED";
     public const string WorkspaceNotAllowed = "WORKSPACE_NOT_ALLOWED";

@@ -67,6 +67,7 @@ await RunApprovalLedgerDeniedAppendFailureFailClosedRegression();
 await RunApprovalLedgerStartupCompactionDeterministicRegression();
 RunCommandRiskPolicyTokenizationRegression();
 RunCanonicalCommandPolicyDecisionRegression();
+await RunPermissionGuardCanonicalCommandPolicyRegression();
 RunExtractRequestedNewFilePath_ExtensionRegression();
 RunExtractRequestedNewFilePath_NoCreateIntentRegression();
 RunExtractRequestedNewFilePath_NoExtensionRegression();
@@ -3654,6 +3655,94 @@ static void RunCanonicalCommandPolicyDecisionRegression()
     }
 
     Console.WriteLine("PASS RunCanonicalCommandPolicyDecisionRegression");
+}
+
+static async Task RunPermissionGuardCanonicalCommandPolicyRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    await File.WriteAllTextAsync(Path.Combine(workspaceRoot, "read-safe.txt"), "ok");
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+
+    var guard = new PermissionGuard();
+    PermissionDecision Run(string payload, string? runId = null) => guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.RunCommand,
+        WorkingDirectory = workspaceRoot,
+        Payload = payload,
+        RunId = runId
+    });
+
+    var safe = Run("dotnet --version");
+    AssertTrue(safe.Allowed, "Expected safe command to be allowed by canonical command policy.");
+
+    var npmRun = Run("npm run build");
+    AssertTrue(!npmRun.Allowed && npmRun.RequiresApproval, "Expected npm run build to require approval.");
+    AssertTrue(npmRun.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, "Expected npm run build high-risk approval reason.");
+
+    var npxRun = Run("npx something");
+    AssertTrue(!npxRun.Allowed && npxRun.RequiresApproval, "Expected npx command to require approval.");
+    AssertTrue(npxRun.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, "Expected npx high-risk approval reason.");
+
+    foreach (var destructive in new[]
+    {
+        "git reset --hard",
+        "git clean -xdf",
+        "git restore --worktree --staged ."
+    })
+    {
+        var decision = Run(destructive);
+        AssertTrue(!decision.Allowed && decision.RequiresApproval, $"Expected '{destructive}' to require approval.");
+        AssertTrue(decision.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, $"Expected '{destructive}' high-risk approval reason.");
+    }
+
+    var shellMeta = Run("echo ok && whoami");
+    AssertTrue(!shellMeta.Allowed, "Expected shell/meta syntax command to be denied.");
+    AssertTrue(!shellMeta.RequiresApproval, "Expected shell/meta syntax command to be denied without approval proposal.");
+    AssertTrue(shellMeta.ReasonCodeString == PermissionReasonCodes.CommandUnsupportedShellSyntax, "Expected deterministic shell/meta denial reason.");
+    AssertTrue(shellMeta.ApprovalProposal is null, "Expected no approval proposal for unsupported shell/meta syntax.");
+
+    var malformed = Run("   ");
+    AssertTrue(!malformed.Allowed, "Expected malformed command to be denied.");
+    AssertTrue(!malformed.RequiresApproval, "Expected malformed command to be denied without approval proposal.");
+    AssertTrue(malformed.ReasonCodeString == PermissionReasonCodes.CommandMalformed, "Expected deterministic malformed-command denial reason.");
+
+    var encoded = Run("powershell -EncodedCommand SQBlAHgA");
+    AssertTrue(!encoded.Allowed, "Expected encoded PowerShell command not to be allowed.");
+    AssertTrue(
+        (encoded.RequiresApproval && encoded.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired) ||
+        (!encoded.RequiresApproval && encoded.ReasonCodeString == PermissionReasonCodes.CommandHardBlocked),
+        "Expected encoded PowerShell handling to match canonical command decision category.");
+
+    var highRisk = Run("nvidia-smi");
+    AssertTrue(!highRisk.Allowed && highRisk.RequiresApproval && highRisk.ApprovalProposal is not null, "Expected high-risk command to require approval proposal.");
+    var token = $"APPROVED:{highRisk.ApprovalProposal!.ProposalId}";
+    var approved = Run($"nvidia-smi {token}", highRisk.ApprovalProposal.RunId);
+    AssertTrue(approved.Allowed, "Expected exact approval token with matching runId to allow high-risk command.");
+
+    var genericMarker = Run("nvidia-smi APPROVED:true");
+    AssertTrue(!genericMarker.Allowed, "Expected APPROVED:true marker to remain denied.");
+    AssertTrue(genericMarker.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, "Expected deterministic generic marker denial reason.");
+
+    var readAllowed = guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.ReadFile,
+        TargetPath = Path.Combine(workspaceRoot, "read-safe.txt")
+    });
+    AssertTrue(readAllowed.Allowed, "Expected read/analysis path to remain unaffected by command-policy integration.");
+
+    Console.WriteLine("PASS RunPermissionGuardCanonicalCommandPolicyRegression");
 }
 
 static async Task RunDestructiveFileApprovalMarkerRegression()

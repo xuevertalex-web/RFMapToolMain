@@ -13,6 +13,24 @@ internal static class CommandRiskPolicy
     private const string ReasonInvalidCommand = "INVALID_COMMAND";
     private const string ReasonUnsupportedShellMetaSyntax = "UNSUPPORTED_SHELL_META_SYNTAX";
 
+    public static CommandPolicyInput BuildInputFromRawCommand(string? rawCommandText, string? workingDirectory = null, ToolActionKind? commandKind = null, string? source = null)
+    {
+        var normalizedRaw = NormalizeCommandPayload(rawCommandText);
+        var tokens = Tokenize(normalizedRaw);
+        var executable = tokens.Count > 0 ? tokens[0] : null;
+        var args = tokens.Count > 1 ? tokens.Skip(1).ToArray() : null;
+
+        return new CommandPolicyInput
+        {
+            Executable = executable,
+            Args = args,
+            RawCommandText = normalizedRaw,
+            WorkingDirectory = workingDirectory,
+            CommandKind = commandKind,
+            Source = source
+        };
+    }
+
     public static CommandPolicyDecision Evaluate(CommandPolicyInput input)
     {
         var normalized = NormalizeInput(input);

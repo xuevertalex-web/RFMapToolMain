@@ -22,5 +22,8 @@ public enum PermissionReasonCode
     ApprovalRunMismatch,
     ApprovalStateUnavailable,
     HighRiskApprovalRequired,
+    CommandUnsupportedShellSyntax,
+    CommandHardBlocked,
+    CommandMalformed,
     ToolDeniedByPolicy
 }

@@ -89,20 +89,39 @@ public sealed class PermissionGuard
 
         if (action.Kind == ToolActionKind.RunCommand)
         {
-            if (CommandRiskPolicy.IsHighRiskCommand(action.Payload))
+            var policyInput = CommandRiskPolicy.BuildInputFromRawCommand(action.Payload, action.WorkingDirectory, action.Kind, "permission_guard");
+            var commandDecision = CommandRiskPolicy.Evaluate(policyInput);
+            var commandTarget = normalizedTarget ?? normalizedWorkspace;
+            switch (commandDecision.Category)
             {
-                if (!session.IsApprovalLedgerHealthy)
-                    return PermissionDecision.Deny(PermissionReasonCode.ApprovalStateUnavailable, $"Approval state unavailable: {session.ApprovalLedgerError}");
-                var highRiskValidation = ValidateBoundApprovalTokenForAction(session, action, PermissionReasonCode.HighRiskApprovalRequired, normalizedTarget ?? normalizedWorkspace, normalizedWorkspace);
-                if (!highRiskValidation.Allowed)
-                {
-                    if (CommandRiskPolicy.HasExplicitApprovalMarker(action.Payload))
-                        return PermissionDecision.Deny(highRiskValidation.ReasonCode, highRiskValidation.Message, normalizedTarget ?? normalizedWorkspace, normalizedWorkspace);
-                    return CreateApprovalRequired(session, action, PermissionReasonCode.HighRiskApprovalRequired, "High-risk host/system/network-impacting command requires explicit approval", normalizedTarget ?? normalizedWorkspace, normalizedWorkspace, CommandRiskPolicy.ResolveCommandRiskLevel(action.Payload));
-                }
-            }
+                case CommandPolicyCategory.Allowed:
+                    return PermissionDecision.Allow(commandTarget, normalizedWorkspace);
 
-            return PermissionDecision.Allow(normalizedTarget ?? normalizedWorkspace, normalizedWorkspace);
+                case CommandPolicyCategory.HighRiskApprovalRequired:
+                {
+                    if (!session.IsApprovalLedgerHealthy)
+                        return PermissionDecision.Deny(PermissionReasonCode.ApprovalStateUnavailable, $"Approval state unavailable: {session.ApprovalLedgerError}");
+                    var highRiskValidation = ValidateBoundApprovalTokenForAction(session, action, PermissionReasonCode.HighRiskApprovalRequired, commandTarget, normalizedWorkspace);
+                    if (!highRiskValidation.Allowed)
+                    {
+                        if (CommandRiskPolicy.HasExplicitApprovalMarker(action.Payload))
+                            return PermissionDecision.Deny(highRiskValidation.ReasonCode, highRiskValidation.Message, commandTarget, normalizedWorkspace);
+                        return CreateApprovalRequired(session, action, PermissionReasonCode.HighRiskApprovalRequired, "High-risk host/system/network-impacting command requires explicit approval", commandTarget, normalizedWorkspace, commandDecision.RiskLevel);
+                    }
+
+                    return PermissionDecision.Allow(commandTarget, normalizedWorkspace);
+                }
+
+                case CommandPolicyCategory.UnsupportedShellMetaSyntax:
+                    return PermissionDecision.Deny(PermissionReasonCode.CommandUnsupportedShellSyntax, "Command contains unsupported shell/meta syntax and cannot be approved.", commandTarget, normalizedWorkspace);
+
+                case CommandPolicyCategory.HardBlocked:
+                    return PermissionDecision.Deny(PermissionReasonCode.CommandHardBlocked, "Command is hard-blocked by command policy and cannot be approved.", commandTarget, normalizedWorkspace);
+
+                case CommandPolicyCategory.InvalidMalformed:
+                default:
+                    return PermissionDecision.Deny(PermissionReasonCode.CommandMalformed, "Command is malformed or missing executable/arguments.", commandTarget, normalizedWorkspace);
+            }
         }
 
         if (normalizedTarget is not null && session.ProtectedPathPolicy.IsProtected(normalizedTarget) && !IsWithinExecutionWorkspace(normalizedTarget, session))

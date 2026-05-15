@@ -31,6 +31,9 @@ public sealed class PermissionDecision
         PermissionReasonCode.ApprovalRunMismatch => PermissionReasonCodes.ApprovalRunMismatch,
         PermissionReasonCode.ApprovalStateUnavailable => PermissionReasonCodes.ApprovalStateUnavailable,
         PermissionReasonCode.HighRiskApprovalRequired => PermissionReasonCodes.HighRiskApprovalRequired,
+        PermissionReasonCode.CommandUnsupportedShellSyntax => PermissionReasonCodes.CommandUnsupportedShellSyntax,
+        PermissionReasonCode.CommandHardBlocked => PermissionReasonCodes.CommandHardBlocked,
+        PermissionReasonCode.CommandMalformed => PermissionReasonCodes.CommandMalformed,
         PermissionReasonCode.ToolDeniedByPolicy => PermissionReasonCodes.ToolDeniedByPolicy,
         _ => PermissionReasonCodes.ToolDeniedByPolicy
     };
