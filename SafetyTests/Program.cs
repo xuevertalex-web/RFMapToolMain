@@ -3,6 +3,8 @@ using System.Text;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
+using System.Globalization;
+using System.Security.Cryptography;
 using LocalCursorAgent.Configuration;
 using LocalCursorAgent.Context;
 using LocalCursorAgent.Core;
@@ -66,6 +68,7 @@ await RunApprovalLedgerCorruptFailClosedRegression();
 await RunApprovalLedgerExpiredAndDeniedEventsRegression();
 await RunApprovalLedgerDeniedAppendFailureFailClosedRegression();
 await RunApprovalLedgerStartupCompactionDeterministicRegression();
+await RunApprovalLedgerIntegrityChainRegression();
 await RunApprovalCapabilityFingerprintSchemaRegression();
 await RunApprovalCapabilityFingerprintEnforcementRegression();
 RunCommandRiskPolicyTokenizationRegression();
@@ -2939,6 +2942,9 @@ static async Task RunApprovalRunIdBindingRegression()
                 actionType = postProposal.ActionType
             });
             await File.WriteAllTextAsync(postLedgerPath, rewrittenPostCutover + Environment.NewLine, new UTF8Encoding(false));
+            var postAnchorPath = Path.Combine(postCutoverRoot, "approval-ledger-v2.anchor.json");
+            if (File.Exists(postAnchorPath))
+                File.Delete(postAnchorPath);
 
             var postLoad = new AgentSessionContext
             {
@@ -3006,6 +3012,9 @@ static async Task RunApprovalRunIdBindingRegression()
                 actionType = legacyProposal.ActionType
             });
             await File.WriteAllTextAsync(legacyLedgerPath, rewrittenLegacy + Environment.NewLine, new UTF8Encoding(false));
+            var legacyAnchorPath = Path.Combine(legacyRoot, "approval-ledger-v2.anchor.json");
+            if (File.Exists(legacyAnchorPath))
+                File.Delete(legacyAnchorPath);
 
             var legacyLoad = new AgentSessionContext
             {
@@ -3521,6 +3530,537 @@ static async Task RunApprovalLedgerStartupCompactionDeterministicRegression()
     }
 }
 
+static async Task RunApprovalLedgerIntegrityChainRegression()
+{
+    static AgentSessionContext CreateSession(string runtimeRoot, string workspaceRoot, string sessionId, Func<DateTime> utcNowProvider) =>
+        new()
+        {
+            SessionId = sessionId,
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = utcNowProvider
+        };
+
+    static string NormalizeUtc(DateTime value) =>
+        value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+
+    static string? NormalizeOptionalValue(string? value)
+    {
+        var normalized = value?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    static string? NormalizeOptionalHash(string? value)
+    {
+        var normalized = NormalizeOptionalValue(value);
+        return normalized?.ToLowerInvariant();
+    }
+
+    static bool IsValidSha256Hash(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length != 64)
+            return false;
+        foreach (var ch in value)
+        {
+            if (!char.IsDigit(ch) && (ch < 'a' || ch > 'f'))
+                return false;
+        }
+
+        return true;
+    }
+
+    static string ComputeIntegrityEventHash(
+        int schemaVersion,
+        string evt,
+        DateTime atUtc,
+        string sessionId,
+        string proposalId,
+        string? runId,
+        DateTime? expiresAtUtc,
+        string reasonCode,
+        string actionType,
+        CapabilityFingerprintV1? capabilityFingerprint,
+        string? prevEventHash)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = false }))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("integrityVersion", 1);
+            var normalizedPrevHash = NormalizeOptionalHash(prevEventHash);
+            if (normalizedPrevHash is null)
+                writer.WriteNull("prevEventHash");
+            else
+                writer.WriteString("prevEventHash", normalizedPrevHash);
+            writer.WriteNumber("schemaVersion", schemaVersion);
+            writer.WriteString("event", evt);
+            writer.WriteString("atUtc", NormalizeUtc(atUtc));
+            writer.WriteString("sessionId", sessionId);
+            writer.WriteString("proposalId", proposalId);
+            var normalizedRunId = NormalizeOptionalValue(runId);
+            if (normalizedRunId is null)
+                writer.WriteNull("runId");
+            else
+                writer.WriteString("runId", normalizedRunId);
+            if (expiresAtUtc.HasValue)
+                writer.WriteString("expiresAtUtc", NormalizeUtc(expiresAtUtc.Value));
+            else
+                writer.WriteNull("expiresAtUtc");
+            writer.WriteString("reasonCode", reasonCode);
+            writer.WriteString("actionType", actionType);
+            if (capabilityFingerprint is null)
+            {
+                writer.WriteNull("capabilityFingerprint");
+            }
+            else
+            {
+                writer.WritePropertyName("capabilityFingerprint");
+                writer.WriteStartObject();
+                writer.WriteNumber("fingerprintVersion", capabilityFingerprint.FingerprintVersion);
+                writer.WriteString("actionKind", capabilityFingerprint.ActionKind);
+                writer.WriteString("capabilityClass", capabilityFingerprint.CapabilityClass);
+                writer.WriteNumber("capabilityTier", capabilityFingerprint.CapabilityTier);
+                writer.WriteString("capabilityGate", capabilityFingerprint.CapabilityGate);
+                var normalizedCategory = NormalizeOptionalValue(capabilityFingerprint.PolicyCategory);
+                if (normalizedCategory is null)
+                    writer.WriteNull("policyCategory");
+                else
+                    writer.WriteString("policyCategory", normalizedCategory);
+                writer.WriteString("actionProfile", capabilityFingerprint.ActionProfile);
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndObject();
+        }
+
+        var hash = SHA256.HashData(stream.ToArray());
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    static void AssertIntegrityChainAndAnchor(string ledgerPath, string anchorPath)
+    {
+        var lines = File.ReadAllLines(ledgerPath, Encoding.UTF8)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToArray();
+        string? previousHash = null;
+        foreach (var line in lines)
+        {
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            AssertTrue(root.TryGetProperty("integrityVersion", out var integrityVersionProp) && integrityVersionProp.ValueKind == JsonValueKind.Number && integrityVersionProp.GetInt32() == 1, "Expected integrityVersion=1 on ledger record.");
+            AssertTrue(root.TryGetProperty("prevEventHash", out var prevProp), "Expected prevEventHash on ledger record.");
+            AssertTrue(root.TryGetProperty("eventHash", out var hashProp) && hashProp.ValueKind == JsonValueKind.String, "Expected eventHash on ledger record.");
+
+            var storedPrevHash = prevProp.ValueKind == JsonValueKind.Null ? null : prevProp.GetString();
+            var storedEventHash = hashProp.GetString();
+            AssertTrue(!string.IsNullOrWhiteSpace(storedEventHash) && IsValidSha256Hash(storedEventHash), "Expected valid lowercase SHA-256 eventHash.");
+
+            DateTime? expiresAtUtc = null;
+            if (root.TryGetProperty("expiresAtUtc", out var expiresProp))
+                expiresAtUtc = expiresProp.ValueKind == JsonValueKind.Null ? null : expiresProp.GetDateTime();
+            var reasonCode = root.TryGetProperty("reasonCode", out var reasonProp) && reasonProp.ValueKind == JsonValueKind.String
+                ? reasonProp.GetString() ?? string.Empty
+                : string.Empty;
+            var actionType = root.TryGetProperty("actionType", out var actionTypeProp) && actionTypeProp.ValueKind == JsonValueKind.String
+                ? actionTypeProp.GetString() ?? string.Empty
+                : string.Empty;
+            var runId = root.TryGetProperty("runId", out var runIdProp) && runIdProp.ValueKind == JsonValueKind.String
+                ? runIdProp.GetString()
+                : null;
+            CapabilityFingerprintV1? capabilityFingerprint = null;
+            if (root.TryGetProperty("capabilityFingerprint", out var fingerprintProp) && fingerprintProp.ValueKind == JsonValueKind.Object)
+            {
+                capabilityFingerprint = new CapabilityFingerprintV1
+                {
+                    FingerprintVersion = fingerprintProp.GetProperty("fingerprintVersion").GetInt32(),
+                    ActionKind = fingerprintProp.GetProperty("actionKind").GetString() ?? string.Empty,
+                    CapabilityClass = fingerprintProp.GetProperty("capabilityClass").GetString() ?? string.Empty,
+                    CapabilityTier = fingerprintProp.GetProperty("capabilityTier").GetInt32(),
+                    CapabilityGate = fingerprintProp.GetProperty("capabilityGate").GetString() ?? string.Empty,
+                    PolicyCategory = fingerprintProp.TryGetProperty("policyCategory", out var policyCategoryProp) && policyCategoryProp.ValueKind == JsonValueKind.String
+                        ? policyCategoryProp.GetString()
+                        : null,
+                    ActionProfile = fingerprintProp.GetProperty("actionProfile").GetString() ?? string.Empty
+                };
+            }
+
+            var expectedHash = ComputeIntegrityEventHash(
+                schemaVersion: 2,
+                evt: root.GetProperty("event").GetString() ?? string.Empty,
+                atUtc: root.GetProperty("atUtc").GetDateTime(),
+                sessionId: root.GetProperty("sessionId").GetString() ?? string.Empty,
+                proposalId: root.GetProperty("proposalId").GetString() ?? string.Empty,
+                runId: runId,
+                expiresAtUtc: expiresAtUtc,
+                reasonCode: reasonCode,
+                actionType: actionType,
+                capabilityFingerprint: capabilityFingerprint,
+                prevEventHash: previousHash);
+            AssertTrue(string.Equals((storedPrevHash ?? string.Empty).Trim().ToLowerInvariant(), (previousHash ?? string.Empty).Trim().ToLowerInvariant(), StringComparison.Ordinal), "Expected prevEventHash to match prior event hash.");
+            AssertTrue(string.Equals((storedEventHash ?? string.Empty).Trim().ToLowerInvariant(), expectedHash, StringComparison.Ordinal), "Expected eventHash to match deterministic canonical hash.");
+            previousHash = storedEventHash;
+        }
+
+        var anchorText = File.ReadAllText(anchorPath, Encoding.UTF8);
+        using var anchorDoc = JsonDocument.Parse(anchorText);
+        var anchorRoot = anchorDoc.RootElement;
+        AssertTrue(anchorRoot.TryGetProperty("integrityVersion", out var anchorVersionProp) && anchorVersionProp.GetInt32() == 1, "Expected integrity anchor version=1.");
+        var anchorTailHash = anchorRoot.TryGetProperty("tailEventHash", out var tailProp) && tailProp.ValueKind == JsonValueKind.String
+            ? tailProp.GetString()
+            : null;
+        AssertTrue(string.Equals((anchorTailHash ?? string.Empty).Trim().ToLowerInvariant(), (previousHash ?? string.Empty).Trim().ToLowerInvariant(), StringComparison.Ordinal), "Expected anchor tail hash to match ledger tail hash.");
+    }
+
+    static string TamperReasonCode(string line)
+    {
+        const string marker = "\"reasonCode\":\"";
+        var markerIndex = line.IndexOf(marker, StringComparison.Ordinal);
+        if (markerIndex < 0)
+            throw new InvalidOperationException("Could not locate reasonCode marker for tamper test.");
+        var valueStart = markerIndex + marker.Length;
+        return line.Insert(valueStart, "TAMPERED_");
+    }
+
+    static string? NormalizeOptionalRunId(string? runId)
+    {
+        var normalized = runId?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    static async Task<(int LineCount, string TailHash)> WriteIntegrityLedgerAsync(string runtimeRoot, DateTime nowUtc)
+    {
+        var ledgerPath = Path.Combine(runtimeRoot, "approval-ledger-v2.jsonl");
+        var anchorPath = Path.Combine(runtimeRoot, "approval-ledger-v2.anchor.json");
+        var lines = new List<string>();
+        string? previousHash = null;
+
+        string AppendIssued(string proposalId, DateTime issuedAtUtc, DateTime expiresAtUtc, string sessionId, string runId)
+        {
+            var eventHash = ComputeIntegrityEventHash(
+                schemaVersion: 2,
+                evt: "issued",
+                atUtc: issuedAtUtc,
+                sessionId: sessionId,
+                proposalId: proposalId,
+                runId: NormalizeOptionalRunId(runId),
+                expiresAtUtc: expiresAtUtc,
+                reasonCode: "ACCESS_DENIED_DELETE_OPERATION",
+                actionType: nameof(ToolActionKind.DeleteFile),
+                capabilityFingerprint: null,
+                prevEventHash: previousHash);
+            var payload = new
+            {
+                schemaVersion = 2,
+                @event = "issued",
+                atUtc = issuedAtUtc,
+                sessionId,
+                proposalId,
+                runId,
+                expiresAtUtc,
+                reasonCode = "ACCESS_DENIED_DELETE_OPERATION",
+                actionType = nameof(ToolActionKind.DeleteFile),
+                integrityVersion = 1,
+                prevEventHash = previousHash,
+                eventHash
+            };
+            lines.Add(JsonSerializer.Serialize(payload));
+            previousHash = eventHash;
+            return eventHash;
+        }
+
+        void AppendDenied(string proposalId, DateTime atUtc, string sessionId, string runId)
+        {
+            var eventHash = ComputeIntegrityEventHash(
+                schemaVersion: 2,
+                evt: "denied_invalid_token",
+                atUtc: atUtc,
+                sessionId: sessionId,
+                proposalId: proposalId,
+                runId: NormalizeOptionalRunId(runId),
+                expiresAtUtc: null,
+                reasonCode: PermissionReasonCodes.HighRiskApprovalRequired,
+                actionType: string.Empty,
+                capabilityFingerprint: null,
+                prevEventHash: previousHash);
+            var payload = new
+            {
+                schemaVersion = 2,
+                @event = "denied_invalid_token",
+                atUtc,
+                sessionId,
+                proposalId,
+                reasonCode = PermissionReasonCodes.HighRiskApprovalRequired,
+                runId,
+                integrityVersion = 1,
+                prevEventHash = previousHash,
+                eventHash
+            };
+            lines.Add(JsonSerializer.Serialize(payload));
+            previousHash = eventHash;
+        }
+
+        _ = AppendIssued("active-issued", nowUtc.AddMinutes(-5), nowUtc.AddHours(1), "compact-session", "compact-run");
+        for (var i = 0; i < 500; i++)
+            AppendDenied("old-" + i.ToString("D3"), nowUtc.AddDays(-7).AddMinutes(i), "old-session", "old-run-" + i.ToString("D3"));
+
+        await File.WriteAllLinesAsync(ledgerPath, lines, new UTF8Encoding(false));
+        await File.WriteAllTextAsync(anchorPath, JsonSerializer.Serialize(new
+        {
+            integrityVersion = 1,
+            tailEventHash = previousHash
+        }), new UTF8Encoding(false));
+        return (lines.Count, previousHash ?? string.Empty);
+    }
+
+    // tampered payload detection + sensitive-payload checks
+    var tamperRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalLedgerIntegrityTamper_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tamperRoot);
+    try
+    {
+        var tamperWorkspace = Path.Combine(tamperRoot, "workspace");
+        Directory.CreateDirectory(tamperWorkspace);
+        var tamperTarget = Path.Combine(tamperWorkspace, "tamper-target.txt");
+        await File.WriteAllTextAsync(tamperTarget, "tamper");
+        var now = new DateTime(2043, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        var tamperSession = CreateSession(tamperRoot, tamperWorkspace, "integrity-tamper", () => now);
+        var tamperGuard = new PermissionGuard();
+        var issued = tamperGuard.Evaluate(tamperSession, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = tamperTarget
+        });
+        AssertTrue(issued.RequiresApproval && issued.ApprovalProposal is not null, "Expected approval proposal for tamper integrity test.");
+        var issuedProposal = issued.ApprovalProposal!;
+        var issuedToken = issued.ExpectedApprovalToken ?? string.Empty;
+        var allowed = tamperGuard.Evaluate(tamperSession, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = tamperTarget,
+            RunId = issuedProposal.RunId,
+            Payload = issuedToken
+        });
+        AssertTrue(allowed.Allowed, "Expected matching approval before tamper.");
+
+        var ledgerPath = Path.Combine(tamperRoot, "approval-ledger-v2.jsonl");
+        var anchorPath = Path.Combine(tamperRoot, "approval-ledger-v2.anchor.json");
+        AssertTrue(File.Exists(ledgerPath), "Expected approval ledger to exist.");
+        AssertTrue(File.Exists(anchorPath), "Expected approval ledger anchor to exist.");
+        AssertIntegrityChainAndAnchor(ledgerPath, anchorPath);
+
+        var ledgerText = await File.ReadAllTextAsync(ledgerPath);
+        AssertTrue(!ledgerText.Contains("APPROVED:", StringComparison.Ordinal), "Integrity ledger must not persist raw approval tokens.");
+        AssertTrue(!ledgerText.Contains(tamperTarget, StringComparison.Ordinal), "Integrity ledger must not persist raw target paths.");
+        AssertTrue(!ledgerText.Contains("\"command\":", StringComparison.OrdinalIgnoreCase), "Integrity ledger must not persist raw command fields.");
+        AssertTrue(!ledgerText.Contains("\"task\":", StringComparison.OrdinalIgnoreCase), "Integrity ledger must not persist raw task fields.");
+        AssertTrue(!ledgerText.Contains("\"secret\":", StringComparison.OrdinalIgnoreCase), "Integrity ledger must not persist secrets.");
+        AssertTrue(!ledgerText.Contains("\"modelOutput\":", StringComparison.OrdinalIgnoreCase), "Integrity ledger must not persist model output.");
+
+        var tamperedLines = (await File.ReadAllLinesAsync(ledgerPath))
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToList();
+        var issuedIndex = tamperedLines.FindIndex(line => line.Contains("\"event\":\"issued\"", StringComparison.Ordinal));
+        AssertTrue(issuedIndex >= 0, "Expected issued record for tamper mutation.");
+        tamperedLines[issuedIndex] = TamperReasonCode(tamperedLines[issuedIndex]);
+        await File.WriteAllLinesAsync(ledgerPath, tamperedLines, new UTF8Encoding(false));
+
+        var tamperReplay = CreateSession(tamperRoot, tamperWorkspace, "integrity-tamper", () => now.AddMinutes(1));
+        var tamperReplayGuard = new PermissionGuard();
+        var tamperDenied = tamperReplayGuard.Evaluate(tamperReplay, new ToolAction
+        {
+            Kind = ToolActionKind.RunCommand,
+            CommandExecutable = "nvidia-smi",
+            CommandArgs = Array.Empty<string>(),
+            Payload = "nvidia-smi",
+            WorkingDirectory = tamperWorkspace
+        });
+        AssertTrue(!tamperDenied.Allowed && tamperDenied.ReasonCodeString == PermissionReasonCodes.ApprovalStateUnavailable, "Tampered ledger payload must fail closed.");
+        var tamperRead = tamperReplayGuard.Evaluate(tamperReplay, new ToolAction
+        {
+            Kind = ToolActionKind.ReadFile,
+            TargetPath = tamperTarget
+        });
+        AssertTrue(tamperRead.Allowed, "Ledger tamper fail-closed must not impact read/analysis paths.");
+    }
+    finally
+    {
+        if (Directory.Exists(tamperRoot))
+            Directory.Delete(tamperRoot, recursive: true);
+    }
+
+    // truncation detection via anchor mismatch
+    var truncRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalLedgerIntegrityTruncate_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(truncRoot);
+    try
+    {
+        var truncWorkspace = Path.Combine(truncRoot, "workspace");
+        Directory.CreateDirectory(truncWorkspace);
+        var truncTarget = Path.Combine(truncWorkspace, "truncate-target.txt");
+        await File.WriteAllTextAsync(truncTarget, "truncate");
+        var now = new DateTime(2043, 1, 2, 0, 0, 0, DateTimeKind.Utc);
+
+        var truncSession = CreateSession(truncRoot, truncWorkspace, "integrity-truncate", () => now);
+        var truncGuard = new PermissionGuard();
+        var truncIssued = truncGuard.Evaluate(truncSession, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = truncTarget
+        });
+        AssertTrue(truncIssued.RequiresApproval, "Expected issued proposal before truncation.");
+
+        var truncLedgerPath = Path.Combine(truncRoot, "approval-ledger-v2.jsonl");
+        await File.WriteAllTextAsync(truncLedgerPath, string.Empty, new UTF8Encoding(false));
+
+        var truncReplay = CreateSession(truncRoot, truncWorkspace, "integrity-truncate", () => now.AddMinutes(1));
+        var truncReplayGuard = new PermissionGuard();
+        var truncDenied = truncReplayGuard.Evaluate(truncReplay, new ToolAction
+        {
+            Kind = ToolActionKind.RunCommand,
+            CommandExecutable = "nvidia-smi",
+            CommandArgs = Array.Empty<string>(),
+            Payload = "nvidia-smi",
+            WorkingDirectory = truncWorkspace
+        });
+        AssertTrue(!truncDenied.Allowed && truncDenied.ReasonCodeString == PermissionReasonCodes.ApprovalStateUnavailable, "Ledger truncation with stale anchor must fail closed.");
+    }
+    finally
+    {
+        if (Directory.Exists(truncRoot))
+            Directory.Delete(truncRoot, recursive: true);
+    }
+
+    // middle-record removal and reorder detection
+    var chainRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalLedgerIntegrityChain_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(chainRoot);
+    try
+    {
+        var chainWorkspace = Path.Combine(chainRoot, "workspace");
+        Directory.CreateDirectory(chainWorkspace);
+        var chainTarget = Path.Combine(chainWorkspace, "chain-target.txt");
+        await File.WriteAllTextAsync(chainTarget, "chain");
+        var now = new DateTime(2043, 1, 3, 0, 0, 0, DateTimeKind.Utc);
+
+        var chainSession = CreateSession(chainRoot, chainWorkspace, "integrity-chain", () => now);
+        var chainGuard = new PermissionGuard();
+        var chainIssued = chainGuard.Evaluate(chainSession, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = chainTarget
+        });
+        AssertTrue(chainIssued.RequiresApproval && chainIssued.ApprovalProposal is not null, "Expected issued proposal for chain mutation test.");
+        var chainProposal = chainIssued.ApprovalProposal!;
+        AssertTrue(chainSession.RecordApprovalDeniedEvent(chainProposal.ProposalId, "denied_invalid_token", PermissionReasonCodes.HighRiskApprovalRequired, chainProposal.RunId), "Expected denied event append before chain mutation.");
+        AssertTrue(chainSession.MarkApprovalProposalExpired(chainProposal.ProposalId, PermissionReasonCodes.ApprovalTokenExpired, chainProposal.RunId), "Expected expired event append before chain mutation.");
+
+        var chainLedgerPath = Path.Combine(chainRoot, "approval-ledger-v2.jsonl");
+        var chainLines = (await File.ReadAllLinesAsync(chainLedgerPath))
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToList();
+        AssertTrue(chainLines.Count >= 3, "Expected at least three records for middle-record removal/reorder detection.");
+        chainLines.RemoveAt(1);
+        await File.WriteAllLinesAsync(chainLedgerPath, chainLines, new UTF8Encoding(false));
+
+        var chainReplay = CreateSession(chainRoot, chainWorkspace, "integrity-chain", () => now.AddMinutes(1));
+        var chainReplayGuard = new PermissionGuard();
+        var chainDenied = chainReplayGuard.Evaluate(chainReplay, new ToolAction
+        {
+            Kind = ToolActionKind.RunCommand,
+            CommandExecutable = "nvidia-smi",
+            CommandArgs = Array.Empty<string>(),
+            Payload = "nvidia-smi",
+            WorkingDirectory = chainWorkspace
+        });
+        AssertTrue(!chainDenied.Allowed && chainDenied.ReasonCodeString == PermissionReasonCodes.ApprovalStateUnavailable, "Middle-record removal/reorder must fail integrity verification.");
+    }
+    finally
+    {
+        if (Directory.Exists(chainRoot))
+            Directory.Delete(chainRoot, recursive: true);
+    }
+
+    // compaction preserves integrity chain
+    var compactRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalLedgerIntegrityCompaction_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(compactRoot);
+    try
+    {
+        var compactWorkspace = Path.Combine(compactRoot, "workspace");
+        Directory.CreateDirectory(compactWorkspace);
+        var compactProbePath = Path.Combine(compactWorkspace, "probe.txt");
+        await File.WriteAllTextAsync(compactProbePath, "probe");
+        var now = new DateTime(2043, 1, 4, 0, 0, 0, DateTimeKind.Utc);
+        var written = await WriteIntegrityLedgerAsync(compactRoot, now);
+        AssertTrue(written.LineCount > 400, "Expected generated integrity ledger to exceed startup compaction threshold.");
+
+        var compactSession = CreateSession(compactRoot, compactWorkspace, "compact-session", () => now);
+        _ = compactSession.GetApprovalProposal("active-issued");
+        AssertTrue(compactSession.IsApprovalLedgerHealthy, "Compaction startup load must keep integrity ledger healthy.");
+
+        var compactLedgerPath = Path.Combine(compactRoot, "approval-ledger-v2.jsonl");
+        var compactAnchorPath = Path.Combine(compactRoot, "approval-ledger-v2.anchor.json");
+        AssertIntegrityChainAndAnchor(compactLedgerPath, compactAnchorPath);
+        var compactedLines = (await File.ReadAllLinesAsync(compactLedgerPath))
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToArray();
+        AssertTrue(compactedLines.Length < written.LineCount, "Startup compaction should reduce integrity-ledger line count.");
+    }
+    finally
+    {
+        if (Directory.Exists(compactRoot))
+            Directory.Delete(compactRoot, recursive: true);
+    }
+
+    // append/update failure fail-closed
+    var appendFailRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalLedgerIntegrityAppendFail_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(appendFailRoot);
+    try
+    {
+        var appendWorkspace = Path.Combine(appendFailRoot, "workspace");
+        Directory.CreateDirectory(appendWorkspace);
+        var appendTarget = Path.Combine(appendWorkspace, "append-fail.txt");
+        await File.WriteAllTextAsync(appendTarget, "append-fail");
+        var now = new DateTime(2043, 1, 5, 0, 0, 0, DateTimeKind.Utc);
+
+        var appendSession = CreateSession(appendFailRoot, appendWorkspace, "integrity-append-fail", () => now);
+        var appendGuard = new PermissionGuard();
+        var appendIssued = appendGuard.Evaluate(appendSession, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = appendTarget
+        });
+        AssertTrue(appendIssued.RequiresApproval && appendIssued.ApprovalProposal is not null, "Expected proposal for append-failure simulation.");
+        var appendProposal = appendIssued.ApprovalProposal!;
+        var anchorPath = Path.Combine(appendFailRoot, "approval-ledger-v2.anchor.json");
+        using (new FileStream(anchorPath, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var appendDenied = appendGuard.Evaluate(appendSession, new ToolAction
+            {
+                Kind = ToolActionKind.DeleteFile,
+                TargetPath = appendTarget,
+                RunId = appendProposal.RunId,
+                Payload = "APPROVED:wrong-proposal"
+            });
+            AssertTrue(!appendDenied.Allowed && appendDenied.ReasonCodeString == PermissionReasonCodes.ApprovalStateUnavailable, "Anchor update failure on denied append must fail closed deterministically.");
+            AssertTrue(!appendSession.IsApprovalLedgerHealthy, "Session must mark ledger unhealthy when append anchor update fails.");
+        }
+
+        var appendRead = appendGuard.Evaluate(appendSession, new ToolAction
+        {
+            Kind = ToolActionKind.ReadFile,
+            TargetPath = appendTarget
+        });
+        AssertTrue(appendRead.Allowed, "Append failure fail-closed must not impact read/analysis paths.");
+    }
+    finally
+    {
+        if (Directory.Exists(appendFailRoot))
+            Directory.Delete(appendFailRoot, recursive: true);
+    }
+
+    Console.WriteLine("PASS ApprovalLedgerIntegrityChainRegression");
+}
+
 static async Task RunApprovalCapabilityFingerprintSchemaRegression()
 {
     var runtimeRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalCapabilityFingerprint_" + Guid.NewGuid().ToString("N"));
@@ -3662,6 +4202,26 @@ static async Task RunApprovalCapabilityFingerprintSchemaRegression()
         AssertTrue(!issuedLine.Contains("\"secret\"", StringComparison.OrdinalIgnoreCase), "Fingerprint JSON must not include secrets.");
         AssertTrue(!issuedLine.Contains("\"modelOutput\"", StringComparison.OrdinalIgnoreCase), "Fingerprint JSON must not include model output.");
 
+        static string StripIntegrityMetadata(string line)
+        {
+            using var doc = JsonDocument.Parse(line);
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = false }))
+            {
+                writer.WriteStartObject();
+                foreach (var property in doc.RootElement.EnumerateObject())
+                {
+                    if (property.NameEquals("integrityVersion") || property.NameEquals("prevEventHash") || property.NameEquals("eventHash"))
+                        continue;
+                    property.WriteTo(writer);
+                }
+
+                writer.WriteEndObject();
+            }
+
+            return Encoding.UTF8.GetString(stream.ToArray());
+        }
+
         var fillerLines = new List<string>();
         for (var i = 0; i < 500; i++)
         {
@@ -3677,6 +4237,14 @@ static async Task RunApprovalCapabilityFingerprintSchemaRegression()
             }));
         }
         await File.AppendAllLinesAsync(ledgerPath, fillerLines, new UTF8Encoding(false));
+        var legacyShapeLines = (await File.ReadAllLinesAsync(ledgerPath))
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(StripIntegrityMetadata)
+            .ToArray();
+        await File.WriteAllLinesAsync(ledgerPath, legacyShapeLines, new UTF8Encoding(false));
+        var anchorPath = Path.Combine(runtimeRoot, "approval-ledger-v2.anchor.json");
+        if (File.Exists(anchorPath))
+            File.Delete(anchorPath);
 
         var compactionSession = new AgentSessionContext
         {
@@ -3754,6 +4322,26 @@ static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
 
     static async Task RewriteIssuedRecordAsync(string ledgerPath, string proposalId, Func<JsonElement, string> rewrite)
     {
+        static string StripIntegrityMetadata(string line)
+        {
+            using var doc = JsonDocument.Parse(line);
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = false }))
+            {
+                writer.WriteStartObject();
+                foreach (var property in doc.RootElement.EnumerateObject())
+                {
+                    if (property.NameEquals("integrityVersion") || property.NameEquals("prevEventHash") || property.NameEquals("eventHash"))
+                        continue;
+                    property.WriteTo(writer);
+                }
+
+                writer.WriteEndObject();
+            }
+
+            return Encoding.UTF8.GetString(stream.ToArray());
+        }
+
         var lines = await File.ReadAllLinesAsync(ledgerPath);
         for (var i = 0; i < lines.Length; i++)
         {
@@ -3772,7 +4360,17 @@ static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
             break;
         }
 
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (string.IsNullOrWhiteSpace(lines[i]))
+                continue;
+            lines[i] = StripIntegrityMetadata(lines[i]);
+        }
+
         await File.WriteAllLinesAsync(ledgerPath, lines, new UTF8Encoding(false));
+        var anchorPath = Path.Combine(Path.GetDirectoryName(ledgerPath) ?? string.Empty, "approval-ledger-v2.anchor.json");
+        if (File.Exists(anchorPath))
+            File.Delete(anchorPath);
     }
 
     var runtimeRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalCapabilityFingerprintEnforcement_" + Guid.NewGuid().ToString("N"));
