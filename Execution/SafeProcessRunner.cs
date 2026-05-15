@@ -65,6 +65,8 @@ public sealed class SafeProcessRunner
         {
             Kind = request.Kind,
             WorkingDirectory = workingDirectory,
+            CommandExecutable = request.Command,
+            CommandArgs = request.Args?.ToArray(),
             Payload = string.Join(" ", request.Args ?? Array.Empty<string>())
         };
 

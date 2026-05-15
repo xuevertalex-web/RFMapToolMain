@@ -89,7 +89,19 @@ public sealed class PermissionGuard
 
         if (action.Kind == ToolActionKind.RunCommand)
         {
-            var policyInput = CommandRiskPolicy.BuildInputFromRawCommand(action.Payload, action.WorkingDirectory, action.Kind, "permission_guard");
+            var hasExplicitExecutable = !string.IsNullOrWhiteSpace(action.CommandExecutable);
+            var hasExplicitArgs = action.CommandArgs is { Count: > 0 };
+            var policyInput = hasExplicitExecutable || hasExplicitArgs
+                ? new CommandPolicyInput
+                {
+                    Executable = action.CommandExecutable,
+                    Args = action.CommandArgs,
+                    RawCommandText = action.Payload,
+                    WorkingDirectory = action.WorkingDirectory,
+                    CommandKind = action.Kind,
+                    Source = "permission_guard"
+                }
+                : CommandRiskPolicy.BuildInputFromRawCommand(action.Payload, action.WorkingDirectory, action.Kind, "permission_guard");
             var commandDecision = CommandRiskPolicy.Evaluate(policyInput);
             var commandTarget = normalizedTarget ?? normalizedWorkspace;
             switch (commandDecision.Category)

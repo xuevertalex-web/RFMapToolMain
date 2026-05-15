@@ -3676,6 +3676,7 @@ static async Task RunPermissionGuardCanonicalCommandPolicyRegression()
     };
 
     var guard = new PermissionGuard();
+    var runner = new SafeProcessRunner(session, guard);
     PermissionDecision Run(string payload, string? runId = null) => guard.Evaluate(session, new ToolAction
     {
         Kind = ToolActionKind.RunCommand,
@@ -3683,17 +3684,34 @@ static async Task RunPermissionGuardCanonicalCommandPolicyRegression()
         Payload = payload,
         RunId = runId
     });
+    PermissionDecision RunExplicit(string executable, IReadOnlyList<string>? args, string? payload = null, string? runId = null) => guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.RunCommand,
+        WorkingDirectory = workspaceRoot,
+        CommandExecutable = executable,
+        CommandArgs = args,
+        Payload = payload,
+        RunId = runId
+    });
 
     var safe = Run("dotnet --version");
     AssertTrue(safe.Allowed, "Expected safe command to be allowed by canonical command policy.");
+    var safeExplicit = RunExplicit("dotnet", new[] { "--version" });
+    AssertTrue(safeExplicit.Allowed, "Expected explicit executable+args safe command to be allowed.");
 
     var npmRun = Run("npm run build");
     AssertTrue(!npmRun.Allowed && npmRun.RequiresApproval, "Expected npm run build to require approval.");
     AssertTrue(npmRun.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, "Expected npm run build high-risk approval reason.");
+    var npmRunExplicit = RunExplicit("npm", new[] { "run", "build" }, "run build");
+    AssertTrue(!npmRunExplicit.Allowed && npmRunExplicit.RequiresApproval, "Expected explicit npm run build to require approval.");
+    AssertTrue(npmRunExplicit.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, "Expected explicit npm run build high-risk approval reason.");
 
     var npxRun = Run("npx something");
     AssertTrue(!npxRun.Allowed && npxRun.RequiresApproval, "Expected npx command to require approval.");
     AssertTrue(npxRun.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, "Expected npx high-risk approval reason.");
+    var npxRunExplicit = RunExplicit("npx", new[] { "something" }, "something");
+    AssertTrue(!npxRunExplicit.Allowed && npxRunExplicit.RequiresApproval, "Expected explicit npx command to require approval.");
+    AssertTrue(npxRunExplicit.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, "Expected explicit npx high-risk approval reason.");
 
     foreach (var destructive in new[]
     {
@@ -3734,6 +3752,20 @@ static async Task RunPermissionGuardCanonicalCommandPolicyRegression()
     var genericMarker = Run("nvidia-smi APPROVED:true");
     AssertTrue(!genericMarker.Allowed, "Expected APPROVED:true marker to remain denied.");
     AssertTrue(genericMarker.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, "Expected deterministic generic marker denial reason.");
+    var genericMarkerExplicit = RunExplicit("nvidia-smi", new[] { "APPROVED:true" }, "nvidia-smi APPROVED:true");
+    AssertTrue(!genericMarkerExplicit.Allowed, "Expected explicit APPROVED:true marker to remain denied.");
+    AssertTrue(genericMarkerExplicit.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, "Expected explicit deterministic generic marker denial reason.");
+
+    var npmRunner = await runner.RunAsync(new SafeProcessRequest
+    {
+        Kind = ToolActionKind.RunCommand,
+        Command = "npm",
+        Args = new[] { "run", "build" },
+        WorkingDirectory = workspaceRoot,
+        Timeout = TimeSpan.FromSeconds(5)
+    });
+    AssertTrue(!npmRunner.Success, "Expected runner npm run build not to execute without approval.");
+    AssertTrue(npmRunner.ReasonCode == PermissionReasonCodes.HighRiskApprovalRequired, "Expected runner npm run build to require approval.");
 
     var readAllowed = guard.Evaluate(session, new ToolAction
     {
