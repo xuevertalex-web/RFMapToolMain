@@ -252,10 +252,11 @@ public sealed class PermissionGuard
     private static PermissionDecision CreateApprovalRequired(AgentSessionContext session, ToolAction action, PermissionReasonCode code, string message, string normalizedTarget, string normalizedWorkspace, string riskLevel = "high")
     {
         var capabilityAssessment = CapabilityTierClassifier.Classify(action);
+        var proposalFingerprint = CapabilityFingerprintV1.FromAssessment(action, capabilityAssessment);
         var issuedAtUtc = session.UtcNowProvider();
         var ttlSeconds = AgentSessionContext.ApprovalTokenTtlSecondsDefault;
         var expiresAtUtc = issuedAtUtc.AddSeconds(ttlSeconds);
-        var proposalId = ComputeProposalId(session, action, code, normalizedTarget, normalizedWorkspace);
+        var proposalId = ComputeProposalId(session, action, code, normalizedTarget, normalizedWorkspace, proposalFingerprint);
         var existing = session.GetApprovalProposal(proposalId);
         if (existing is not null &&
             !session.IsApprovalProposalConsumed(proposalId) &&
@@ -293,7 +294,7 @@ public sealed class PermissionGuard
             TtlSeconds = ttlSeconds,
             SessionId = session.SessionId,
             SessionBound = true,
-            CapabilityFingerprint = CapabilityFingerprintV1.FromAssessment(action, capabilityAssessment)
+            CapabilityFingerprint = proposalFingerprint
         };
         if (!session.RegisterApprovalProposal(proposal))
             return PermissionDecision.Deny(PermissionReasonCode.ApprovalStateUnavailable, $"Approval state unavailable: {session.ApprovalLedgerError}", normalizedTarget, normalizedWorkspace);
@@ -306,35 +307,25 @@ public sealed class PermissionGuard
             normalizedWorkspace);
     }
 
-    private static string ComputeProposalId(AgentSessionContext session, ToolAction action, PermissionReasonCode code, string normalizedTarget, string normalizedWorkspace)
-    {
-        var signature = string.Join("|", new[]
-        {
+    private static string ComputeProposalId(AgentSessionContext session, ToolAction action, PermissionReasonCode code, string normalizedTarget, string normalizedWorkspace, CapabilityFingerprintV1? capabilityFingerprint) =>
+        ApprovalProposalIdentityV1.ComputeProposalId(
             session.SessionId,
-            action.Kind.ToString(),
+            action,
+            code,
             normalizedTarget,
             normalizedWorkspace,
-            code.ToString(),
-            action.Payload ?? string.Empty
-        });
-        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(signature)))
-            .ToLowerInvariant()[..16];
-    }
+            capabilityFingerprint);
 
     private static ApprovalValidationResult ValidateBoundApprovalTokenForAction(AgentSessionContext session, ToolAction action, PermissionReasonCode code, string normalizedTarget, string normalizedWorkspace)
     {
         if (!CommandRiskPolicy.TryExtractApprovalToken(action.Payload, out var token))
             return ApprovalValidationResult.Denied(code, "Approval token is required.");
-        var expected = ComputeProposalId(session, new ToolAction
-        {
-            Kind = action.Kind,
-            RunId = action.RunId,
-            TargetPath = action.TargetPath,
-            SourcePath = action.SourcePath,
-            DestinationPath = action.DestinationPath,
-            WorkingDirectory = action.WorkingDirectory,
-            Payload = StripApprovalToken(action.Payload)
-        }, code, normalizedTarget, normalizedWorkspace);
+
+        var sanitizedAction = SanitizeActionForIdentity(action);
+        if (!TryBuildCapabilityFingerprint(sanitizedAction, out var currentFingerprint) || currentFingerprint is null)
+            return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalCapabilityBindingUnavailable, "Approval capability binding unavailable.");
+
+        var expected = ComputeProposalId(session, sanitizedAction, code, normalizedTarget, normalizedWorkspace, currentFingerprint);
         if (!token.Equals(expected, StringComparison.OrdinalIgnoreCase))
         {
             if (!session.RecordApprovalDeniedEvent(expected, "denied_invalid_token", PermissionDecision.ToReasonCodeString(code), action.RunId))
@@ -391,8 +382,6 @@ public sealed class PermissionGuard
             }
         }
 
-        if (!TryBuildCapabilityFingerprint(action, out var currentFingerprint) || currentFingerprint is null)
-            return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalCapabilityBindingUnavailable, "Approval capability binding unavailable.");
         var proposalFingerprint = proposal.CapabilityFingerprint;
         var legacyFingerprintless = IsLegacyFingerprintlessProposal(proposal);
         if (proposalFingerprint is null && !legacyFingerprintless)
@@ -414,6 +403,42 @@ public sealed class PermissionGuard
             return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalTokenExpired, "Approval token expired.");
         }
         return ApprovalValidationResult.Valid();
+    }
+
+    private static ToolAction SanitizeActionForIdentity(ToolAction action)
+    {
+        var strippedPayload = StripApprovalToken(action.Payload);
+        var strippedCommandArgs = StripApprovalTokenFromArgs(action.CommandArgs);
+
+        return new ToolAction
+        {
+            Kind = action.Kind,
+            RunId = action.RunId,
+            TargetPath = action.TargetPath,
+            SourcePath = action.SourcePath,
+            DestinationPath = action.DestinationPath,
+            WorkingDirectory = action.WorkingDirectory,
+            CommandExecutable = action.CommandExecutable,
+            CommandArgs = strippedCommandArgs,
+            Payload = strippedPayload
+        };
+    }
+
+    private static IReadOnlyList<string>? StripApprovalTokenFromArgs(IReadOnlyList<string>? args)
+    {
+        if (args is null || args.Count == 0)
+            return args;
+
+        var output = new List<string>(args.Count);
+        foreach (var arg in args)
+        {
+            var sanitized = StripApprovalToken(arg);
+            if (string.IsNullOrWhiteSpace(sanitized))
+                continue;
+            output.Add(sanitized);
+        }
+
+        return output.ToArray();
     }
 
     private static string? StripApprovalToken(string? payload)

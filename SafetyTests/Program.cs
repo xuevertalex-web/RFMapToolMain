@@ -72,6 +72,7 @@ await RunApprovalLedgerStartupCompactionDeterministicRegression();
 await RunApprovalLedgerIntegrityChainRegression();
 await RunApprovalCapabilityFingerprintSchemaRegression();
 await RunApprovalCapabilityFingerprintEnforcementRegression();
+await RunApprovalProposalIdentityCanonicalizationRegression();
 RunCommandRiskPolicyTokenizationRegression();
 RunCanonicalCommandPolicyDecisionRegression();
 RunCapabilityTierClassifierRegression();
@@ -4919,6 +4920,162 @@ static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
         tierSession?.Dispose();
         classReplay?.Dispose();
         session?.Dispose();
+        if (Directory.Exists(runtimeRoot))
+            Directory.Delete(runtimeRoot, recursive: true);
+    }
+}
+
+static async Task RunApprovalProposalIdentityCanonicalizationRegression()
+{
+    var runtimeRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalProposalIdentity_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(runtimeRoot);
+    AgentSessionContext? replayIssueSession = null;
+    AgentSessionContext? replayLoadSession = null;
+    try
+    {
+        var workspaceRoot = Path.Combine(runtimeRoot, "workspace");
+        var outsideRoot = Path.Combine(runtimeRoot, "outside");
+        Directory.CreateDirectory(workspaceRoot);
+        Directory.CreateDirectory(outsideRoot);
+        var targetPath = Path.Combine(workspaceRoot, "identity-target.txt");
+        await File.WriteAllTextAsync(targetPath, "identity");
+        var now = new DateTime(2045, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        using (var session = new AgentSessionContext
+        {
+            SessionId = "proposal-identity-main",
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        })
+        {
+            var guard = new PermissionGuard();
+
+            var stableA = guard.Evaluate(session, new ToolAction
+            {
+                Kind = ToolActionKind.DeleteFile,
+                TargetPath = targetPath,
+                Payload = "  identity payload  "
+            });
+            var stableB = guard.Evaluate(session, new ToolAction
+            {
+                Kind = ToolActionKind.DeleteFile,
+                TargetPath = targetPath,
+                Payload = "\r\nidentity payload\r\n"
+            });
+            AssertTrue(stableA.RequiresApproval && stableA.ApprovalProposal is not null, "Expected delete approval proposal for canonical identity stability.");
+            AssertTrue(stableB.RequiresApproval && stableB.ApprovalProposal is not null, "Expected second delete approval proposal for canonical identity stability.");
+            AssertTrue(string.Equals(stableA.ApprovalProposal!.ProposalId, stableB.ApprovalProposal!.ProposalId, StringComparison.Ordinal), "Expected same logical proposal to produce stable canonical proposalId.");
+
+            var delimiterA = guard.Evaluate(session, new ToolAction
+            {
+                Kind = ToolActionKind.DeleteFile,
+                TargetPath = targetPath,
+                Payload = "alpha|beta||gamma"
+            });
+            var delimiterB = guard.Evaluate(session, new ToolAction
+            {
+                Kind = ToolActionKind.DeleteFile,
+                TargetPath = targetPath,
+                Payload = "alpha||beta|gamma"
+            });
+            AssertTrue(delimiterA.RequiresApproval && delimiterA.ApprovalProposal is not null, "Expected delimiter test proposal A.");
+            AssertTrue(delimiterB.RequiresApproval && delimiterB.ApprovalProposal is not null, "Expected delimiter test proposal B.");
+            AssertTrue(!string.Equals(delimiterA.ApprovalProposal!.ProposalId, delimiterB.ApprovalProposal!.ProposalId, StringComparison.Ordinal), "Expected delimiter-ambiguous payloads to remain collision-resistant under canonical identity hashing.");
+
+            var commandA = guard.Evaluate(session, new ToolAction
+            {
+                Kind = ToolActionKind.RunCommand,
+                WorkingDirectory = outsideRoot,
+                CommandExecutable = "nvidia-smi",
+                CommandArgs = new[] { "--query-gpu=name" },
+                Payload = "--query-gpu=name"
+            });
+            var commandB = guard.Evaluate(session, new ToolAction
+            {
+                Kind = ToolActionKind.RunCommand,
+                WorkingDirectory = outsideRoot,
+                CommandExecutable = "wmic",
+                CommandArgs = new[] { "--query-gpu=name" },
+                Payload = "--query-gpu=name"
+            });
+            AssertTrue(commandA.RequiresApproval && commandA.ApprovalProposal is not null, "Expected RunCommand proposal A.");
+            AssertTrue(commandB.RequiresApproval && commandB.ApprovalProposal is not null, "Expected RunCommand proposal B.");
+            AssertTrue(!string.Equals(commandA.ApprovalProposal!.ProposalId, commandB.ApprovalProposal!.ProposalId, StringComparison.Ordinal), "Expected different executable with same args to produce different proposal identity.");
+
+            var commandWhitespace = guard.Evaluate(session, new ToolAction
+            {
+                Kind = ToolActionKind.RunCommand,
+                WorkingDirectory = outsideRoot,
+                CommandExecutable = "nvidia-smi",
+                CommandArgs = new[] { "--query-gpu=name" },
+                Payload = "   --query-gpu=name   ",
+                RunId = "transient-run-field"
+            });
+            AssertTrue(commandWhitespace.RequiresApproval && commandWhitespace.ApprovalProposal is not null, "Expected RunCommand proposal for non-authority field check.");
+            AssertTrue(string.Equals(commandA.ApprovalProposal!.ProposalId, commandWhitespace.ApprovalProposal!.ProposalId, StringComparison.Ordinal), "Expected non-authority field/payload whitespace differences not to change identity when executable/args metadata is available.");
+
+            var rawCommandA = guard.Evaluate(session, new ToolAction
+            {
+                Kind = ToolActionKind.RunCommand,
+                WorkingDirectory = outsideRoot,
+                Payload = "nvidia-smi    --help"
+            });
+            var rawCommandB = guard.Evaluate(session, new ToolAction
+            {
+                Kind = ToolActionKind.RunCommand,
+                WorkingDirectory = outsideRoot,
+                Payload = "  nvidia-smi --help  "
+            });
+            AssertTrue(rawCommandA.RequiresApproval && rawCommandA.ApprovalProposal is not null, "Expected payload-only RunCommand proposal A.");
+            AssertTrue(rawCommandB.RequiresApproval && rawCommandB.ApprovalProposal is not null, "Expected payload-only RunCommand proposal B.");
+            AssertTrue(string.Equals(rawCommandA.ApprovalProposal!.ProposalId, rawCommandB.ApprovalProposal!.ProposalId, StringComparison.Ordinal), "Expected deterministic whitespace normalization for payload-only RunCommand identity.");
+        }
+
+        replayIssueSession = new AgentSessionContext
+        {
+            SessionId = "proposal-identity-replay",
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        var replayGuard = new PermissionGuard();
+        var replayIssued = replayGuard.Evaluate(replayIssueSession, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = targetPath,
+            Payload = "replay-candidate"
+        });
+        AssertTrue(replayIssued.RequiresApproval && replayIssued.ApprovalProposal is not null, "Expected replay issuance proposal.");
+        var replayProposalId = replayIssued.ApprovalProposal!.ProposalId;
+        replayIssueSession.Dispose();
+        replayIssueSession = null;
+
+        replayLoadSession = new AgentSessionContext
+        {
+            SessionId = "proposal-identity-replay",
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now.AddMinutes(1)
+        };
+        var replayLoaded = replayLoadSession.GetApprovalProposal(replayProposalId);
+        AssertTrue(replayLoaded is not null, "Expected active issued proposal to be replayed after restart.");
+        AssertTrue(string.Equals(replayLoaded!.ProposalId, replayProposalId, StringComparison.Ordinal), "Expected replayed active proposal identity to remain stable.");
+        replayLoadSession.Dispose();
+        replayLoadSession = null;
+
+        Console.WriteLine("PASS ApprovalProposalIdentityCanonicalizationRegression");
+    }
+    finally
+    {
+        replayLoadSession?.Dispose();
+        replayIssueSession?.Dispose();
         if (Directory.Exists(runtimeRoot))
             Directory.Delete(runtimeRoot, recursive: true);
     }
