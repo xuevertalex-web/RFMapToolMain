@@ -66,6 +66,7 @@ await RunApprovalLedgerCorruptFailClosedRegression();
 await RunApprovalLedgerExpiredAndDeniedEventsRegression();
 await RunApprovalLedgerDeniedAppendFailureFailClosedRegression();
 await RunApprovalLedgerStartupCompactionDeterministicRegression();
+await RunApprovalCapabilityFingerprintSchemaRegression();
 RunCommandRiskPolicyTokenizationRegression();
 RunCanonicalCommandPolicyDecisionRegression();
 RunCapabilityTierClassifierRegression();
@@ -3511,6 +3512,196 @@ static async Task RunApprovalLedgerStartupCompactionDeterministicRegression()
         }
 
         Console.WriteLine("PASS ApprovalLedgerStartupCompactionDeterministicRegression");
+    }
+    finally
+    {
+        if (Directory.Exists(runtimeRoot))
+            Directory.Delete(runtimeRoot, recursive: true);
+    }
+}
+
+static async Task RunApprovalCapabilityFingerprintSchemaRegression()
+{
+    var runtimeRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalCapabilityFingerprint_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(runtimeRoot);
+    try
+    {
+        var workspaceRoot = Path.Combine(runtimeRoot, "workspace");
+        Directory.CreateDirectory(workspaceRoot);
+        var consumedTarget = Path.Combine(workspaceRoot, "fingerprint-consumed.txt");
+        var expiredTarget = Path.Combine(workspaceRoot, "fingerprint-expired.txt");
+        await File.WriteAllTextAsync(consumedTarget, "consumed");
+        await File.WriteAllTextAsync(expiredTarget, "expired");
+
+        var now = new DateTime(2041, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var session = new AgentSessionContext
+        {
+            SessionId = "capability-fingerprint-schema",
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        var guard = new PermissionGuard();
+
+        var consumedIssued = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = consumedTarget
+        });
+        AssertTrue(consumedIssued.RequiresApproval && consumedIssued.ApprovalProposal is not null, "Expected consumed-path approval proposal.");
+        var consumedProposal = consumedIssued.ApprovalProposal!;
+        AssertTrue(consumedProposal.CapabilityFingerprint is not null, "Expected capability fingerprint on issued proposal.");
+        AssertTrue(consumedProposal.CapabilityFingerprint!.FingerprintVersion == 1, "Expected fingerprintVersion=1.");
+        AssertTrue(consumedProposal.CapabilityFingerprint.ActionKind == nameof(ToolActionKind.DeleteFile), "Expected actionKind=DeleteFile.");
+        AssertTrue(consumedProposal.CapabilityFingerprint.CapabilityClass == "destructive", "Expected destructive capability class for delete.");
+        AssertTrue(consumedProposal.CapabilityFingerprint.CapabilityTier == 2, "Expected destructive capability tier for delete.");
+        AssertTrue(consumedProposal.CapabilityFingerprint.CapabilityGate == "approval_required", "Expected approval_required capability gate for delete.");
+        AssertTrue(string.IsNullOrWhiteSpace(consumedProposal.CapabilityFingerprint.PolicyCategory), "Expected empty policyCategory for non-command delete.");
+        AssertTrue(consumedProposal.CapabilityFingerprint.ActionProfile == "delete_file", "Expected enum-like actionProfile=delete_file.");
+
+        var consumedToken = consumedIssued.ExpectedApprovalToken ?? string.Empty;
+        var consumedAllowed = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = consumedTarget,
+            RunId = consumedProposal.RunId,
+            Payload = consumedToken
+        });
+        AssertTrue(consumedAllowed.Allowed, "Expected valid token to allow consumed-path action.");
+        AssertTrue(session.ConsumeApprovalProposal(consumedProposal.ProposalId, consumedProposal.RunId), "Expected consumed event append.");
+
+        var expiredIssued = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = expiredTarget
+        });
+        AssertTrue(expiredIssued.RequiresApproval && expiredIssued.ApprovalProposal is not null, "Expected expired-path approval proposal.");
+        var expiredProposal = expiredIssued.ApprovalProposal!;
+        var expiredToken = expiredIssued.ExpectedApprovalToken ?? string.Empty;
+
+        now = now.AddSeconds(AgentSessionContext.ApprovalTokenTtlSecondsDefault + 1);
+        var expiredDenied = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = expiredTarget,
+            RunId = expiredProposal.RunId,
+            Payload = expiredToken
+        });
+        AssertTrue(!expiredDenied.Allowed && expiredDenied.ReasonCodeString == PermissionReasonCodes.ApprovalTokenExpired, "Expected expired approval denial.");
+
+        var replay = new AgentSessionContext
+        {
+            SessionId = session.SessionId,
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        var replayProposal = replay.GetApprovalProposal(consumedProposal.ProposalId);
+        AssertTrue(replayProposal?.CapabilityFingerprint is not null, "Expected replay to retain capability fingerprint.");
+        AssertTrue(replayProposal!.CapabilityFingerprint!.ActionProfile == "delete_file", "Expected replayed fingerprint actionProfile to be preserved.");
+
+        var ledgerPath = Path.Combine(runtimeRoot, "approval-ledger-v2.jsonl");
+        var ledgerLines = (await File.ReadAllLinesAsync(ledgerPath))
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToArray();
+
+        string FindLedgerLine(string proposalId, string eventName)
+        {
+            foreach (var line in ledgerLines)
+            {
+                using var doc = JsonDocument.Parse(line);
+                var root = doc.RootElement;
+                var lineEvent = root.GetProperty("event").GetString() ?? string.Empty;
+                var lineProposal = root.GetProperty("proposalId").GetString() ?? string.Empty;
+                if (lineEvent.Equals(eventName, StringComparison.OrdinalIgnoreCase) &&
+                    lineProposal.Equals(proposalId, StringComparison.OrdinalIgnoreCase))
+                    return line;
+            }
+
+            throw new InvalidOperationException($"Missing ledger line for {eventName}:{proposalId}");
+        }
+
+        void AssertFingerprintShape(string line)
+        {
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            AssertTrue(root.TryGetProperty("capabilityFingerprint", out var fingerprint) && fingerprint.ValueKind == JsonValueKind.Object, "Expected capabilityFingerprint object.");
+            var expectedFields = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "fingerprintVersion",
+                "actionKind",
+                "capabilityClass",
+                "capabilityTier",
+                "capabilityGate",
+                "policyCategory",
+                "actionProfile"
+            };
+            foreach (var property in fingerprint.EnumerateObject())
+                AssertTrue(expectedFields.Contains(property.Name), $"Unexpected capability fingerprint field: {property.Name}");
+            AssertTrue(fingerprint.GetProperty("fingerprintVersion").GetInt32() == 1, "Expected fingerprintVersion=1 in ledger.");
+            AssertTrue(fingerprint.GetProperty("actionKind").GetString() == nameof(ToolActionKind.DeleteFile), "Expected actionKind=DeleteFile in ledger.");
+            AssertTrue(fingerprint.GetProperty("actionProfile").GetString() == "delete_file", "Expected actionProfile=delete_file in ledger.");
+        }
+
+        var issuedLine = FindLedgerLine(consumedProposal.ProposalId, "issued");
+        var consumedLine = FindLedgerLine(consumedProposal.ProposalId, "consumed");
+        var expiredLine = FindLedgerLine(expiredProposal.ProposalId, "expired");
+        AssertFingerprintShape(issuedLine);
+        AssertFingerprintShape(consumedLine);
+        AssertFingerprintShape(expiredLine);
+
+        AssertTrue(!issuedLine.Contains("APPROVED:", StringComparison.Ordinal), "Fingerprint JSON must not include raw approval tokens.");
+        AssertTrue(!issuedLine.Contains("\"command\"", StringComparison.OrdinalIgnoreCase), "Fingerprint JSON must not include raw command text.");
+        AssertTrue(!issuedLine.Contains("\"path\"", StringComparison.OrdinalIgnoreCase), "Fingerprint JSON must not include raw path payload.");
+        AssertTrue(!issuedLine.Contains("\"task\"", StringComparison.OrdinalIgnoreCase), "Fingerprint JSON must not include raw task text.");
+        AssertTrue(!issuedLine.Contains("\"secret\"", StringComparison.OrdinalIgnoreCase), "Fingerprint JSON must not include secrets.");
+        AssertTrue(!issuedLine.Contains("\"modelOutput\"", StringComparison.OrdinalIgnoreCase), "Fingerprint JSON must not include model output.");
+
+        var fillerLines = new List<string>();
+        for (var i = 0; i < 500; i++)
+        {
+            fillerLines.Add(System.Text.Json.JsonSerializer.Serialize(new
+            {
+                schemaVersion = 2,
+                @event = "denied_invalid_token",
+                atUtc = now.AddDays(-10).AddMinutes(i),
+                sessionId = "old",
+                proposalId = "old-fingerprint-" + i.ToString("D3"),
+                reasonCode = "HIGH_RISK_APPROVAL_REQUIRED",
+                runId = "old-run-" + i.ToString("D3")
+            }));
+        }
+        await File.AppendAllLinesAsync(ledgerPath, fillerLines, new UTF8Encoding(false));
+
+        var compactionSession = new AgentSessionContext
+        {
+            SessionId = session.SessionId,
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        _ = compactionSession.GetApprovalProposal(consumedProposal.ProposalId);
+
+        var compactedLines = (await File.ReadAllLinesAsync(ledgerPath))
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToArray();
+        var compactedConsumedLine = compactedLines.FirstOrDefault(line =>
+        {
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            return string.Equals(root.GetProperty("event").GetString(), "consumed", StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(root.GetProperty("proposalId").GetString(), consumedProposal.ProposalId, StringComparison.OrdinalIgnoreCase);
+        });
+        AssertTrue(!string.IsNullOrWhiteSpace(compactedConsumedLine), "Expected retained consumed record after compaction.");
+        AssertFingerprintShape(compactedConsumedLine!);
+
+        Console.WriteLine("PASS ApprovalCapabilityFingerprintSchemaRegression");
     }
     finally
     {

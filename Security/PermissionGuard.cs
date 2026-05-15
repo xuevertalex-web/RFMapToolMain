@@ -251,6 +251,7 @@ public sealed class PermissionGuard
 
     private static PermissionDecision CreateApprovalRequired(AgentSessionContext session, ToolAction action, PermissionReasonCode code, string message, string normalizedTarget, string normalizedWorkspace, string riskLevel = "high")
     {
+        var capabilityAssessment = CapabilityTierClassifier.Classify(action);
         var issuedAtUtc = session.UtcNowProvider();
         var ttlSeconds = AgentSessionContext.ApprovalTokenTtlSecondsDefault;
         var expiresAtUtc = issuedAtUtc.AddSeconds(ttlSeconds);
@@ -291,7 +292,8 @@ public sealed class PermissionGuard
             ExpiresAtUtc = expiresAtUtc,
             TtlSeconds = ttlSeconds,
             SessionId = session.SessionId,
-            SessionBound = true
+            SessionBound = true,
+            CapabilityFingerprint = CapabilityFingerprintV1.FromAssessment(action, capabilityAssessment)
         };
         if (!session.RegisterApprovalProposal(proposal))
             return PermissionDecision.Deny(PermissionReasonCode.ApprovalStateUnavailable, $"Approval state unavailable: {session.ApprovalLedgerError}", normalizedTarget, normalizedWorkspace);

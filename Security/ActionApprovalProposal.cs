@@ -31,4 +31,5 @@ public sealed class ActionApprovalProposal
     public int TtlSeconds { get; init; }
     public string SessionId { get; init; } = string.Empty;
     public bool SessionBound { get; init; } = true;
+    public CapabilityFingerprintV1? CapabilityFingerprint { get; init; }
 }

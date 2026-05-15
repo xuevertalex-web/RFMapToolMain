@@ -72,7 +72,8 @@ public sealed class AgentSessionContext
             return false;
 
         var effectiveRunId = ResolveRunIdForProposal(proposalId, runId);
-        if (!_approvalLedger.TryAppendConsumed(SessionId, proposalId, UtcNowProvider(), effectiveRunId, out var appendError))
+        var capabilityFingerprint = ResolveCapabilityFingerprintForProposal(proposalId);
+        if (!_approvalLedger.TryAppendConsumed(SessionId, proposalId, UtcNowProvider(), effectiveRunId, capabilityFingerprint, out var appendError))
         {
             _approvalLedgerHealthy = false;
             _approvalLedgerError = $"consume_append_failed: {appendError}";
@@ -98,7 +99,8 @@ public sealed class AgentSessionContext
         if (IsApprovalProposalExpired(proposalId))
             return true;
         var effectiveRunId = ResolveRunIdForProposal(proposalId, runId);
-        if (!_approvalLedger.TryAppendExpired(SessionId, proposalId, UtcNowProvider(), reasonCode, effectiveRunId, out var appendError))
+        var capabilityFingerprint = ResolveCapabilityFingerprintForProposal(proposalId);
+        if (!_approvalLedger.TryAppendExpired(SessionId, proposalId, UtcNowProvider(), reasonCode, effectiveRunId, capabilityFingerprint, out var appendError))
         {
             _approvalLedgerHealthy = false;
             _approvalLedgerError = $"expired_append_failed: {appendError}";
@@ -168,6 +170,12 @@ public sealed class AgentSessionContext
     {
         var normalized = runId?.Trim();
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    private CapabilityFingerprintV1? ResolveCapabilityFingerprintForProposal(string proposalId)
+    {
+        var proposal = GetApprovalProposal(proposalId);
+        return proposal?.CapabilityFingerprint;
     }
 
     private void EnsureApprovalLedgerInitialized()
