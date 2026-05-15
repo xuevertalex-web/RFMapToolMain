@@ -316,7 +316,7 @@ static async Task RunCanonicalContainment_JunctionEscapeRegression()
         WorkingDirectory = linkPath,
         Timeout = TimeSpan.FromSeconds(5)
     });
-    AssertTrue(!processResult.Success && processResult.ReasonCode == "BLOCKED_PROCESS_EXECUTION", "Expected process working directory via junction to be denied.");
+    AssertTrue(!processResult.Success && processResult.ReasonCode == PermissionReasonCodes.AccessDeniedOutsideWorkspace, "Expected process working directory via junction to be denied.");
 
     Console.WriteLine("PASS CanonicalContainment_JunctionEscapeRegression");
 }
@@ -1472,9 +1472,7 @@ static async Task RunExternalActionApprovalProposalRegression()
         WorkingDirectory = tempRoot
     });
     AssertTrue(!cmdResult.Success, "Expected outside-workspace command not to execute.");
-    AssertTrue(
-        cmdResult.ReasonCode == PermissionReasonCodes.AccessDeniedOutsideWorkspace || cmdResult.ReasonCode == "BLOCKED_PROCESS_EXECUTION",
-        "Expected outside-workspace command denial reason.");
+    AssertTrue(cmdResult.ReasonCode == PermissionReasonCodes.AccessDeniedOutsideWorkspace, "Expected outside-workspace command denial reason.");
 
     var protectedDecision = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.ReadFile, TargetPath = runtimeRoot });
     AssertTrue(!protectedDecision.Allowed, "Expected protected/system-like path to be non-success.");
@@ -2625,15 +2623,14 @@ static async Task RunProcessExecutionHardeningRegression()
     });
     AssertTrue(allowed.Success, "Expected whitelisted command to pass.");
 
-    var forbidden = await runner.RunAsync(new SafeProcessRequest
+    var malformed = await runner.RunAsync(new SafeProcessRequest
     {
         Kind = ToolActionKind.RunCommand,
-        Command = "powershell",
-        Args = new[] { "-Command", "Get-ChildItem" },
+        Command = "   ",
         WorkingDirectory = workspaceRoot,
         Timeout = TimeSpan.FromSeconds(5)
     });
-    AssertTrue(!forbidden.Success && forbidden.ReasonCode == "INVALID_COMMAND", "Expected non-whitelisted command to be blocked.");
+    AssertTrue(!malformed.Success && malformed.ReasonCode == PermissionReasonCodes.CommandMalformed, "Expected malformed command invocation to be blocked.");
 
     var injection = await runner.RunAsync(new SafeProcessRequest
     {
@@ -2643,7 +2640,48 @@ static async Task RunProcessExecutionHardeningRegression()
         WorkingDirectory = workspaceRoot,
         Timeout = TimeSpan.FromSeconds(5)
     });
-    AssertTrue(!injection.Success && injection.ReasonCode == "BLOCKED_PROCESS_EXECUTION", "Expected shell injection pattern to be blocked.");
+    AssertTrue(!injection.Success && injection.ReasonCode == PermissionReasonCodes.CommandUnsupportedShellSyntax, "Expected shell/meta syntax to be denied by canonical command policy.");
+
+    var shellMetaWithApproval = await runner.RunAsync(new SafeProcessRequest
+    {
+        Kind = ToolActionKind.RunCommand,
+        Command = "git",
+        Args = new[] { "status&&whoami", "APPROVED:test" },
+        RunId = "test-run",
+        WorkingDirectory = workspaceRoot,
+        Timeout = TimeSpan.FromSeconds(5)
+    });
+    AssertTrue(!shellMetaWithApproval.Success && shellMetaWithApproval.ReasonCode == PermissionReasonCodes.CommandUnsupportedShellSyntax, "Expected unsupported shell/meta syntax not to be approvable.");
+
+    var highRiskWithoutApproval = await runner.RunAsync(new SafeProcessRequest
+    {
+        Kind = ToolActionKind.RunCommand,
+        Command = "npm",
+        Args = new[] { "run", "build" },
+        WorkingDirectory = workspaceRoot,
+        Timeout = TimeSpan.FromSeconds(5)
+    });
+    AssertTrue(!highRiskWithoutApproval.Success && highRiskWithoutApproval.ReasonCode == PermissionReasonCodes.HighRiskApprovalRequired, "Expected high-risk command to require approval before process start.");
+
+    var seededHighRisk = guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.RunCommand,
+        WorkingDirectory = workspaceRoot,
+        CommandExecutable = "dotnet",
+        CommandArgs = new[] { "--version", "nvidia-smi" },
+        Payload = "--version nvidia-smi"
+    });
+    AssertTrue(!seededHighRisk.Allowed && seededHighRisk.RequiresApproval && seededHighRisk.ApprovalProposal is not null, "Expected seeded runner high-risk command to produce approval proposal.");
+    var approvedHighRisk = await runner.RunAsync(new SafeProcessRequest
+    {
+        Kind = ToolActionKind.RunCommand,
+        Command = "dotnet",
+        Args = new[] { "--version", "nvidia-smi", $"APPROVED:{seededHighRisk.ApprovalProposal!.ProposalId}" },
+        RunId = seededHighRisk.ApprovalProposal.RunId,
+        WorkingDirectory = workspaceRoot,
+        Timeout = TimeSpan.FromSeconds(10)
+    });
+    AssertTrue(approvedHighRisk.ReasonCode == PermissionReasonCodes.Allowed, "Expected approved high-risk command to reach process start path.");
 
     var outside = await runner.RunAsync(new SafeProcessRequest
     {
@@ -2653,7 +2691,7 @@ static async Task RunProcessExecutionHardeningRegression()
         WorkingDirectory = outsideRoot,
         Timeout = TimeSpan.FromSeconds(5)
     });
-    AssertTrue(!outside.Success && outside.ReasonCode == "BLOCKED_PROCESS_EXECUTION", "Expected out-of-workspace working directory to be blocked.");
+    AssertTrue(!outside.Success && outside.ReasonCode == PermissionReasonCodes.AccessDeniedOutsideWorkspace, "Expected out-of-workspace working directory to be blocked.");
 
     Console.WriteLine("PASS ProcessExecution_HardeningValidation");
 }
@@ -3484,12 +3522,12 @@ static async Task RunProcessArgumentListPreservesArgumentsRegression()
     {
         Kind = ToolActionKind.RunCommand,
         Command = "powershell",
-        Args = args,
+        Args = new[] { "-EncodedCommand", "SQBlAHgA" },
         WorkingDirectory = workspaceRoot,
         Timeout = TimeSpan.FromSeconds(15)
     });
 
-    AssertTrue(!result.Success && result.ReasonCode == "INVALID_COMMAND", "Expected powershell command to remain blocked by allowlist.");
+    AssertTrue(!result.Success && result.ReasonCode == PermissionReasonCodes.HighRiskApprovalRequired, "Expected encoded powershell command to require approval via canonical policy.");
 
     // Validate exact argument preservation by probing ProcessStartInfo.ArgumentList directly.
     var startInfo = new ProcessStartInfo
@@ -3766,6 +3804,16 @@ static async Task RunPermissionGuardCanonicalCommandPolicyRegression()
     });
     AssertTrue(!npmRunner.Success, "Expected runner npm run build not to execute without approval.");
     AssertTrue(npmRunner.ReasonCode == PermissionReasonCodes.HighRiskApprovalRequired, "Expected runner npm run build to require approval.");
+    var npxRunner = await runner.RunAsync(new SafeProcessRequest
+    {
+        Kind = ToolActionKind.RunCommand,
+        Command = "npx",
+        Args = new[] { "something" },
+        WorkingDirectory = workspaceRoot,
+        Timeout = TimeSpan.FromSeconds(5)
+    });
+    AssertTrue(!npxRunner.Success, "Expected runner npx command not to execute without approval.");
+    AssertTrue(npxRunner.ReasonCode == PermissionReasonCodes.HighRiskApprovalRequired, "Expected runner npx command to require approval.");
 
     var readAllowed = guard.Evaluate(session, new ToolAction
     {

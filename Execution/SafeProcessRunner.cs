@@ -13,14 +13,6 @@ public sealed class SafeProcessRunner
         "/p:UseSharedCompilation=false"
     };
 
-    private static readonly HashSet<string> AllowedCommands = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "dotnet",
-        "git",
-        "npm"
-    };
-    private static readonly string[] ForbiddenShellTokens = { "&&", "|", ">", "<", ";" };
-
     private readonly AgentSessionContext _session;
     private readonly PermissionGuard _permissionGuard;
     private readonly ExecutionTracer? _tracer;
@@ -39,19 +31,19 @@ public sealed class SafeProcessRunner
         if (request is null)
             throw new ArgumentNullException(nameof(request));
 
-        if (string.IsNullOrWhiteSpace(request.Command) || !AllowedCommands.Contains(request.Command))
+        if (string.IsNullOrWhiteSpace(request.Command))
         {
-            _tracer?.LogActionEvent("ProcessSpawn", "SafeProcessRunner", ExecutionTracer.ActionLogLevel.Warning, "rejected", PermissionReasonCodes.ToolDeniedByPolicy, new Dictionary<string, object?>
+            _tracer?.LogActionEvent("ProcessSpawn", "SafeProcessRunner", ExecutionTracer.ActionLogLevel.Warning, "rejected", PermissionReasonCodes.CommandMalformed, new Dictionary<string, object?>
             {
                 { "command", request.Command },
                 { "working_directory", request.WorkingDirectory },
                 { "args", request.Args?.ToArray() ?? Array.Empty<string>() }
             });
-            return SafeProcessResult.InvalidCommand($"Command '{request.Command}' is not allowed", request.Command, request.WorkingDirectory);
-        }
-        if (ContainsForbiddenShellTokens(request.Command) || (request.Args?.Any(ContainsForbiddenShellTokens) ?? false))
-        {
-            return SafeProcessResult.BlockedProcessExecution("Shell chaining/redirection tokens are not allowed", request.Command, request.WorkingDirectory);
+            return SafeProcessResult.Denied(
+                PermissionReasonCode.CommandMalformed,
+                "Command is required for process execution.",
+                request.Command,
+                request.WorkingDirectory);
         }
 
         var workingDirectory = string.IsNullOrWhiteSpace(request.WorkingDirectory)
@@ -59,11 +51,16 @@ public sealed class SafeProcessRunner
             : request.WorkingDirectory!;
         if (!IsWithinExecutionRoot(workingDirectory))
         {
-            return SafeProcessResult.BlockedProcessExecution("Working directory must stay within execution workspace", request.Command, workingDirectory);
+            return SafeProcessResult.Denied(
+                PermissionReasonCode.PathOutsideWorkspace,
+                "Working directory must stay within execution workspace",
+                request.Command,
+                workingDirectory);
         }
         var action = new ToolAction
         {
             Kind = request.Kind,
+            RunId = request.RunId,
             WorkingDirectory = workingDirectory,
             CommandExecutable = request.Command,
             CommandArgs = request.Args?.ToArray(),
@@ -84,7 +81,7 @@ public sealed class SafeProcessRunner
                 decision.ReasonCode,
                 decision.Message,
                 request.Command,
-                request.WorkingDirectory);
+                workingDirectory);
         }
 
         if (!Directory.Exists(workingDirectory))
@@ -260,13 +257,6 @@ public sealed class SafeProcessRunner
         var root = _session.ExecutionWorkspaceRoot ?? _session.ActiveWorkspaceRoot;
         return CanonicalPathPolicy.IsCanonicallyContained(root, path);
     }
-
-    private static bool ContainsForbiddenShellTokens(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return false;
-        return ForbiddenShellTokens.Any(token => value.Contains(token, StringComparison.Ordinal));
-    }
 }
 
 public sealed class SafeProcessRequest
@@ -275,6 +265,7 @@ public sealed class SafeProcessRequest
     public required string Command { get; init; }
     public IReadOnlyList<string>? Args { get; init; }
     public required string WorkingDirectory { get; init; }
+    public string? RunId { get; init; }
     public TimeSpan? Timeout { get; init; }
 }
 
@@ -299,7 +290,16 @@ public sealed class SafeProcessResult
         ReasonCode = reason switch
         {
             PermissionReasonCode.PathOutsideWorkspace => PermissionReasonCodes.AccessDeniedOutsideWorkspace,
+            PermissionReasonCode.PathNormalizationFailed => PermissionReasonCodes.PathNormalizationFailed,
+            PermissionReasonCode.InvalidWorkingDirectory => PermissionReasonCodes.InvalidWorkingDirectory,
+            PermissionReasonCode.ApprovalTokenExpired => PermissionReasonCodes.ApprovalTokenExpired,
+            PermissionReasonCode.ApprovalRunBindingUnavailable => PermissionReasonCodes.ApprovalRunBindingUnavailable,
+            PermissionReasonCode.ApprovalRunMismatch => PermissionReasonCodes.ApprovalRunMismatch,
+            PermissionReasonCode.ApprovalStateUnavailable => PermissionReasonCodes.ApprovalStateUnavailable,
             PermissionReasonCode.HighRiskApprovalRequired => PermissionReasonCodes.HighRiskApprovalRequired,
+            PermissionReasonCode.CommandUnsupportedShellSyntax => PermissionReasonCodes.CommandUnsupportedShellSyntax,
+            PermissionReasonCode.CommandHardBlocked => PermissionReasonCodes.CommandHardBlocked,
+            PermissionReasonCode.CommandMalformed => PermissionReasonCodes.CommandMalformed,
             PermissionReasonCode.ReadOnlyWriteDenied => PermissionReasonCodes.AccessDeniedByMode,
             PermissionReasonCode.ReadOnlyDeleteDenied => PermissionReasonCodes.AccessDeniedDeleteOperation,
             PermissionReasonCode.WriteModeDeleteDenied => PermissionReasonCodes.AccessDeniedDeleteOperation,
@@ -317,28 +317,6 @@ public sealed class SafeProcessResult
         TimedOut = false,
         ExitCode = -1,
         ReasonCode = PermissionReasonCodes.ToolDeniedByPolicy,
-        Message = message,
-        Command = command,
-        WorkingDirectory = workingDirectory
-    };
-
-    public static SafeProcessResult BlockedProcessExecution(string message, string command, string workingDirectory) => new()
-    {
-        Success = false,
-        TimedOut = false,
-        ExitCode = -1,
-        ReasonCode = "BLOCKED_PROCESS_EXECUTION",
-        Message = message,
-        Command = command,
-        WorkingDirectory = workingDirectory
-    };
-
-    public static SafeProcessResult InvalidCommand(string message, string command, string workingDirectory) => new()
-    {
-        Success = false,
-        TimedOut = false,
-        ExitCode = -1,
-        ReasonCode = "INVALID_COMMAND",
         Message = message,
         Command = command,
         WorkingDirectory = workingDirectory
