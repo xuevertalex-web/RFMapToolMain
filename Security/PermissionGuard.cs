@@ -6,45 +6,52 @@ public sealed class PermissionGuard
 
     public PermissionDecision Evaluate(AgentSessionContext session, ToolAction action)
     {
+        var capabilityAssessment = CapabilityTierClassifier.Classify(action);
+        PermissionDecision WithCapability(PermissionDecision decision) => decision.WithCapabilityMetadata(
+            capabilityAssessment.CapabilityClass,
+            capabilityAssessment.CapabilityTier,
+            capabilityAssessment.Gate,
+            capabilityAssessment.CommandPolicyCategory);
+
         var workspaceRoot = session.ExecutionWorkspaceRoot ?? session.ActiveWorkspaceRoot;
         if (string.IsNullOrWhiteSpace(session.RuntimeRoot) || string.IsNullOrWhiteSpace(workspaceRoot))
-            return PermissionDecision.Deny(PermissionReasonCode.WorkspaceNotResolved, "Workspace root not resolved");
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.WorkspaceNotResolved, "Workspace root not resolved"));
 
         if (PathSafetyPolicy.HasExtendedLengthPrefix(action.TargetPath))
-            return PermissionDecision.Deny(PermissionReasonCode.ExtendedLengthPathDenied, "Target uses extended-length path prefix", action.TargetPath, workspaceRoot);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ExtendedLengthPathDenied, "Target uses extended-length path prefix", action.TargetPath, workspaceRoot));
 
         if (PathSafetyPolicy.HasExtendedLengthPrefix(action.SourcePath))
-            return PermissionDecision.Deny(PermissionReasonCode.ExtendedLengthPathDenied, "Source uses extended-length path prefix", action.SourcePath, session.ActiveWorkspaceRoot);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ExtendedLengthPathDenied, "Source uses extended-length path prefix", action.SourcePath, session.ActiveWorkspaceRoot));
 
         if (PathSafetyPolicy.HasExtendedLengthPrefix(action.DestinationPath))
-            return PermissionDecision.Deny(PermissionReasonCode.ExtendedLengthPathDenied, "Destination uses extended-length path prefix", action.DestinationPath, session.ActiveWorkspaceRoot);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ExtendedLengthPathDenied, "Destination uses extended-length path prefix", action.DestinationPath, session.ActiveWorkspaceRoot));
 
         if (PathSafetyPolicy.HasExtendedLengthPrefix(action.WorkingDirectory))
-            return PermissionDecision.Deny(PermissionReasonCode.ExtendedLengthPathDenied, "Working directory uses extended-length path prefix", action.WorkingDirectory, session.ActiveWorkspaceRoot);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ExtendedLengthPathDenied, "Working directory uses extended-length path prefix", action.WorkingDirectory, session.ActiveWorkspaceRoot));
 
         if (PathSafetyPolicy.HasRelativeDriveSyntax(action.TargetPath))
-            return PermissionDecision.Deny(PermissionReasonCode.InvalidPathSyntaxDenied, "Target uses drive-relative syntax", action.TargetPath, session.ActiveWorkspaceRoot);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.InvalidPathSyntaxDenied, "Target uses drive-relative syntax", action.TargetPath, session.ActiveWorkspaceRoot));
 
         if (PathSafetyPolicy.HasRelativeDriveSyntax(action.SourcePath))
-            return PermissionDecision.Deny(PermissionReasonCode.InvalidPathSyntaxDenied, "Source uses drive-relative syntax", action.SourcePath, session.ActiveWorkspaceRoot);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.InvalidPathSyntaxDenied, "Source uses drive-relative syntax", action.SourcePath, session.ActiveWorkspaceRoot));
 
         if (PathSafetyPolicy.HasRelativeDriveSyntax(action.DestinationPath))
-            return PermissionDecision.Deny(PermissionReasonCode.InvalidPathSyntaxDenied, "Destination uses drive-relative syntax", action.DestinationPath, session.ActiveWorkspaceRoot);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.InvalidPathSyntaxDenied, "Destination uses drive-relative syntax", action.DestinationPath, session.ActiveWorkspaceRoot));
 
         if (PathSafetyPolicy.HasRelativeDriveSyntax(action.WorkingDirectory))
-            return PermissionDecision.Deny(PermissionReasonCode.InvalidPathSyntaxDenied, "Working directory uses drive-relative syntax", action.WorkingDirectory, session.ActiveWorkspaceRoot);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.InvalidPathSyntaxDenied, "Working directory uses drive-relative syntax", action.WorkingDirectory, session.ActiveWorkspaceRoot));
 
         if (PathSafetyPolicy.HasAlternateDataStreamSyntax(action.TargetPath))
-            return PermissionDecision.Deny(PermissionReasonCode.AlternateDataStreamDenied, "Target uses alternate data stream syntax", action.TargetPath, session.ActiveWorkspaceRoot);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.AlternateDataStreamDenied, "Target uses alternate data stream syntax", action.TargetPath, session.ActiveWorkspaceRoot));
 
         if (PathSafetyPolicy.HasAlternateDataStreamSyntax(action.SourcePath))
-            return PermissionDecision.Deny(PermissionReasonCode.AlternateDataStreamDenied, "Source uses alternate data stream syntax", action.SourcePath, session.ActiveWorkspaceRoot);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.AlternateDataStreamDenied, "Source uses alternate data stream syntax", action.SourcePath, session.ActiveWorkspaceRoot));
 
         if (PathSafetyPolicy.HasAlternateDataStreamSyntax(action.DestinationPath))
-            return PermissionDecision.Deny(PermissionReasonCode.AlternateDataStreamDenied, "Destination uses alternate data stream syntax", action.DestinationPath, session.ActiveWorkspaceRoot);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.AlternateDataStreamDenied, "Destination uses alternate data stream syntax", action.DestinationPath, session.ActiveWorkspaceRoot));
 
         if (PathSafetyPolicy.HasAlternateDataStreamSyntax(action.WorkingDirectory))
-            return PermissionDecision.Deny(PermissionReasonCode.AlternateDataStreamDenied, "Working directory uses alternate data stream syntax", action.WorkingDirectory, session.ActiveWorkspaceRoot);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.AlternateDataStreamDenied, "Working directory uses alternate data stream syntax", action.WorkingDirectory, session.ActiveWorkspaceRoot));
 
         string normalizedWorkspace;
         string? normalizedTarget = null;
@@ -66,26 +73,26 @@ public sealed class PermissionGuard
         }
         catch
         {
-            return PermissionDecision.Deny(PermissionReasonCode.PathNormalizationFailed, "Path normalization failed");
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.PathNormalizationFailed, "Path normalization failed"));
         }
 
         if (normalizedTarget is not null && PathSafetyPolicy.IsUncPath(normalizedTarget))
-            return PermissionDecision.Deny(PermissionReasonCode.NetworkPathDenied, "Target is a network path", normalizedTarget, normalizedWorkspace);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.NetworkPathDenied, "Target is a network path", normalizedTarget, normalizedWorkspace));
 
         if (normalizedSource is not null && PathSafetyPolicy.IsUncPath(normalizedSource))
-            return PermissionDecision.Deny(PermissionReasonCode.NetworkPathDenied, "Source is a network path", normalizedSource, normalizedWorkspace);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.NetworkPathDenied, "Source is a network path", normalizedSource, normalizedWorkspace));
 
         if (normalizedDestination is not null && PathSafetyPolicy.IsUncPath(normalizedDestination))
-            return PermissionDecision.Deny(PermissionReasonCode.NetworkPathDenied, "Destination is a network path", normalizedDestination, normalizedWorkspace);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.NetworkPathDenied, "Destination is a network path", normalizedDestination, normalizedWorkspace));
 
         if (normalizedTarget is not null && !IsWithinCanonicalWorkspace(normalizedTarget, normalizedWorkspace))
-            return CreateApprovalRequired(session, action, PermissionReasonCode.PathOutsideWorkspace, "Target is outside active workspace", normalizedTarget, normalizedWorkspace);
+            return WithCapability(CreateApprovalRequired(session, action, PermissionReasonCode.PathOutsideWorkspace, "Target is outside active workspace", normalizedTarget, normalizedWorkspace));
 
         if (normalizedSource is not null && !IsWithinCanonicalWorkspace(normalizedSource, normalizedWorkspace))
-            return CreateApprovalRequired(session, action, PermissionReasonCode.PathOutsideWorkspace, "Source is outside active workspace", normalizedSource, normalizedWorkspace);
+            return WithCapability(CreateApprovalRequired(session, action, PermissionReasonCode.PathOutsideWorkspace, "Source is outside active workspace", normalizedSource, normalizedWorkspace));
 
         if (normalizedDestination is not null && !IsWithinCanonicalWorkspace(normalizedDestination, normalizedWorkspace))
-            return CreateApprovalRequired(session, action, PermissionReasonCode.PathOutsideWorkspace, "Destination is outside active workspace", normalizedDestination, normalizedWorkspace);
+            return WithCapability(CreateApprovalRequired(session, action, PermissionReasonCode.PathOutsideWorkspace, "Destination is outside active workspace", normalizedDestination, normalizedWorkspace));
 
         if (action.Kind == ToolActionKind.RunCommand)
         {
@@ -107,75 +114,75 @@ public sealed class PermissionGuard
             switch (commandDecision.Category)
             {
                 case CommandPolicyCategory.Allowed:
-                    return PermissionDecision.Allow(commandTarget, normalizedWorkspace);
+                    return WithCapability(PermissionDecision.Allow(commandTarget, normalizedWorkspace));
 
                 case CommandPolicyCategory.HighRiskApprovalRequired:
                 {
                     if (!session.IsApprovalLedgerHealthy)
-                        return PermissionDecision.Deny(PermissionReasonCode.ApprovalStateUnavailable, $"Approval state unavailable: {session.ApprovalLedgerError}");
+                        return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ApprovalStateUnavailable, $"Approval state unavailable: {session.ApprovalLedgerError}"));
                     var highRiskValidation = ValidateBoundApprovalTokenForAction(session, action, PermissionReasonCode.HighRiskApprovalRequired, commandTarget, normalizedWorkspace);
                     if (!highRiskValidation.Allowed)
                     {
                         if (CommandRiskPolicy.HasExplicitApprovalMarker(action.Payload))
-                            return PermissionDecision.Deny(highRiskValidation.ReasonCode, highRiskValidation.Message, commandTarget, normalizedWorkspace);
-                        return CreateApprovalRequired(session, action, PermissionReasonCode.HighRiskApprovalRequired, "High-risk host/system/network-impacting command requires explicit approval", commandTarget, normalizedWorkspace, commandDecision.RiskLevel);
+                            return WithCapability(PermissionDecision.Deny(highRiskValidation.ReasonCode, highRiskValidation.Message, commandTarget, normalizedWorkspace));
+                        return WithCapability(CreateApprovalRequired(session, action, PermissionReasonCode.HighRiskApprovalRequired, "High-risk host/system/network-impacting command requires explicit approval", commandTarget, normalizedWorkspace, commandDecision.RiskLevel));
                     }
 
-                    return PermissionDecision.Allow(commandTarget, normalizedWorkspace);
+                    return WithCapability(PermissionDecision.Allow(commandTarget, normalizedWorkspace));
                 }
 
                 case CommandPolicyCategory.UnsupportedShellMetaSyntax:
-                    return PermissionDecision.Deny(PermissionReasonCode.CommandUnsupportedShellSyntax, "Command contains unsupported shell/meta syntax and cannot be approved.", commandTarget, normalizedWorkspace);
+                    return WithCapability(PermissionDecision.Deny(PermissionReasonCode.CommandUnsupportedShellSyntax, "Command contains unsupported shell/meta syntax and cannot be approved.", commandTarget, normalizedWorkspace));
 
                 case CommandPolicyCategory.HardBlocked:
-                    return PermissionDecision.Deny(PermissionReasonCode.CommandHardBlocked, "Command is hard-blocked by command policy and cannot be approved.", commandTarget, normalizedWorkspace);
+                    return WithCapability(PermissionDecision.Deny(PermissionReasonCode.CommandHardBlocked, "Command is hard-blocked by command policy and cannot be approved.", commandTarget, normalizedWorkspace));
 
                 case CommandPolicyCategory.InvalidMalformed:
                 default:
-                    return PermissionDecision.Deny(PermissionReasonCode.CommandMalformed, "Command is malformed or missing executable/arguments.", commandTarget, normalizedWorkspace);
+                    return WithCapability(PermissionDecision.Deny(PermissionReasonCode.CommandMalformed, "Command is malformed or missing executable/arguments.", commandTarget, normalizedWorkspace));
             }
         }
 
         if (normalizedTarget is not null && session.ProtectedPathPolicy.IsProtected(normalizedTarget) && !IsWithinExecutionWorkspace(normalizedTarget, session))
-            return PermissionDecision.Deny(PermissionReasonCode.ProtectedPathDenied, "Target is protected", normalizedTarget, normalizedWorkspace);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ProtectedPathDenied, "Target is protected", normalizedTarget, normalizedWorkspace));
 
         if (normalizedSource is not null && session.ProtectedPathPolicy.IsProtected(normalizedSource) && !IsWithinExecutionWorkspace(normalizedSource, session))
-            return PermissionDecision.Deny(PermissionReasonCode.ProtectedPathDenied, "Source is protected", normalizedSource, normalizedWorkspace);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ProtectedPathDenied, "Source is protected", normalizedSource, normalizedWorkspace));
 
         if (normalizedDestination is not null && session.ProtectedPathPolicy.IsProtected(normalizedDestination) && !IsWithinExecutionWorkspace(normalizedDestination, session))
-            return PermissionDecision.Deny(PermissionReasonCode.ProtectedPathDenied, "Destination is protected", normalizedDestination, normalizedWorkspace);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ProtectedPathDenied, "Destination is protected", normalizedDestination, normalizedWorkspace));
 
         if (normalizedTarget is not null && PathSafetyPolicy.ContainsReparsePoint(normalizedTarget))
-            return PermissionDecision.Deny(PermissionReasonCode.ReparsePointDenied, "Target path contains a reparse point", normalizedTarget, normalizedWorkspace);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ReparsePointDenied, "Target path contains a reparse point", normalizedTarget, normalizedWorkspace));
 
         if (normalizedSource is not null && PathSafetyPolicy.ContainsReparsePoint(normalizedSource))
-            return PermissionDecision.Deny(PermissionReasonCode.ReparsePointDenied, "Source path contains a reparse point", normalizedSource, normalizedWorkspace);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ReparsePointDenied, "Source path contains a reparse point", normalizedSource, normalizedWorkspace));
 
         if (normalizedDestination is not null && PathSafetyPolicy.ContainsReparsePoint(normalizedDestination))
-            return PermissionDecision.Deny(PermissionReasonCode.ReparsePointDenied, "Destination path contains a reparse point", normalizedDestination, normalizedWorkspace);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ReparsePointDenied, "Destination path contains a reparse point", normalizedDestination, normalizedWorkspace));
 
         if (IsRuntimeDiagnosticsMutation(action.Kind))
         {
             if (normalizedTarget is not null && IsWithinRuntimeDiagnosticsPath(normalizedTarget, normalizedWorkspace))
-                return PermissionDecision.Deny(PermissionReasonCode.ProtectedRuntimeDiagnosticsPathDenied, "Mutation denied for protected runtime diagnostics path", normalizedTarget, normalizedWorkspace);
+                return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ProtectedRuntimeDiagnosticsPathDenied, "Mutation denied for protected runtime diagnostics path", normalizedTarget, normalizedWorkspace));
 
             if (normalizedSource is not null && IsWithinRuntimeDiagnosticsPath(normalizedSource, normalizedWorkspace))
-                return PermissionDecision.Deny(PermissionReasonCode.ProtectedRuntimeDiagnosticsPathDenied, "Mutation denied for protected runtime diagnostics path", normalizedSource, normalizedWorkspace);
+                return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ProtectedRuntimeDiagnosticsPathDenied, "Mutation denied for protected runtime diagnostics path", normalizedSource, normalizedWorkspace));
 
             if (normalizedDestination is not null && IsWithinRuntimeDiagnosticsPath(normalizedDestination, normalizedWorkspace))
-                return PermissionDecision.Deny(PermissionReasonCode.ProtectedRuntimeDiagnosticsPathDenied, "Mutation denied for protected runtime diagnostics path", normalizedDestination, normalizedWorkspace);
+                return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ProtectedRuntimeDiagnosticsPathDenied, "Mutation denied for protected runtime diagnostics path", normalizedDestination, normalizedWorkspace));
         }
 
         if (session.AccessMode == AgentAccessMode.ReadOnly)
         {
             if (IsWriteLike(action.Kind))
-                return PermissionDecision.Deny(PermissionReasonCode.ReadOnlyWriteDenied, "Write denied in ReadOnly mode", normalizedTarget, normalizedWorkspace);
+                return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ReadOnlyWriteDenied, "Write denied in ReadOnly mode", normalizedTarget, normalizedWorkspace));
 
             if (IsDeleteLike(action.Kind))
-                return PermissionDecision.Deny(PermissionReasonCode.ReadOnlyDeleteDenied, "Delete denied in ReadOnly mode", normalizedTarget, normalizedWorkspace);
+                return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ReadOnlyDeleteDenied, "Delete denied in ReadOnly mode", normalizedTarget, normalizedWorkspace));
 
             if (IsRenameLike(action.Kind) || IsMoveLike(action.Kind))
-                return PermissionDecision.Deny(PermissionReasonCode.ReadOnlyWriteDenied, "Rename/move denied in ReadOnly mode", normalizedTarget, normalizedWorkspace);
+                return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ReadOnlyWriteDenied, "Rename/move denied in ReadOnly mode", normalizedTarget, normalizedWorkspace));
         }
 
         if (session.AccessMode == AgentAccessMode.WorkspaceWrite)
@@ -183,13 +190,13 @@ public sealed class PermissionGuard
             if (IsDeleteLike(action.Kind) || IsRenameLike(action.Kind) || IsMoveLike(action.Kind))
             {
                 if (!session.IsApprovalLedgerHealthy)
-                    return PermissionDecision.Deny(PermissionReasonCode.ApprovalStateUnavailable, $"Approval state unavailable: {session.ApprovalLedgerError}");
+                    return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ApprovalStateUnavailable, $"Approval state unavailable: {session.ApprovalLedgerError}"));
                 var target = normalizedTarget ?? normalizedSource ?? normalizedDestination ?? normalizedWorkspace;
                 if (!CommandRiskPolicy.HasExplicitApprovalMarker(action.Payload))
-                    return CreateApprovalRequired(session, action, PermissionReasonCode.WriteModeDeleteDenied, "Destructive operation requires explicit approval in WorkspaceWrite mode", normalizedTarget ?? normalizedSource ?? normalizedDestination ?? normalizedWorkspace, normalizedWorkspace, "high");
+                    return WithCapability(CreateApprovalRequired(session, action, PermissionReasonCode.WriteModeDeleteDenied, "Destructive operation requires explicit approval in WorkspaceWrite mode", normalizedTarget ?? normalizedSource ?? normalizedDestination ?? normalizedWorkspace, normalizedWorkspace, "high"));
                 var destructiveValidation = ValidateBoundApprovalTokenForAction(session, action, PermissionReasonCode.WriteModeDeleteDenied, target, normalizedWorkspace);
                 if (!destructiveValidation.Allowed)
-                    return PermissionDecision.Deny(destructiveValidation.ReasonCode, destructiveValidation.Message, target, normalizedWorkspace);
+                    return WithCapability(PermissionDecision.Deny(destructiveValidation.ReasonCode, destructiveValidation.Message, target, normalizedWorkspace));
             }
         }
 
@@ -197,23 +204,23 @@ public sealed class PermissionGuard
             !string.IsNullOrWhiteSpace(normalizedTarget) &&
             !Directory.Exists(normalizedTarget))
         {
-            return PermissionDecision.Deny(PermissionReasonCode.InvalidWorkingDirectory, "Working directory does not exist", normalizedTarget, normalizedWorkspace);
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.InvalidWorkingDirectory, "Working directory does not exist", normalizedTarget, normalizedWorkspace));
         }
 
         if ((action.Kind == ToolActionKind.RenameFile || action.Kind == ToolActionKind.MoveFile) &&
             string.IsNullOrWhiteSpace(normalizedSource))
         {
-            return PermissionDecision.Deny(PermissionReasonCode.PathNormalizationFailed, "Source path is required for rename/move");
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.PathNormalizationFailed, "Source path is required for rename/move"));
         }
 
         if ((action.Kind == ToolActionKind.RenameFile || action.Kind == ToolActionKind.MoveFile) &&
             string.IsNullOrWhiteSpace(normalizedDestination))
         {
-            return PermissionDecision.Deny(PermissionReasonCode.PathNormalizationFailed, "Destination path is required for rename/move");
+            return WithCapability(PermissionDecision.Deny(PermissionReasonCode.PathNormalizationFailed, "Destination path is required for rename/move"));
         }
 
         var resolvedTarget = normalizedTarget ?? normalizedSource ?? normalizedDestination;
-        return PermissionDecision.Allow(resolvedTarget, normalizedWorkspace);
+        return WithCapability(PermissionDecision.Allow(resolvedTarget, normalizedWorkspace));
     }
 
     private static bool IsWithinWorkspace(string path, string workspaceRoot) =>

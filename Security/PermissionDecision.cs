@@ -42,6 +42,27 @@ public sealed class PermissionDecision
     public string? NormalizedWorkspaceRoot { get; init; }
     public ActionApprovalProposal? ApprovalProposal { get; init; }
     public string? ExpectedApprovalToken { get; init; }
+    public string? CapabilityClass { get; init; }
+    public int? CapabilityTier { get; init; }
+    public string? CapabilityGate { get; init; }
+    public string? CapabilityPolicyCategory { get; init; }
+
+    public PermissionDecision WithCapabilityMetadata(string capabilityClass, int capabilityTier, string capabilityGate, string? capabilityPolicyCategory = null) => new()
+    {
+        Allowed = Allowed,
+        RequiresApproval = RequiresApproval,
+        ApprovalStatus = ApprovalStatus,
+        ReasonCode = ReasonCode,
+        Message = Message,
+        NormalizedTargetPath = NormalizedTargetPath,
+        NormalizedWorkspaceRoot = NormalizedWorkspaceRoot,
+        ApprovalProposal = ApprovalProposal,
+        ExpectedApprovalToken = ExpectedApprovalToken,
+        CapabilityClass = capabilityClass,
+        CapabilityTier = capabilityTier,
+        CapabilityGate = capabilityGate,
+        CapabilityPolicyCategory = capabilityPolicyCategory
+    };
 
     public static PermissionDecision Allow(string? target, string? workspace) => new()
     {

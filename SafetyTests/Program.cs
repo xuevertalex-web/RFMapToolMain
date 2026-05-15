@@ -3897,12 +3897,33 @@ static async Task RunPermissionGuardCanonicalCommandPolicyRegression()
 
     var safe = Run("dotnet --version");
     AssertTrue(safe.Allowed, "Expected safe command to be allowed by canonical command policy.");
+    AssertTrue(safe.CapabilityClass == "analysis" && safe.CapabilityTier == 0 && safe.CapabilityGate == "allowed", "Expected safe command capability metadata analysis/tier0/allowed.");
+    AssertTrue(safe.CapabilityPolicyCategory == "allowed", "Expected safe command capability policy category.");
     var safeExplicit = RunExplicit("dotnet", new[] { "--version" });
     AssertTrue(safeExplicit.Allowed, "Expected explicit executable+args safe command to be allowed.");
+    AssertTrue(safeExplicit.CapabilityClass == "analysis" && safeExplicit.CapabilityTier == 0 && safeExplicit.CapabilityGate == "allowed", "Expected explicit safe command capability metadata analysis/tier0/allowed.");
+
+    var writeAllowed = guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.WriteFile,
+        TargetPath = Path.Combine(workspaceRoot, "write-safe.txt")
+    });
+    AssertTrue(writeAllowed.Allowed, "Expected write action in WorkspaceWrite mode to be allowed.");
+    AssertTrue(writeAllowed.CapabilityClass == "mutation" && writeAllowed.CapabilityTier == 1 && writeAllowed.CapabilityGate == "allowed", "Expected write action capability metadata mutation/tier1/allowed.");
+
+    var destructiveDelete = guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.DeleteFile,
+        TargetPath = Path.Combine(workspaceRoot, "read-safe.txt")
+    });
+    AssertTrue(!destructiveDelete.Allowed && destructiveDelete.RequiresApproval, "Expected destructive delete to require approval.");
+    AssertTrue(destructiveDelete.CapabilityClass == "destructive" && destructiveDelete.CapabilityTier == 2 && destructiveDelete.CapabilityGate == "approval_required", "Expected destructive delete capability metadata destructive/tier2/approval_required.");
 
     var npmRun = Run("npm run build");
     AssertTrue(!npmRun.Allowed && npmRun.RequiresApproval, "Expected npm run build to require approval.");
     AssertTrue(npmRun.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, "Expected npm run build high-risk approval reason.");
+    AssertTrue(npmRun.CapabilityClass == "kernel_system" && npmRun.CapabilityTier == 5 && npmRun.CapabilityGate == "approval_required", "Expected npm run capability metadata kernel_system/tier5/approval_required.");
+    AssertTrue(npmRun.CapabilityPolicyCategory == "high_risk_approval_required", "Expected npm run capability policy category.");
     var npmRunExplicit = RunExplicit("npm", new[] { "run", "build" }, "run build");
     AssertTrue(!npmRunExplicit.Allowed && npmRunExplicit.RequiresApproval, "Expected explicit npm run build to require approval.");
     AssertTrue(npmRunExplicit.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, "Expected explicit npm run build high-risk approval reason.");
@@ -3931,6 +3952,8 @@ static async Task RunPermissionGuardCanonicalCommandPolicyRegression()
     AssertTrue(!shellMeta.RequiresApproval, "Expected shell/meta syntax command to be denied without approval proposal.");
     AssertTrue(shellMeta.ReasonCodeString == PermissionReasonCodes.CommandUnsupportedShellSyntax, "Expected deterministic shell/meta denial reason.");
     AssertTrue(shellMeta.ApprovalProposal is null, "Expected no approval proposal for unsupported shell/meta syntax.");
+    AssertTrue(shellMeta.CapabilityClass == "kernel_system" && shellMeta.CapabilityTier == 5 && shellMeta.CapabilityGate == "denied", "Expected shell/meta capability metadata kernel_system/tier5/denied.");
+    AssertTrue(shellMeta.CapabilityPolicyCategory == "unsupported_shell_meta_syntax", "Expected shell/meta capability policy category.");
 
     var malformed = Run("   ");
     AssertTrue(!malformed.Allowed, "Expected malformed command to be denied.");
@@ -3953,6 +3976,7 @@ static async Task RunPermissionGuardCanonicalCommandPolicyRegression()
     var genericMarker = Run("nvidia-smi APPROVED:true");
     AssertTrue(!genericMarker.Allowed, "Expected APPROVED:true marker to remain denied.");
     AssertTrue(genericMarker.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, "Expected deterministic generic marker denial reason.");
+    AssertTrue(genericMarker.CapabilityGate == "approval_required", "Expected generic marker capability gate to stay approval_required.");
     var genericMarkerExplicit = RunExplicit("nvidia-smi", new[] { "APPROVED:true" }, "nvidia-smi APPROVED:true");
     AssertTrue(!genericMarkerExplicit.Allowed, "Expected explicit APPROVED:true marker to remain denied.");
     AssertTrue(genericMarkerExplicit.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, "Expected explicit deterministic generic marker denial reason.");
@@ -3984,6 +4008,7 @@ static async Task RunPermissionGuardCanonicalCommandPolicyRegression()
         TargetPath = Path.Combine(workspaceRoot, "read-safe.txt")
     });
     AssertTrue(readAllowed.Allowed, "Expected read/analysis path to remain unaffected by command-policy integration.");
+    AssertTrue(readAllowed.CapabilityClass == "analysis" && readAllowed.CapabilityTier == 0 && readAllowed.CapabilityGate == "allowed", "Expected read action capability metadata analysis/tier0/allowed.");
 
     Console.WriteLine("PASS RunPermissionGuardCanonicalCommandPolicyRegression");
 }
