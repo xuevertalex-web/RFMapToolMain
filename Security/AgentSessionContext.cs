@@ -5,6 +5,19 @@ namespace LocalCursorAgent.Security;
 
 public sealed class AgentSessionContext : IDisposable
 {
+    private const string UnknownStateUnavailable = "unknown_state_unavailable";
+    private static readonly HashSet<string> KnownApprovalLedgerErrorCodes = new(StringComparer.Ordinal)
+    {
+        "owner_lock_unavailable",
+        "load_failed",
+        "compact_failed",
+        "issue_append_failed",
+        "consume_append_failed",
+        "expired_append_failed",
+        "denied_append_failed",
+        "init_failed",
+        UnknownStateUnavailable
+    };
     public const int ApprovalTokenTtlSecondsDefault = 600;
     public static readonly DateTime RunIdCutoverUtc = new(2026, 5, 14, 0, 0, 0, DateTimeKind.Utc);
     public static readonly DateTime CapabilityFingerprintCutoverUtc = new(2026, 5, 15, 0, 0, 0, DateTimeKind.Utc);
@@ -43,7 +56,7 @@ public sealed class AgentSessionContext : IDisposable
         get
         {
             EnsureApprovalLedgerInitialized();
-            return _approvalLedgerError;
+            return GetPublicApprovalLedgerErrorCode();
         }
     }
 
@@ -80,10 +93,10 @@ public sealed class AgentSessionContext : IDisposable
 
         var effectiveRunId = ResolveRunIdForProposal(proposalId, runId);
         var capabilityFingerprint = ResolveCapabilityFingerprintForProposal(proposalId);
-        if (!_approvalLedger.TryAppendConsumed(SessionId, proposalId, UtcNowProvider(), effectiveRunId, capabilityFingerprint, out var appendError))
+        if (!_approvalLedger.TryAppendConsumed(SessionId, proposalId, UtcNowProvider(), effectiveRunId, capabilityFingerprint, out _))
         {
             _approvalLedgerHealthy = false;
-            _approvalLedgerError = $"consume_append_failed: {appendError}";
+            SetApprovalLedgerErrorCode("consume_append_failed");
             return false;
         }
 
@@ -107,10 +120,10 @@ public sealed class AgentSessionContext : IDisposable
             return true;
         var effectiveRunId = ResolveRunIdForProposal(proposalId, runId);
         var capabilityFingerprint = ResolveCapabilityFingerprintForProposal(proposalId);
-        if (!_approvalLedger.TryAppendExpired(SessionId, proposalId, UtcNowProvider(), reasonCode, effectiveRunId, capabilityFingerprint, out var appendError))
+        if (!_approvalLedger.TryAppendExpired(SessionId, proposalId, UtcNowProvider(), reasonCode, effectiveRunId, capabilityFingerprint, out _))
         {
             _approvalLedgerHealthy = false;
-            _approvalLedgerError = $"expired_append_failed: {appendError}";
+            SetApprovalLedgerErrorCode("expired_append_failed");
             return false;
         }
         lock (_expiredApprovalProposalIds)
@@ -126,10 +139,10 @@ public sealed class AgentSessionContext : IDisposable
         if (!_approvalLedgerHealthy || _approvalLedger is null)
             return false;
         var effectiveRunId = ResolveRunIdForProposal(proposalId, runId);
-        if (!_approvalLedger.TryAppendDenied(SessionId, proposalId, eventName, UtcNowProvider(), reasonCode, effectiveRunId, out var appendError))
+        if (!_approvalLedger.TryAppendDenied(SessionId, proposalId, eventName, UtcNowProvider(), reasonCode, effectiveRunId, out _))
         {
             _approvalLedgerHealthy = false;
-            _approvalLedgerError = $"denied_append_failed: {appendError}";
+            SetApprovalLedgerErrorCode("denied_append_failed");
             return false;
         }
         return true;
@@ -143,10 +156,10 @@ public sealed class AgentSessionContext : IDisposable
         if (!_approvalLedgerHealthy || _approvalLedger is null)
             return false;
 
-        if (!_approvalLedger.TryAppendIssued(proposal, out var appendError))
+        if (!_approvalLedger.TryAppendIssued(proposal, out _))
         {
             _approvalLedgerHealthy = false;
-            _approvalLedgerError = $"issue_append_failed: {appendError}";
+            SetApprovalLedgerErrorCode("issue_append_failed");
             return false;
         }
 
@@ -197,23 +210,23 @@ public sealed class AgentSessionContext : IDisposable
             _approvalLedgerInitialized = true;
             try
             {
-                if (!TryAcquireApprovalRuntimeOwnerLock(out var ownerLockError))
+                if (!TryAcquireApprovalRuntimeOwnerLock())
                 {
                     _approvalLedgerHealthy = false;
-                    _approvalLedgerError = $"owner_lock_unavailable: {ownerLockError}";
+                    SetApprovalLedgerErrorCode("owner_lock_unavailable");
                     return;
                 }
                 _approvalLedger = new ApprovalLedgerV2(RuntimeRoot);
-                if (!_approvalLedger.TryCompactForStartup(UtcNowProvider(), ApprovalTokenTtlSecondsDefault, out _, out var compactError))
+                if (!_approvalLedger.TryCompactForStartup(UtcNowProvider(), ApprovalTokenTtlSecondsDefault, out _, out _))
                 {
                     _approvalLedgerHealthy = false;
-                    _approvalLedgerError = $"compact_failed: {compactError}";
+                    SetApprovalLedgerErrorCode("compact_failed");
                     return;
                 }
-                if (!_approvalLedger.TryLoad(out var proposals, out var consumed, out var expired, out var loadError))
+                if (!_approvalLedger.TryLoad(out var proposals, out var consumed, out var expired, out _))
                 {
                     _approvalLedgerHealthy = false;
-                    _approvalLedgerError = $"load_failed: {loadError}";
+                    SetApprovalLedgerErrorCode("load_failed");
                     return;
                 }
 
@@ -224,17 +237,16 @@ public sealed class AgentSessionContext : IDisposable
                 foreach (var id in expired)
                     _expiredApprovalProposalIds.Add(id);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 _approvalLedgerHealthy = false;
-                _approvalLedgerError = $"init_failed: {ex.Message}";
+                SetApprovalLedgerErrorCode("init_failed");
             }
         }
     }
 
-    private bool TryAcquireApprovalRuntimeOwnerLock(out string? error)
+    private bool TryAcquireApprovalRuntimeOwnerLock()
     {
-        error = null;
         if (_approvalRuntimeOwnerLockHandle is not null)
             return true;
 
@@ -251,11 +263,33 @@ public sealed class AgentSessionContext : IDisposable
                 FileShare.None);
             return true;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            error = ex.Message;
             return false;
         }
+    }
+
+    private void SetApprovalLedgerErrorCode(string? code)
+    {
+        _approvalLedgerError = NormalizeApprovalLedgerErrorCode(code);
+    }
+
+    private string GetPublicApprovalLedgerErrorCode() =>
+        NormalizeApprovalLedgerErrorCode(_approvalLedgerError);
+
+    private static string NormalizeApprovalLedgerErrorCode(string? code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+            return UnknownStateUnavailable;
+
+        var normalized = code.Trim();
+        var separator = normalized.IndexOf(':');
+        if (separator > 0)
+            normalized = normalized[..separator].Trim();
+
+        return KnownApprovalLedgerErrorCodes.Contains(normalized)
+            ? normalized
+            : UnknownStateUnavailable;
     }
 
     private static string ComputeApprovalRuntimeOwnerLockPath(string runtimeRoot)

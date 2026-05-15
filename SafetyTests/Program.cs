@@ -3108,7 +3108,9 @@ static async Task RunApprovalRuntimeOwnerLockRegression()
             WorkingDirectory = workspaceRoot
         });
         AssertTrue(!secondDecision.Allowed && secondDecision.ReasonCodeString == PermissionReasonCodes.ApprovalStateUnavailable, "Expected second runtime owner contender to fail closed for approval-gated command.");
-        AssertTrue(secondSession.ApprovalLedgerError.StartsWith("owner_lock_unavailable:", StringComparison.Ordinal), "Expected deterministic owner lock unavailable error prefix.");
+        AssertTrue(string.Equals(secondSession.ApprovalLedgerError, "owner_lock_unavailable", StringComparison.Ordinal), "Expected deterministic owner lock unavailable diagnostic code.");
+        AssertTrue(string.Equals(secondDecision.Message, "Approval state unavailable: owner_lock_unavailable", StringComparison.Ordinal), "Expected sanitized owner lock unavailable denial message.");
+        AssertTrue(!secondDecision.Message.Contains(runtimeRoot, StringComparison.OrdinalIgnoreCase), "Owner-lock denial diagnostics must not leak runtime path details.");
 
         var secondRead = secondGuard.Evaluate(secondSession, new ToolAction
         {
@@ -3293,6 +3295,10 @@ static async Task RunApprovalLedgerCorruptFailClosedRegression()
             WorkingDirectory = workspaceRoot
         });
         AssertTrue(!highRisk.Allowed && highRisk.ReasonCodeString == PermissionReasonCodes.ApprovalStateUnavailable, "Expected fail-closed for approval-gated command when ledger is corrupt.");
+        AssertTrue(string.Equals(session.ApprovalLedgerError, "load_failed", StringComparison.Ordinal), "Expected sanitized load_failed diagnostic code for corrupt ledger load.");
+        AssertTrue(string.Equals(highRisk.Message, "Approval state unavailable: load_failed", StringComparison.Ordinal), "Expected sanitized load-failure denial message.");
+        AssertTrue(!highRisk.Message.Contains(runtimeRoot, StringComparison.OrdinalIgnoreCase), "Load-failure denial diagnostics must not leak runtime path details.");
+        AssertTrue(!highRisk.Message.Contains("{bad-json", StringComparison.OrdinalIgnoreCase), "Load-failure denial diagnostics must not leak raw parse payload.");
 
         var readTarget = Path.Combine(workspaceRoot, "read-ok.txt");
         await File.WriteAllTextAsync(readTarget, "ok");
@@ -3450,6 +3456,11 @@ static async Task RunApprovalLedgerDeniedAppendFailureFailClosedRegression()
                 WorkingDirectory = workspaceRoot
             });
             AssertTrue(!highRisk.Allowed && highRisk.ReasonCodeString == PermissionReasonCodes.ApprovalStateUnavailable, "Expected deterministic fail-closed behavior after denied append failure.");
+            AssertTrue(string.Equals(session.ApprovalLedgerError, "denied_append_failed", StringComparison.Ordinal), "Expected sanitized denied_append_failed diagnostic code.");
+            AssertTrue(string.Equals(highRisk.Message, "Approval state unavailable: denied_append_failed", StringComparison.Ordinal), "Expected sanitized denied-append failure denial message.");
+            AssertTrue(!highRisk.Message.Contains("APPROVED:true", StringComparison.OrdinalIgnoreCase), "Denied-append failure diagnostics must not leak approval marker payload.");
+            AssertTrue(!highRisk.Message.Contains(runtimeRoot, StringComparison.OrdinalIgnoreCase), "Denied-append failure diagnostics must not leak runtime path details.");
+            AssertTrue(!highRisk.Message.Contains("nvidia-smi", StringComparison.OrdinalIgnoreCase), "Denied-append failure diagnostics must not leak command payload.");
 
             var readPath = Path.Combine(workspaceRoot, "read-ok-after-denied-append.txt");
             await File.WriteAllTextAsync(readPath, "ok");
@@ -3641,6 +3652,9 @@ static async Task RunApprovalLedgerStartupCompactionDeterministicRegression()
                 WorkingDirectory = workspaceRoot
             });
             AssertTrue(!denied.Allowed && denied.ReasonCodeString == PermissionReasonCodes.ApprovalStateUnavailable, "Compaction replace failure must fail closed for approval-gated actions.");
+            AssertTrue(string.Equals(replaceSession.ApprovalLedgerError, "compact_failed", StringComparison.Ordinal), "Expected sanitized compact_failed diagnostic code.");
+            AssertTrue(string.Equals(denied.Message, "Approval state unavailable: compact_failed", StringComparison.Ordinal), "Expected sanitized compaction-failure denial message.");
+            AssertTrue(!denied.Message.Contains(runtimeRootReplaceFail, StringComparison.OrdinalIgnoreCase), "Compaction-failure denial diagnostics must not leak runtime path details.");
             AssertTrue(File.Exists(replaceLedger), "Original ledger must remain present after replace failure.");
             File.SetAttributes(replaceLedger, FileAttributes.Normal);
         }
