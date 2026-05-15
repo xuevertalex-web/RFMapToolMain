@@ -68,6 +68,7 @@ await RunApprovalLedgerDeniedAppendFailureFailClosedRegression();
 await RunApprovalLedgerStartupCompactionDeterministicRegression();
 RunCommandRiskPolicyTokenizationRegression();
 RunCanonicalCommandPolicyDecisionRegression();
+RunCapabilityTierClassifierRegression();
 await RunPermissionGuardCanonicalCommandPolicyRegression();
 RunExtractRequestedNewFilePath_ExtensionRegression();
 RunExtractRequestedNewFilePath_NoCreateIntentRegression();
@@ -3767,6 +3768,94 @@ static void RunCanonicalCommandPolicyDecisionRegression()
     }
 
     Console.WriteLine("PASS RunCanonicalCommandPolicyDecisionRegression");
+}
+
+static void RunCapabilityTierClassifierRegression()
+{
+    var assembly = typeof(PermissionGuard).Assembly;
+    var classifierType = assembly.GetType("LocalCursorAgent.Security.CapabilityTierClassifier", throwOnError: true)!;
+    var classifyMethod = classifierType.GetMethod("Classify", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public)!;
+    var requiresEscalationMethod = classifierType.GetMethod("RequiresEscalation", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public)!;
+    AssertTrue(classifyMethod is not null, "Expected CapabilityTierClassifier.Classify.");
+    AssertTrue(requiresEscalationMethod is not null, "Expected CapabilityTierClassifier.RequiresEscalation.");
+
+    object Classify(ToolAction action) => classifyMethod.Invoke(null, new object[] { action })!;
+    static string ReadString(object o, string p) => (string)(o.GetType().GetProperty(p)?.GetValue(o) ?? string.Empty);
+    static int ReadInt(object o, string p) => (int)(o.GetType().GetProperty(p)?.GetValue(o) ?? -1);
+
+    var read = Classify(new ToolAction { Kind = ToolActionKind.ReadFile });
+    AssertTrue(ReadString(read, "CapabilityClass") == "analysis", "Expected ReadFile capability class=analysis.");
+    AssertTrue(ReadInt(read, "CapabilityTier") == 0, "Expected ReadFile capability tier=0.");
+    AssertTrue(ReadString(read, "Gate") == "allowed", "Expected ReadFile gate=allowed.");
+
+    var write = Classify(new ToolAction { Kind = ToolActionKind.WriteFile });
+    AssertTrue(ReadString(write, "CapabilityClass") == "mutation", "Expected WriteFile capability class=mutation.");
+    AssertTrue(ReadInt(write, "CapabilityTier") == 1, "Expected WriteFile capability tier=1.");
+    AssertTrue(ReadString(write, "Gate") == "allowed", "Expected WriteFile gate=allowed.");
+
+    var delete = Classify(new ToolAction { Kind = ToolActionKind.DeleteFile });
+    AssertTrue(ReadString(delete, "CapabilityClass") == "destructive", "Expected DeleteFile capability class=destructive.");
+    AssertTrue(ReadInt(delete, "CapabilityTier") == 2, "Expected DeleteFile capability tier=2.");
+    AssertTrue(ReadString(delete, "Gate") == "approval_required", "Expected DeleteFile gate=approval_required.");
+
+    var safeCommand = Classify(new ToolAction
+    {
+        Kind = ToolActionKind.RunCommand,
+        CommandExecutable = "dotnet",
+        CommandArgs = new[] { "--version" },
+        Payload = "--version"
+    });
+    AssertTrue(ReadString(safeCommand, "Gate") == "allowed", "Expected safe command gate=allowed.");
+    AssertTrue(ReadString(safeCommand, "CommandPolicyCategory") == "allowed", "Expected safe command category=allowed.");
+
+    var highRiskCommand = Classify(new ToolAction
+    {
+        Kind = ToolActionKind.RunCommand,
+        CommandExecutable = "npm",
+        CommandArgs = new[] { "run", "build" },
+        Payload = "run build"
+    });
+    AssertTrue(ReadString(highRiskCommand, "Gate") == "approval_required", "Expected npm run build gate=approval_required.");
+    AssertTrue(ReadString(highRiskCommand, "ReasonCode") == PermissionReasonCodes.HighRiskApprovalRequired, "Expected npm run build high-risk reason.");
+    AssertTrue(ReadString(highRiskCommand, "CommandPolicyCategory") == "high_risk_approval_required", "Expected npm run build category=high_risk_approval_required.");
+
+    var shellMetaCommand = Classify(new ToolAction
+    {
+        Kind = ToolActionKind.RunCommand,
+        CommandExecutable = "git",
+        CommandArgs = new[] { "status&&whoami" },
+        Payload = "status&&whoami"
+    });
+    AssertTrue(ReadString(shellMetaCommand, "Gate") == "denied", "Expected shell/meta command gate=denied.");
+    AssertTrue(ReadString(shellMetaCommand, "ReasonCode") == PermissionReasonCodes.CommandUnsupportedShellSyntax, "Expected shell/meta deterministic reason.");
+    AssertTrue(ReadString(shellMetaCommand, "CommandPolicyCategory") == "unsupported_shell_meta_syntax", "Expected shell/meta category=unsupported_shell_meta_syntax.");
+
+    var malformedCommand = Classify(new ToolAction
+    {
+        Kind = ToolActionKind.RunCommand,
+        Payload = "   "
+    });
+    AssertTrue(ReadString(malformedCommand, "Gate") == "denied", "Expected malformed command gate=denied.");
+    AssertTrue(ReadString(malformedCommand, "ReasonCode") == PermissionReasonCodes.CommandMalformed, "Expected malformed command deterministic reason.");
+
+    var safeCommandRepeat = Classify(new ToolAction
+    {
+        Kind = ToolActionKind.RunCommand,
+        CommandExecutable = "dotnet",
+        CommandArgs = new[] { "--version" },
+        Payload = "--version"
+    });
+    AssertTrue(ReadString(safeCommand, "CapabilityClass") == ReadString(safeCommandRepeat, "CapabilityClass"), "Expected deterministic capability class.");
+    AssertTrue(ReadInt(safeCommand, "CapabilityTier") == ReadInt(safeCommandRepeat, "CapabilityTier"), "Expected deterministic capability tier.");
+    AssertTrue(ReadString(safeCommand, "Gate") == ReadString(safeCommandRepeat, "Gate"), "Expected deterministic gate.");
+    AssertTrue(ReadString(safeCommand, "ReasonCode") == ReadString(safeCommandRepeat, "ReasonCode"), "Expected deterministic reason code.");
+
+    var escalates = (bool)(requiresEscalationMethod.Invoke(null, new[] { read, delete }) ?? false);
+    var doesNotEscalate = (bool)(requiresEscalationMethod.Invoke(null, new[] { delete, write }) ?? true);
+    AssertTrue(escalates, "Expected escalation from analysis to destructive tier.");
+    AssertTrue(!doesNotEscalate, "Expected no escalation from destructive to mutation tier.");
+
+    Console.WriteLine("PASS RunCapabilityTierClassifierRegression");
 }
 
 static async Task RunPermissionGuardCanonicalCommandPolicyRegression()
