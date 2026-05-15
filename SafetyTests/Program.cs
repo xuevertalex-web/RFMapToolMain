@@ -2663,6 +2663,15 @@ static async Task RunProcessExecutionHardeningRegression()
         Timeout = TimeSpan.FromSeconds(5)
     });
     AssertTrue(!highRiskWithoutApproval.Success && highRiskWithoutApproval.ReasonCode == PermissionReasonCodes.HighRiskApprovalRequired, "Expected high-risk command to require approval before process start.");
+    var highRiskGenericApproved = await runner.RunAsync(new SafeProcessRequest
+    {
+        Kind = ToolActionKind.RunCommand,
+        Command = "npm",
+        Args = new[] { "run", "build", "APPROVED:true" },
+        WorkingDirectory = workspaceRoot,
+        Timeout = TimeSpan.FromSeconds(5)
+    });
+    AssertTrue(!highRiskGenericApproved.Success && highRiskGenericApproved.ReasonCode == PermissionReasonCodes.HighRiskApprovalRequired, "Expected generic APPROVED:true marker to remain denied in runner path.");
 
     var seededHighRisk = guard.Evaluate(session, new ToolAction
     {
@@ -2683,6 +2692,25 @@ static async Task RunProcessExecutionHardeningRegression()
         Timeout = TimeSpan.FromSeconds(10)
     });
     AssertTrue(approvedHighRisk.ReasonCode == PermissionReasonCodes.Allowed, "Expected approved high-risk command to reach process start path.");
+    var approvedHighRiskMissingRun = await runner.RunAsync(new SafeProcessRequest
+    {
+        Kind = ToolActionKind.RunCommand,
+        Command = "dotnet",
+        Args = new[] { "--version", "nvidia-smi", $"APPROVED:{seededHighRisk.ApprovalProposal!.ProposalId}" },
+        WorkingDirectory = workspaceRoot,
+        Timeout = TimeSpan.FromSeconds(10)
+    });
+    AssertTrue(!approvedHighRiskMissingRun.Success && approvedHighRiskMissingRun.ReasonCode == PermissionReasonCodes.ApprovalRunBindingUnavailable, "Expected missing runId to deny approved high-risk command in runner path.");
+    var approvedHighRiskMismatchedRun = await runner.RunAsync(new SafeProcessRequest
+    {
+        Kind = ToolActionKind.RunCommand,
+        Command = "dotnet",
+        Args = new[] { "--version", "nvidia-smi", $"APPROVED:{seededHighRisk.ApprovalProposal!.ProposalId}" },
+        RunId = "mismatched-run",
+        WorkingDirectory = workspaceRoot,
+        Timeout = TimeSpan.FromSeconds(10)
+    });
+    AssertTrue(!approvedHighRiskMismatchedRun.Success && approvedHighRiskMismatchedRun.ReasonCode == PermissionReasonCodes.ApprovalRunMismatch, "Expected mismatched runId to deny approved high-risk command in runner path.");
 
     var outside = await runner.RunAsync(new SafeProcessRequest
     {
