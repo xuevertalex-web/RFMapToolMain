@@ -67,6 +67,7 @@ await RunApprovalLedgerExpiredAndDeniedEventsRegression();
 await RunApprovalLedgerDeniedAppendFailureFailClosedRegression();
 await RunApprovalLedgerStartupCompactionDeterministicRegression();
 await RunApprovalCapabilityFingerprintSchemaRegression();
+await RunApprovalCapabilityFingerprintEnforcementRegression();
 RunCommandRiskPolicyTokenizationRegression();
 RunCanonicalCommandPolicyDecisionRegression();
 RunCapabilityTierClassifierRegression();
@@ -3702,6 +3703,354 @@ static async Task RunApprovalCapabilityFingerprintSchemaRegression()
         AssertFingerprintShape(compactedConsumedLine!);
 
         Console.WriteLine("PASS ApprovalCapabilityFingerprintSchemaRegression");
+    }
+    finally
+    {
+        if (Directory.Exists(runtimeRoot))
+            Directory.Delete(runtimeRoot, recursive: true);
+    }
+}
+
+static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
+{
+    static string CreateIssuedRecordWithoutFingerprint(JsonElement root)
+    {
+        var runId = root.TryGetProperty("runId", out var runIdProp) && runIdProp.ValueKind == JsonValueKind.String
+            ? runIdProp.GetString()
+            : null;
+        return JsonSerializer.Serialize(new
+        {
+            schemaVersion = 2,
+            @event = "issued",
+            atUtc = root.GetProperty("atUtc").GetDateTime(),
+            sessionId = root.GetProperty("sessionId").GetString(),
+            proposalId = root.GetProperty("proposalId").GetString(),
+            runId,
+            expiresAtUtc = root.GetProperty("expiresAtUtc").GetDateTime(),
+            reasonCode = root.GetProperty("reasonCode").GetString(),
+            actionType = root.GetProperty("actionType").GetString()
+        });
+    }
+
+    static string CreateIssuedRecordWithFingerprint(JsonElement root, object capabilityFingerprint)
+    {
+        var runId = root.TryGetProperty("runId", out var runIdProp) && runIdProp.ValueKind == JsonValueKind.String
+            ? runIdProp.GetString()
+            : null;
+        return JsonSerializer.Serialize(new
+        {
+            schemaVersion = 2,
+            @event = "issued",
+            atUtc = root.GetProperty("atUtc").GetDateTime(),
+            sessionId = root.GetProperty("sessionId").GetString(),
+            proposalId = root.GetProperty("proposalId").GetString(),
+            runId,
+            expiresAtUtc = root.GetProperty("expiresAtUtc").GetDateTime(),
+            reasonCode = root.GetProperty("reasonCode").GetString(),
+            actionType = root.GetProperty("actionType").GetString(),
+            capabilityFingerprint
+        });
+    }
+
+    static async Task RewriteIssuedRecordAsync(string ledgerPath, string proposalId, Func<JsonElement, string> rewrite)
+    {
+        var lines = await File.ReadAllLinesAsync(ledgerPath);
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            var evt = root.GetProperty("event").GetString() ?? string.Empty;
+            var id = root.GetProperty("proposalId").GetString() ?? string.Empty;
+            if (!evt.Equals("issued", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (!id.Equals(proposalId, StringComparison.OrdinalIgnoreCase))
+                continue;
+            lines[i] = rewrite(root);
+            break;
+        }
+
+        await File.WriteAllLinesAsync(ledgerPath, lines, new UTF8Encoding(false));
+    }
+
+    var runtimeRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalCapabilityFingerprintEnforcement_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(runtimeRoot);
+    try
+    {
+        var workspaceRoot = Path.Combine(runtimeRoot, "workspace");
+        Directory.CreateDirectory(workspaceRoot);
+        var deletePath = Path.Combine(workspaceRoot, "fingerprint-enforcement-delete.txt");
+        var deleteTierPath = Path.Combine(workspaceRoot, "fingerprint-enforcement-tier.txt");
+        var readPath = Path.Combine(workspaceRoot, "fingerprint-enforcement-read.txt");
+        await File.WriteAllTextAsync(deletePath, "a");
+        await File.WriteAllTextAsync(deleteTierPath, "b");
+        await File.WriteAllTextAsync(readPath, "d");
+
+        var now = new DateTime(2042, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var session = new AgentSessionContext
+        {
+            SessionId = "capability-fingerprint-enforcement",
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        var guard = new PermissionGuard();
+
+        var issued = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = deletePath
+        });
+        AssertTrue(issued.RequiresApproval && issued.ApprovalProposal is not null, "Expected post-cutover delete approval proposal.");
+        var proposal = issued.ApprovalProposal!;
+        var token = issued.ExpectedApprovalToken ?? string.Empty;
+        var allowed = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = deletePath,
+            RunId = proposal.RunId,
+            Payload = token
+        });
+        AssertTrue(allowed.Allowed, "Expected matching capability fingerprint approval to succeed.");
+
+        var runMismatch = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = deletePath,
+            RunId = "different-run",
+            Payload = token
+        });
+        AssertTrue(!runMismatch.Allowed && runMismatch.ReasonCodeString == PermissionReasonCodes.ApprovalRunMismatch, "Expected runId mismatch semantics to remain unchanged.");
+
+        var rewritePath = Path.Combine(runtimeRoot, "approval-ledger-v2.jsonl");
+        await RewriteIssuedRecordAsync(rewritePath, proposal.ProposalId, root => CreateIssuedRecordWithFingerprint(root, new
+        {
+            fingerprintVersion = 1,
+            actionKind = "DeleteFile",
+            capabilityClass = "mutation",
+            capabilityTier = 2,
+            capabilityGate = "approval_required",
+            policyCategory = (string?)null,
+            actionProfile = "delete_file"
+        }));
+        var classReplay = new AgentSessionContext
+        {
+            SessionId = session.SessionId,
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        var classReplayGuard = new PermissionGuard();
+        var classMismatch = classReplayGuard.Evaluate(classReplay, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = deletePath,
+            RunId = proposal.RunId,
+            Payload = token
+        });
+        AssertTrue(!classMismatch.Allowed && classMismatch.ReasonCodeString == PermissionReasonCodes.ApprovalCapabilityMismatch, "Expected capability class mismatch denial.");
+
+        var tierSession = new AgentSessionContext
+        {
+            SessionId = "capability-fingerprint-tier",
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        var tierGuard = new PermissionGuard();
+        var tierIssued = tierGuard.Evaluate(tierSession, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = deleteTierPath
+        });
+        AssertTrue(tierIssued.RequiresApproval && tierIssued.ApprovalProposal is not null, "Expected tier proposal.");
+        var tierProposal = tierIssued.ApprovalProposal!;
+        var tierToken = tierIssued.ExpectedApprovalToken ?? string.Empty;
+        await RewriteIssuedRecordAsync(rewritePath, tierProposal.ProposalId, root => CreateIssuedRecordWithFingerprint(root, new
+        {
+            fingerprintVersion = 1,
+            actionKind = "DeleteFile",
+            capabilityClass = "destructive",
+            capabilityTier = 1,
+            capabilityGate = "approval_required",
+            policyCategory = (string?)null,
+            actionProfile = "delete_file"
+        }));
+        var tierReplay = new AgentSessionContext
+        {
+            SessionId = tierSession.SessionId,
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        var tierReplayGuard = new PermissionGuard();
+        var tierMismatch = tierReplayGuard.Evaluate(tierReplay, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = deleteTierPath,
+            RunId = tierProposal.RunId,
+            Payload = tierToken
+        });
+        AssertTrue(!tierMismatch.Allowed && tierMismatch.ReasonCodeString == PermissionReasonCodes.ApprovalCapabilityMismatch, "Expected capability tier mismatch denial.");
+
+        var policySession = new AgentSessionContext
+        {
+            SessionId = "capability-fingerprint-policy",
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        var policyGuard = new PermissionGuard();
+        var policyIssued = policyGuard.Evaluate(policySession, new ToolAction
+        {
+            Kind = ToolActionKind.RunCommand,
+            CommandExecutable = "nvidia-smi",
+            CommandArgs = Array.Empty<string>(),
+            Payload = "nvidia-smi",
+            WorkingDirectory = workspaceRoot
+        });
+        AssertTrue(policyIssued.RequiresApproval && policyIssued.ApprovalProposal is not null, "Expected high-risk command proposal.");
+        var policyProposal = policyIssued.ApprovalProposal!;
+        var policyToken = policyIssued.ExpectedApprovalToken ?? string.Empty;
+        await RewriteIssuedRecordAsync(rewritePath, policyProposal.ProposalId, root => CreateIssuedRecordWithFingerprint(root, new
+        {
+            fingerprintVersion = 1,
+            actionKind = "RunCommand",
+            capabilityClass = "kernel_system",
+            capabilityTier = 5,
+            capabilityGate = "approval_required",
+            policyCategory = "allowed",
+            actionProfile = "run_command"
+        }));
+        var policyReplay = new AgentSessionContext
+        {
+            SessionId = policySession.SessionId,
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        var policyReplayGuard = new PermissionGuard();
+        var policyMismatch = policyReplayGuard.Evaluate(policyReplay, new ToolAction
+        {
+            Kind = ToolActionKind.RunCommand,
+            CommandExecutable = "nvidia-smi",
+            CommandArgs = Array.Empty<string>(),
+            Payload = $"nvidia-smi {policyToken}",
+            WorkingDirectory = workspaceRoot,
+            RunId = policyProposal.RunId
+        });
+        AssertTrue(!policyMismatch.Allowed && policyMismatch.ReasonCodeString == PermissionReasonCodes.ApprovalCapabilityMismatch, "Expected policyCategory mismatch denial.");
+
+        var ledgerText = await File.ReadAllTextAsync(rewritePath);
+        AssertTrue(ledgerText.Contains("\"event\":\"denied_capability_mismatch\"", StringComparison.Ordinal), "Expected denied_capability_mismatch event in ledger.");
+        AssertTrue(!ledgerText.Contains("APPROVED:", StringComparison.Ordinal), "Denied capability mismatch diagnostics must not persist raw approval tokens.");
+        AssertTrue(!ledgerText.Contains(deletePath, StringComparison.Ordinal), "Denied capability mismatch diagnostics must not persist raw paths.");
+        AssertTrue(!ledgerText.Contains("\"command\":", StringComparison.OrdinalIgnoreCase), "Denied capability mismatch diagnostics must not persist raw command payload fields.");
+
+        await RewriteIssuedRecordAsync(rewritePath, tierProposal.ProposalId, root => CreateIssuedRecordWithoutFingerprint(root));
+        var postCutoverMissing = new AgentSessionContext
+        {
+            SessionId = tierSession.SessionId,
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        var postCutoverMissingGuard = new PermissionGuard();
+        var postCutoverMissingDenied = postCutoverMissingGuard.Evaluate(postCutoverMissing, new ToolAction
+        {
+            Kind = ToolActionKind.DeleteFile,
+            TargetPath = deleteTierPath,
+            RunId = tierProposal.RunId,
+            Payload = tierToken
+        });
+        AssertTrue(!postCutoverMissingDenied.Allowed && postCutoverMissingDenied.ReasonCodeString == PermissionReasonCodes.ApprovalCapabilityBindingUnavailable, "Expected post-cutover missing fingerprint to fail closed.");
+
+        var preCutoverRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalCapabilityFingerprintLegacy_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(preCutoverRoot);
+        try
+        {
+            var preWorkspace = Path.Combine(preCutoverRoot, "workspace");
+            Directory.CreateDirectory(preWorkspace);
+            var prePath = Path.Combine(preWorkspace, "legacy-fingerprint.txt");
+            await File.WriteAllTextAsync(prePath, "legacy");
+            var preNow = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var preIssue = new AgentSessionContext
+            {
+                SessionId = "capability-fingerprint-legacy",
+                RuntimeRoot = preCutoverRoot,
+                ActiveWorkspaceRoot = preWorkspace,
+                AccessMode = AgentAccessMode.WorkspaceWrite,
+                ProtectedPathPolicy = new ProtectedPathPolicy(new[] { preCutoverRoot }),
+                UtcNowProvider = () => preNow
+            };
+            var preGuard = new PermissionGuard();
+            var preIssued = preGuard.Evaluate(preIssue, new ToolAction
+            {
+                Kind = ToolActionKind.DeleteFile,
+                TargetPath = prePath
+            });
+            AssertTrue(preIssued.RequiresApproval && preIssued.ApprovalProposal is not null, "Expected pre-cutover proposal.");
+            var preProposal = preIssued.ApprovalProposal!;
+            var preToken = preIssued.ExpectedApprovalToken ?? string.Empty;
+            var preLedgerPath = Path.Combine(preCutoverRoot, "approval-ledger-v2.jsonl");
+            await RewriteIssuedRecordAsync(preLedgerPath, preProposal.ProposalId, root => CreateIssuedRecordWithoutFingerprint(root));
+            var preReplay = new AgentSessionContext
+            {
+                SessionId = preIssue.SessionId,
+                RuntimeRoot = preCutoverRoot,
+                ActiveWorkspaceRoot = preWorkspace,
+                AccessMode = AgentAccessMode.WorkspaceWrite,
+                ProtectedPathPolicy = new ProtectedPathPolicy(new[] { preCutoverRoot }),
+                UtcNowProvider = () => preNow.AddMinutes(1)
+            };
+            var preReplayGuard = new PermissionGuard();
+            var preAllowed = preReplayGuard.Evaluate(preReplay, new ToolAction
+            {
+                Kind = ToolActionKind.DeleteFile,
+                TargetPath = prePath,
+                RunId = preProposal.RunId,
+                Payload = preToken
+            });
+            AssertTrue(preAllowed.Allowed, "Expected pre-cutover missing fingerprint legacy compatibility.");
+        }
+        finally
+        {
+            if (Directory.Exists(preCutoverRoot))
+                Directory.Delete(preCutoverRoot, recursive: true);
+        }
+
+        var genericDenied = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.RunCommand,
+            Payload = "nvidia-smi APPROVED:true",
+            WorkingDirectory = workspaceRoot
+        });
+        AssertTrue(!genericDenied.Allowed, "Expected APPROVED:true semantics unchanged.");
+
+        var readAllowed = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.ReadFile,
+            TargetPath = readPath
+        });
+        AssertTrue(readAllowed.Allowed, "Expected read/analysis path to remain unaffected.");
+
+        Console.WriteLine("PASS ApprovalCapabilityFingerprintEnforcementRegression");
     }
     finally
     {

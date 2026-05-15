@@ -4,6 +4,7 @@ public sealed class AgentSessionContext
 {
     public const int ApprovalTokenTtlSecondsDefault = 600;
     public static readonly DateTime RunIdCutoverUtc = new(2026, 5, 14, 0, 0, 0, DateTimeKind.Utc);
+    public static readonly DateTime CapabilityFingerprintCutoverUtc = new(2026, 5, 15, 0, 0, 0, DateTimeKind.Utc);
     private readonly HashSet<string> _consumedApprovalProposalIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _expiredApprovalProposalIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ActionApprovalProposal> _approvalProposals = new(StringComparer.OrdinalIgnoreCase);

@@ -29,6 +29,8 @@ public sealed class PermissionDecision
         PermissionReasonCode.ApprovalTokenExpired => PermissionReasonCodes.ApprovalTokenExpired,
         PermissionReasonCode.ApprovalRunBindingUnavailable => PermissionReasonCodes.ApprovalRunBindingUnavailable,
         PermissionReasonCode.ApprovalRunMismatch => PermissionReasonCodes.ApprovalRunMismatch,
+        PermissionReasonCode.ApprovalCapabilityMismatch => PermissionReasonCodes.ApprovalCapabilityMismatch,
+        PermissionReasonCode.ApprovalCapabilityBindingUnavailable => PermissionReasonCodes.ApprovalCapabilityBindingUnavailable,
         PermissionReasonCode.ApprovalStateUnavailable => PermissionReasonCodes.ApprovalStateUnavailable,
         PermissionReasonCode.HighRiskApprovalRequired => PermissionReasonCodes.HighRiskApprovalRequired,
         PermissionReasonCode.CommandUnsupportedShellSyntax => PermissionReasonCodes.CommandUnsupportedShellSyntax,

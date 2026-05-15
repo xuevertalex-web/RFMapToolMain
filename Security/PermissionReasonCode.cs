@@ -20,6 +20,8 @@ public enum PermissionReasonCode
     ApprovalTokenExpired,
     ApprovalRunBindingUnavailable,
     ApprovalRunMismatch,
+    ApprovalCapabilityMismatch,
+    ApprovalCapabilityBindingUnavailable,
     ApprovalStateUnavailable,
     HighRiskApprovalRequired,
     CommandUnsupportedShellSyntax,

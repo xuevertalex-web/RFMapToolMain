@@ -24,6 +24,8 @@ public static class PermissionReasonCodes
     public const string ApprovalTokenExpired = "APPROVAL_TOKEN_EXPIRED";
     public const string ApprovalRunBindingUnavailable = "APPROVAL_RUN_BINDING_UNAVAILABLE";
     public const string ApprovalRunMismatch = "APPROVAL_RUN_MISMATCH";
+    public const string ApprovalCapabilityMismatch = "APPROVAL_CAPABILITY_MISMATCH";
+    public const string ApprovalCapabilityBindingUnavailable = "APPROVAL_CAPABILITY_BINDING_UNAVAILABLE";
     public const string ApprovalStateUnavailable = "APPROVAL_STATE_UNAVAILABLE";
     public const string HighRiskApprovalRequired = "HIGH_RISK_APPROVAL_REQUIRED";
     public const string CommandUnsupportedShellSyntax = "COMMAND_UNSUPPORTED_SHELL_SYNTAX";

@@ -391,6 +391,20 @@ public sealed class PermissionGuard
             }
         }
 
+        if (!TryBuildCapabilityFingerprint(action, out var currentFingerprint) || currentFingerprint is null)
+            return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalCapabilityBindingUnavailable, "Approval capability binding unavailable.");
+        var proposalFingerprint = proposal.CapabilityFingerprint;
+        var legacyFingerprintless = IsLegacyFingerprintlessProposal(proposal);
+        if (proposalFingerprint is null && !legacyFingerprintless)
+            return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalCapabilityBindingUnavailable, "Approval capability binding unavailable.");
+        if (proposalFingerprint is not null &&
+            !CapabilityFingerprintsEqual(currentFingerprint, proposalFingerprint))
+        {
+            if (!session.RecordApprovalDeniedEvent(expected, "denied_capability_mismatch", PermissionReasonCodes.ApprovalCapabilityMismatch, proposalRunId ?? currentRunId))
+                return ApprovalValidationResult.LedgerUnavailable(session);
+            return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalCapabilityMismatch, "Approval is bound to a different capability profile.");
+        }
+
         if (session.UtcNowProvider() > proposal.ExpiresAtUtc)
         {
             if (!session.MarkApprovalProposalExpired(expected, PermissionReasonCodes.ApprovalTokenExpired, proposalRunId ?? currentRunId))
@@ -430,6 +444,46 @@ public sealed class PermissionGuard
             ToolActionKind.Test => "Runs project tests in the specified working directory.",
             _ => "Performs the requested tool action on the specified target."
         };
+    }
+
+    private static bool TryBuildCapabilityFingerprint(ToolAction action, out CapabilityFingerprintV1? fingerprint)
+    {
+        try
+        {
+            var capabilityAssessment = CapabilityTierClassifier.Classify(action);
+            fingerprint = CapabilityFingerprintV1.FromAssessment(action, capabilityAssessment);
+            return true;
+        }
+        catch
+        {
+            fingerprint = null;
+            return false;
+        }
+    }
+
+    private static bool IsLegacyFingerprintlessProposal(ActionApprovalProposal proposal)
+    {
+        if (proposal.CapabilityFingerprint is not null)
+            return false;
+
+        return proposal.IssuedAtUtc < AgentSessionContext.CapabilityFingerprintCutoverUtc;
+    }
+
+    private static bool CapabilityFingerprintsEqual(CapabilityFingerprintV1 current, CapabilityFingerprintV1 proposal)
+    {
+        return current.FingerprintVersion == proposal.FingerprintVersion &&
+               current.ActionKind.Equals(proposal.ActionKind, StringComparison.Ordinal) &&
+               current.CapabilityClass.Equals(proposal.CapabilityClass, StringComparison.Ordinal) &&
+               current.CapabilityTier == proposal.CapabilityTier &&
+               current.CapabilityGate.Equals(proposal.CapabilityGate, StringComparison.Ordinal) &&
+               NormalizeOptionalValue(current.PolicyCategory).Equals(NormalizeOptionalValue(proposal.PolicyCategory), StringComparison.Ordinal) &&
+               current.ActionProfile.Equals(proposal.ActionProfile, StringComparison.Ordinal);
+    }
+
+    private static string NormalizeOptionalValue(string? value)
+    {
+        var normalized = value?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? string.Empty : normalized;
     }
 
     private static string? NormalizeRunId(string? runId)
