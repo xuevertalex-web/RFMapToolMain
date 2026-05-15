@@ -29,6 +29,10 @@ namespace LocalCursorAgent.Execution
             public string ReasonCode { get; set; } = string.Empty;
             public bool TimedOut { get; set; }
             public int ExitCode { get; set; }
+            public string? CapabilityClass { get; set; }
+            public int? CapabilityTier { get; set; }
+            public string? CapabilityGate { get; set; }
+            public string? CapabilityPolicyCategory { get; set; }
         }
 
         /// <summary>
@@ -80,6 +84,10 @@ namespace LocalCursorAgent.Execution
             result.ReasonCode = safeResult.ReasonCode ?? string.Empty;
             result.TimedOut = safeResult.TimedOut;
             result.ExitCode = safeResult.ExitCode;
+            result.CapabilityClass = safeResult.CapabilityClass;
+            result.CapabilityTier = safeResult.CapabilityTier;
+            result.CapabilityGate = safeResult.CapabilityGate;
+            result.CapabilityPolicyCategory = safeResult.CapabilityPolicyCategory;
             if (!safeResult.Success && !string.IsNullOrWhiteSpace(safeResult.Message))
             {
                 result.Errors.Add(safeResult.Message);

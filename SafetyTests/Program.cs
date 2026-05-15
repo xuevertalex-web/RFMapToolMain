@@ -3619,14 +3619,20 @@ static async Task RunBuildVerifierCanonicalRunnerUnificationRegression()
     var safeResult = await verifier.VerifyBuild(safeBuildPath);
     AssertTrue(safeResult.ReasonCode == PermissionReasonCodes.Allowed, "Expected safe build verification path to reach canonical runner allow/start path.");
     AssertTrue(safeResult.ExitCode != -1, "Expected safe build verification to reach actual process execution path.");
+    AssertTrue(safeResult.CapabilityClass == "mutation" && safeResult.CapabilityTier == 1 && safeResult.CapabilityGate == "allowed", "Expected safe build verifier result capability metadata mutation/tier1/allowed.");
+    AssertTrue(string.IsNullOrWhiteSpace(safeResult.CapabilityPolicyCategory), "Expected safe build verifier result command policy category to remain empty for build action.");
 
     var outsideResult = await verifier.VerifyBuild(outsideTempPath);
     AssertTrue(!outsideResult.Success, "Expected outside-workspace build verification to be denied.");
     AssertTrue(outsideResult.ReasonCode == PermissionReasonCodes.AccessDeniedOutsideWorkspace, "Expected outside-workspace build verification to be denied by canonical authority.");
+    AssertTrue(string.IsNullOrWhiteSpace(outsideResult.CapabilityClass) && outsideResult.CapabilityTier is null && string.IsNullOrWhiteSpace(outsideResult.CapabilityGate), "Expected outside build verifier denial metadata to remain empty for early runner denial without PermissionDecision.");
+    AssertTrue(string.IsNullOrWhiteSpace(outsideResult.CapabilityPolicyCategory), "Expected outside build verifier denial command policy category to remain empty for build action.");
 
     var outsideMetaResult = await verifier.VerifyBuild(outsideMetaPath);
     AssertTrue(!outsideMetaResult.Success, "Expected shell/meta-like outside path not to bypass build verification policy.");
     AssertTrue(outsideMetaResult.ReasonCode == PermissionReasonCodes.AccessDeniedOutsideWorkspace, "Expected shell/meta-like outside path to remain denied by canonical authority.");
+    AssertTrue(string.IsNullOrWhiteSpace(outsideMetaResult.CapabilityClass) && outsideMetaResult.CapabilityTier is null && string.IsNullOrWhiteSpace(outsideMetaResult.CapabilityGate), "Expected outside meta build verifier denial metadata to remain empty for early runner denial without PermissionDecision.");
+    AssertTrue(string.IsNullOrWhiteSpace(outsideMetaResult.CapabilityPolicyCategory), "Expected outside meta build verifier denial command policy category to remain empty for build action.");
 
     Console.WriteLine("PASS BuildVerifier_CanonicalRunnerUnificationRegression");
 }
