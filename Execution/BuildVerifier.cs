@@ -1,7 +1,5 @@
-using System.Diagnostics;
 using LocalCursorAgent.Diagnostics;
 using LocalCursorAgent.Security;
-using LocalCursorAgent.Tools;
 
 namespace LocalCursorAgent.Execution
 {
@@ -57,22 +55,13 @@ namespace LocalCursorAgent.Execution
                 return result;
             }
 
-            SafeProcessResult safeResult;
-            if (Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                .Equals(Path.GetDirectoryName(projectPath)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+            var safeResult = await _processRunner.RunAsync(new SafeProcessRequest
             {
-                safeResult = await RunDotnetBuildDirectly(projectPath);
-            }
-            else
-            {
-                safeResult = await _processRunner.RunAsync(new SafeProcessRequest
-                {
-                    Kind = ToolActionKind.Build,
-                    Command = "dotnet",
-                    Args = SafeProcessRunner.GetDefaultBuildArgs(),
-                    WorkingDirectory = projectPath
-                });
-            }
+                Kind = ToolActionKind.Build,
+                Command = "dotnet",
+                Args = SafeProcessRunner.GetDefaultBuildArgs(),
+                WorkingDirectory = projectPath
+            });
 
             _tracer?.LogActionEvent("Build", "BuildVerifier", safeResult.Success ? ExecutionTracer.ActionLogLevel.Info : ExecutionTracer.ActionLogLevel.Warning, safeResult.Success ? "completed" : (safeResult.TimedOut ? "timed_out" : "failed"), safeResult.ReasonCode, new Dictionary<string, object?>
             {
@@ -126,47 +115,5 @@ namespace LocalCursorAgent.Execution
             return result;
         }
 
-        private static async Task<SafeProcessResult> RunDotnetBuildDirectly(string workingDirectory)
-        {
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = "dotnet",
-                Arguments = string.Join(" ", SafeProcessRunner.GetDefaultBuildArgs()),
-                WorkingDirectory = workingDirectory,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-
-            using var process = new Process { StartInfo = startInfo };
-            try
-            {
-                if (!process.Start())
-                    return SafeProcessResult.Failed("Failed to start process", "dotnet", workingDirectory);
-            }
-            catch (Exception ex)
-            {
-                return SafeProcessResult.Failed(ex.Message, "dotnet", workingDirectory);
-            }
-
-            var stdoutTask = process.StandardOutput.ReadToEndAsync();
-            var stderrTask = process.StandardError.ReadToEndAsync();
-            await process.WaitForExitAsync();
-            await Task.WhenAll(stdoutTask, stderrTask);
-
-            return new SafeProcessResult
-            {
-                Success = process.ExitCode == 0,
-                TimedOut = false,
-                ExitCode = process.ExitCode,
-                StdOut = await stdoutTask,
-                StdErr = await stderrTask,
-                Command = "dotnet",
-                Arguments = "build",
-                WorkingDirectory = workingDirectory,
-                ReasonCode = process.ExitCode == 0 ? PermissionReasonCodes.Allowed : "BUILD_FAILED"
-            };
-        }
     }
 }

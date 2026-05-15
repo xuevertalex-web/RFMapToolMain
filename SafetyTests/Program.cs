@@ -55,6 +55,7 @@ await RunBroadExecuteIntent_ProjectWideFixRegression();
 await RunHostDiagnosticsCommandApprovalRegression();
 await RunProcessExecutionHardeningRegression();
 await RunProcessArgumentListPreservesArgumentsRegression();
+await RunBuildVerifierCanonicalRunnerUnificationRegression();
 await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
 await RunDestructiveFileApprovalMarkerRegression();
 await RunGuardedToolExplicitApprovalHandoffRegression();
@@ -3546,6 +3547,51 @@ static async Task RunProcessArgumentListPreservesArgumentsRegression()
         AssertTrue(string.Equals(startInfo.ArgumentList[i], args[i], StringComparison.Ordinal), $"Argument mismatch at index {i}.");
 
     Console.WriteLine("PASS ProcessArgumentList_PreservesArguments");
+}
+
+static async Task RunBuildVerifierCanonicalRunnerUnificationRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LocalCursorAgentSafetyTests", Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+
+    var safeBuildPath = Path.Combine(workspaceRoot, "safe-build-probe");
+    Directory.CreateDirectory(safeBuildPath);
+
+    // This path layout previously qualified for BuildVerifier direct temp execution fallback.
+    var outsideTempPath = Path.Combine(tempRoot, "outside-temp-build-probe");
+    Directory.CreateDirectory(outsideTempPath);
+    var outsideMetaPath = Path.Combine(tempRoot, "outside&&meta-build-probe");
+    Directory.CreateDirectory(outsideMetaPath);
+
+    var session = new AgentSessionContext
+    {
+        SessionId = Guid.NewGuid().ToString("N"),
+        RuntimeRoot = runtimeRoot,
+        ActiveWorkspaceRoot = workspaceRoot,
+        AccessMode = AgentAccessMode.WorkspaceWrite,
+        ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+    };
+    var guard = new PermissionGuard();
+    var tracer = new ExecutionTracer(runtimeRoot);
+    var runner = new SafeProcessRunner(session, guard, tracer);
+    var verifier = new BuildVerifier(runner, tracer);
+
+    var safeResult = await verifier.VerifyBuild(safeBuildPath);
+    AssertTrue(safeResult.ReasonCode == PermissionReasonCodes.Allowed, "Expected safe build verification path to reach canonical runner allow/start path.");
+    AssertTrue(safeResult.ExitCode != -1, "Expected safe build verification to reach actual process execution path.");
+
+    var outsideResult = await verifier.VerifyBuild(outsideTempPath);
+    AssertTrue(!outsideResult.Success, "Expected outside-workspace build verification to be denied.");
+    AssertTrue(outsideResult.ReasonCode == PermissionReasonCodes.AccessDeniedOutsideWorkspace, "Expected outside-workspace build verification to be denied by canonical authority.");
+
+    var outsideMetaResult = await verifier.VerifyBuild(outsideMetaPath);
+    AssertTrue(!outsideMetaResult.Success, "Expected shell/meta-like outside path not to bypass build verification policy.");
+    AssertTrue(outsideMetaResult.ReasonCode == PermissionReasonCodes.AccessDeniedOutsideWorkspace, "Expected shell/meta-like outside path to remain denied by canonical authority.");
+
+    Console.WriteLine("PASS BuildVerifier_CanonicalRunnerUnificationRegression");
 }
 
 static async Task RunRuntimeGpuDiagnosticsTruthfulReportingRegression()
