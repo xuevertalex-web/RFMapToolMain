@@ -1,6 +1,9 @@
+using System.Security.Cryptography;
+using System.Text;
+
 namespace LocalCursorAgent.Security;
 
-public sealed class AgentSessionContext
+public sealed class AgentSessionContext : IDisposable
 {
     public const int ApprovalTokenTtlSecondsDefault = 600;
     public static readonly DateTime RunIdCutoverUtc = new(2026, 5, 14, 0, 0, 0, DateTimeKind.Utc);
@@ -9,6 +12,8 @@ public sealed class AgentSessionContext
     private readonly HashSet<string> _expiredApprovalProposalIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ActionApprovalProposal> _approvalProposals = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _approvalLedgerLock = new();
+    private FileStream? _approvalRuntimeOwnerLockHandle;
+    private string? _approvalRuntimeOwnerLockPath;
     private bool _approvalLedgerInitialized;
     private bool _approvalLedgerHealthy = true;
     private string _approvalLedgerError = string.Empty;
@@ -24,6 +29,7 @@ public sealed class AgentSessionContext
     public required AgentAccessMode AccessMode { get; set; }
     public required ProtectedPathPolicy ProtectedPathPolicy { get; init; }
     public Func<DateTime> UtcNowProvider { get; init; } = static () => DateTime.UtcNow;
+    public string ApprovalRuntimeOwnerLockPath => _approvalRuntimeOwnerLockPath ??= ComputeApprovalRuntimeOwnerLockPath(RuntimeRoot);
     public bool IsApprovalLedgerHealthy
     {
         get
@@ -191,6 +197,12 @@ public sealed class AgentSessionContext
             _approvalLedgerInitialized = true;
             try
             {
+                if (!TryAcquireApprovalRuntimeOwnerLock(out var ownerLockError))
+                {
+                    _approvalLedgerHealthy = false;
+                    _approvalLedgerError = $"owner_lock_unavailable: {ownerLockError}";
+                    return;
+                }
                 _approvalLedger = new ApprovalLedgerV2(RuntimeRoot);
                 if (!_approvalLedger.TryCompactForStartup(UtcNowProvider(), ApprovalTokenTtlSecondsDefault, out _, out var compactError))
                 {
@@ -217,6 +229,63 @@ public sealed class AgentSessionContext
                 _approvalLedgerHealthy = false;
                 _approvalLedgerError = $"init_failed: {ex.Message}";
             }
+        }
+    }
+
+    private bool TryAcquireApprovalRuntimeOwnerLock(out string? error)
+    {
+        error = null;
+        if (_approvalRuntimeOwnerLockHandle is not null)
+            return true;
+
+        try
+        {
+            var lockPath = ApprovalRuntimeOwnerLockPath;
+            var lockDir = Path.GetDirectoryName(lockPath);
+            if (!string.IsNullOrWhiteSpace(lockDir))
+                Directory.CreateDirectory(lockDir);
+            _approvalRuntimeOwnerLockHandle = new FileStream(
+                lockPath,
+                FileMode.OpenOrCreate,
+                FileAccess.ReadWrite,
+                FileShare.None);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    private static string ComputeApprovalRuntimeOwnerLockPath(string runtimeRoot)
+    {
+        var normalizedRuntimeRoot = Path.GetFullPath(runtimeRoot)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .ToUpperInvariant();
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedRuntimeRoot))).ToLowerInvariant();
+        return Path.Combine(Path.GetTempPath(), "LocalCursorAgent", "approval-runtime-owner-locks", $"approval-runtime-owner-{hash}.lock");
+    }
+
+    public void Dispose()
+    {
+        lock (_approvalLedgerLock)
+        {
+            _approvalRuntimeOwnerLockHandle?.Dispose();
+            _approvalRuntimeOwnerLockHandle = null;
+        }
+        GC.SuppressFinalize(this);
+    }
+
+    ~AgentSessionContext()
+    {
+        try
+        {
+            _approvalRuntimeOwnerLockHandle?.Dispose();
+        }
+        catch
+        {
+            // best-effort cleanup for abandoned session objects
         }
     }
 }

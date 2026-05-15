@@ -63,6 +63,7 @@ await RunDestructiveFileApprovalMarkerRegression();
 await RunGuardedToolExplicitApprovalHandoffRegression();
 await RunApprovalTokenTtlLifecycleRegression();
 await RunApprovalRunIdBindingRegression();
+await RunApprovalRuntimeOwnerLockRegression();
 await RunApprovalLedgerReplayAcrossRestartRegression();
 await RunApprovalLedgerCorruptFailClosedRegression();
 await RunApprovalLedgerExpiredAndDeniedEventsRegression();
@@ -2945,6 +2946,7 @@ static async Task RunApprovalRunIdBindingRegression()
             var postAnchorPath = Path.Combine(postCutoverRoot, "approval-ledger-v2.anchor.json");
             if (File.Exists(postAnchorPath))
                 File.Delete(postAnchorPath);
+            postIssue.Dispose();
 
             var postLoad = new AgentSessionContext
             {
@@ -3015,6 +3017,7 @@ static async Task RunApprovalRunIdBindingRegression()
             var legacyAnchorPath = Path.Combine(legacyRoot, "approval-ledger-v2.anchor.json");
             if (File.Exists(legacyAnchorPath))
                 File.Delete(legacyAnchorPath);
+            legacyIssue.Dispose();
 
             var legacyLoad = new AgentSessionContext
             {
@@ -3049,10 +3052,114 @@ static async Task RunApprovalRunIdBindingRegression()
     }
 }
 
+static async Task RunApprovalRuntimeOwnerLockRegression()
+{
+    var runtimeRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalRuntimeOwnerLock_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(runtimeRoot);
+    AgentSessionContext? firstSession = null;
+    AgentSessionContext? secondSession = null;
+    AgentSessionContext? thirdSession = null;
+    try
+    {
+        var workspaceRoot = Path.Combine(runtimeRoot, "workspace");
+        Directory.CreateDirectory(workspaceRoot);
+        var targetPath = Path.Combine(workspaceRoot, "owner-lock-target.txt");
+        await File.WriteAllTextAsync(targetPath, "owner-lock");
+        var now = new DateTime(2044, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        firstSession = new AgentSessionContext
+        {
+            SessionId = "owner-lock-first",
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        var firstGuard = new PermissionGuard();
+        var firstDecision = firstGuard.Evaluate(firstSession, new ToolAction
+        {
+            Kind = ToolActionKind.RunCommand,
+            CommandExecutable = "nvidia-smi",
+            CommandArgs = Array.Empty<string>(),
+            Payload = "nvidia-smi",
+            WorkingDirectory = workspaceRoot
+        });
+        AssertTrue(firstDecision.RequiresApproval && firstDecision.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, "Expected first runtime owner to acquire lock and keep normal approval-required behavior.");
+        AssertTrue(firstSession.IsApprovalLedgerHealthy, "Expected first runtime owner lock holder to keep approval ledger healthy.");
+
+        secondSession = new AgentSessionContext
+        {
+            SessionId = "owner-lock-second",
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        var secondGuard = new PermissionGuard();
+        var secondDecision = secondGuard.Evaluate(secondSession, new ToolAction
+        {
+            Kind = ToolActionKind.RunCommand,
+            CommandExecutable = "nvidia-smi",
+            CommandArgs = Array.Empty<string>(),
+            Payload = "nvidia-smi",
+            WorkingDirectory = workspaceRoot
+        });
+        AssertTrue(!secondDecision.Allowed && secondDecision.ReasonCodeString == PermissionReasonCodes.ApprovalStateUnavailable, "Expected second runtime owner contender to fail closed for approval-gated command.");
+        AssertTrue(secondSession.ApprovalLedgerError.StartsWith("owner_lock_unavailable:", StringComparison.Ordinal), "Expected deterministic owner lock unavailable error prefix.");
+
+        var secondRead = secondGuard.Evaluate(secondSession, new ToolAction
+        {
+            Kind = ToolActionKind.ReadFile,
+            TargetPath = targetPath
+        });
+        AssertTrue(secondRead.Allowed, "Expected read/analysis path to remain unaffected when owner lock is unavailable.");
+
+        firstSession.Dispose();
+        firstSession = null;
+
+        thirdSession = new AgentSessionContext
+        {
+            SessionId = "owner-lock-third",
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now.AddMinutes(1)
+        };
+        var thirdGuard = new PermissionGuard();
+        var thirdDecision = thirdGuard.Evaluate(thirdSession, new ToolAction
+        {
+            Kind = ToolActionKind.RunCommand,
+            CommandExecutable = "nvidia-smi",
+            CommandArgs = Array.Empty<string>(),
+            Payload = "nvidia-smi",
+            WorkingDirectory = workspaceRoot
+        });
+        AssertTrue(thirdDecision.RequiresApproval && thirdDecision.ReasonCodeString == PermissionReasonCodes.HighRiskApprovalRequired, "Expected new runtime instance to acquire owner lock after previous owner is released.");
+        AssertTrue(thirdSession.IsApprovalLedgerHealthy, "Expected third runtime owner lock holder to keep approval ledger healthy.");
+
+        Console.WriteLine("PASS ApprovalRuntimeOwnerLockRegression");
+    }
+    finally
+    {
+        thirdSession?.Dispose();
+        secondSession?.Dispose();
+        firstSession?.Dispose();
+        if (Directory.Exists(runtimeRoot))
+            Directory.Delete(runtimeRoot, recursive: true);
+    }
+}
+
 static async Task RunApprovalLedgerReplayAcrossRestartRegression()
 {
     var runtimeRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalLedgerReplay_" + Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(runtimeRoot);
+    AgentSessionContext? session = null;
+    AgentSessionContext? restarted = null;
+    AgentSessionContext? issuedSession = null;
+    AgentSessionContext? restartedBeforeConsume = null;
     try
     {
         var workspaceRoot = Path.Combine(runtimeRoot, "workspace");
@@ -3070,7 +3177,7 @@ static async Task RunApprovalLedgerReplayAcrossRestartRegression()
         };
 
         var sessionId = Guid.NewGuid().ToString("N");
-        var session = CreateSession(sessionId);
+        session = CreateSession(sessionId);
         var guard = new PermissionGuard();
         var noApproval = guard.Evaluate(session, new ToolAction
         {
@@ -3097,8 +3204,10 @@ static async Task RunApprovalLedgerReplayAcrossRestartRegression()
             RunId = noApproval.ApprovalProposal?.RunId,
             Payload = $"APPROVED:{proposalId}"
         }).Allowed, "Expected token reuse in same process to be denied.");
+        session.Dispose();
+        session = null;
 
-        var restarted = CreateSession(sessionId);
+        restarted = CreateSession(sessionId);
         var restartedGuard = new PermissionGuard();
         var replayDecision = restartedGuard.Evaluate(restarted, new ToolAction
         {
@@ -3108,10 +3217,12 @@ static async Task RunApprovalLedgerReplayAcrossRestartRegression()
             Payload = $"APPROVED:{proposalId}"
         });
         AssertTrue(!replayDecision.Allowed, "Expected consumed token replay to be denied after restart.");
+        restarted.Dispose();
+        restarted = null;
 
         var freshPath = Path.Combine(workspaceRoot, "approval-ledger-fresh.txt");
         await File.WriteAllTextAsync(freshPath, "fresh");
-        var issuedSession = CreateSession(sessionId);
+        issuedSession = CreateSession(sessionId);
         var issuedGuard = new PermissionGuard();
         var issuedDecision = issuedGuard.Evaluate(issuedSession, new ToolAction
         {
@@ -3119,8 +3230,10 @@ static async Task RunApprovalLedgerReplayAcrossRestartRegression()
             TargetPath = freshPath
         });
         AssertTrue(issuedDecision.RequiresApproval && issuedDecision.ApprovalProposal is not null, "Expected approval proposal before restart.");
+        issuedSession.Dispose();
+        issuedSession = null;
 
-        var restartedBeforeConsume = CreateSession(sessionId);
+        restartedBeforeConsume = CreateSession(sessionId);
         var restartedBeforeConsumeGuard = new PermissionGuard();
         var token = issuedDecision.ExpectedApprovalToken ?? string.Empty;
         var preConsumeAfterRestart = restartedBeforeConsumeGuard.Evaluate(restartedBeforeConsume, new ToolAction
@@ -3138,10 +3251,16 @@ static async Task RunApprovalLedgerReplayAcrossRestartRegression()
             WorkingDirectory = workspaceRoot
         });
         AssertTrue(!genericMarker.Allowed, "Expected generic APPROVED:true marker to remain denied.");
+        restartedBeforeConsume.Dispose();
+        restartedBeforeConsume = null;
         Console.WriteLine("PASS ApprovalLedgerReplayAcrossRestartRegression");
     }
     finally
     {
+        restartedBeforeConsume?.Dispose();
+        issuedSession?.Dispose();
+        restarted?.Dispose();
+        session?.Dispose();
         if (Directory.Exists(runtimeRoot))
             Directory.Delete(runtimeRoot, recursive: true);
     }
@@ -3195,6 +3314,8 @@ static async Task RunApprovalLedgerExpiredAndDeniedEventsRegression()
 {
     var runtimeRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalLedgerEvents_" + Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(runtimeRoot);
+    AgentSessionContext? session = null;
+    AgentSessionContext? restart = null;
     try
     {
         var workspaceRoot = Path.Combine(runtimeRoot, "workspace");
@@ -3203,7 +3324,7 @@ static async Task RunApprovalLedgerExpiredAndDeniedEventsRegression()
         await File.WriteAllTextAsync(target, "x");
 
         var now = new DateTime(2035, 01, 01, 12, 00, 00, DateTimeKind.Utc);
-        var session = new AgentSessionContext
+        session = new AgentSessionContext
         {
             SessionId = Guid.NewGuid().ToString("N"),
             RuntimeRoot = runtimeRoot,
@@ -3233,9 +3354,12 @@ static async Task RunApprovalLedgerExpiredAndDeniedEventsRegression()
         AssertTrue(!expiredDecision.Allowed && expiredDecision.ReasonCodeString == PermissionReasonCodes.ApprovalTokenExpired, "Expected expired token denial.");
 
         var proposalId = token["APPROVED:".Length..];
-        var restart = new AgentSessionContext
+        var sessionId = session.SessionId;
+        session.Dispose();
+        session = null;
+        restart = new AgentSessionContext
         {
-            SessionId = session.SessionId,
+            SessionId = sessionId,
             RuntimeRoot = runtimeRoot,
             ActiveWorkspaceRoot = workspaceRoot,
             AccessMode = AgentAccessMode.WorkspaceWrite,
@@ -3266,10 +3390,14 @@ static async Task RunApprovalLedgerExpiredAndDeniedEventsRegression()
         AssertTrue(ledger.Contains("\"event\":\"denied_expired\"", StringComparison.Ordinal), "Expected denied_expired event in ledger.");
         AssertTrue(ledger.Contains("\"event\":\"denied_invalid_token\"", StringComparison.Ordinal), "Expected denied_invalid_token event in ledger.");
         AssertTrue(!ledger.Contains("APPROVED:true", StringComparison.Ordinal), "Ledger must not persist raw approval token payload.");
+        restart.Dispose();
+        restart = null;
         Console.WriteLine("PASS ApprovalLedgerExpiredAndDeniedEventsRegression");
     }
     finally
     {
+        restart?.Dispose();
+        session?.Dispose();
         if (Directory.Exists(runtimeRoot))
             Directory.Delete(runtimeRoot, recursive: true);
     }
@@ -4065,6 +4193,9 @@ static async Task RunApprovalCapabilityFingerprintSchemaRegression()
 {
     var runtimeRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalCapabilityFingerprint_" + Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(runtimeRoot);
+    AgentSessionContext? session = null;
+    AgentSessionContext? replay = null;
+    AgentSessionContext? compactionSession = null;
     try
     {
         var workspaceRoot = Path.Combine(runtimeRoot, "workspace");
@@ -4075,7 +4206,7 @@ static async Task RunApprovalCapabilityFingerprintSchemaRegression()
         await File.WriteAllTextAsync(expiredTarget, "expired");
 
         var now = new DateTime(2041, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-        var session = new AgentSessionContext
+        session = new AgentSessionContext
         {
             SessionId = "capability-fingerprint-schema",
             RuntimeRoot = runtimeRoot,
@@ -4132,9 +4263,12 @@ static async Task RunApprovalCapabilityFingerprintSchemaRegression()
         });
         AssertTrue(!expiredDenied.Allowed && expiredDenied.ReasonCodeString == PermissionReasonCodes.ApprovalTokenExpired, "Expected expired approval denial.");
 
-        var replay = new AgentSessionContext
+        session.Dispose();
+        session = null;
+
+        replay = new AgentSessionContext
         {
-            SessionId = session.SessionId,
+            SessionId = "capability-fingerprint-schema",
             RuntimeRoot = runtimeRoot,
             ActiveWorkspaceRoot = workspaceRoot,
             AccessMode = AgentAccessMode.WorkspaceWrite,
@@ -4246,9 +4380,12 @@ static async Task RunApprovalCapabilityFingerprintSchemaRegression()
         if (File.Exists(anchorPath))
             File.Delete(anchorPath);
 
-        var compactionSession = new AgentSessionContext
+        replay.Dispose();
+        replay = null;
+
+        compactionSession = new AgentSessionContext
         {
-            SessionId = session.SessionId,
+            SessionId = "capability-fingerprint-schema",
             RuntimeRoot = runtimeRoot,
             ActiveWorkspaceRoot = workspaceRoot,
             AccessMode = AgentAccessMode.WorkspaceWrite,
@@ -4274,6 +4411,9 @@ static async Task RunApprovalCapabilityFingerprintSchemaRegression()
     }
     finally
     {
+        compactionSession?.Dispose();
+        replay?.Dispose();
+        session?.Dispose();
         if (Directory.Exists(runtimeRoot))
             Directory.Delete(runtimeRoot, recursive: true);
     }
@@ -4375,6 +4515,14 @@ static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
 
     var runtimeRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalCapabilityFingerprintEnforcement_" + Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(runtimeRoot);
+    AgentSessionContext? session = null;
+    AgentSessionContext? classReplay = null;
+    AgentSessionContext? tierSession = null;
+    AgentSessionContext? tierReplay = null;
+    AgentSessionContext? policySession = null;
+    AgentSessionContext? policyReplay = null;
+    AgentSessionContext? postCutoverMissing = null;
+    AgentSessionContext? finalSession = null;
     try
     {
         var workspaceRoot = Path.Combine(runtimeRoot, "workspace");
@@ -4387,9 +4535,10 @@ static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
         await File.WriteAllTextAsync(readPath, "d");
 
         var now = new DateTime(2042, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-        var session = new AgentSessionContext
+        var enforcementSessionId = "capability-fingerprint-enforcement";
+        session = new AgentSessionContext
         {
-            SessionId = "capability-fingerprint-enforcement",
+            SessionId = enforcementSessionId,
             RuntimeRoot = runtimeRoot,
             ActiveWorkspaceRoot = workspaceRoot,
             AccessMode = AgentAccessMode.WorkspaceWrite,
@@ -4435,9 +4584,12 @@ static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
             policyCategory = (string?)null,
             actionProfile = "delete_file"
         }));
-        var classReplay = new AgentSessionContext
+        session.Dispose();
+        session = null;
+
+        classReplay = new AgentSessionContext
         {
-            SessionId = session.SessionId,
+            SessionId = enforcementSessionId,
             RuntimeRoot = runtimeRoot,
             ActiveWorkspaceRoot = workspaceRoot,
             AccessMode = AgentAccessMode.WorkspaceWrite,
@@ -4454,7 +4606,10 @@ static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
         });
         AssertTrue(!classMismatch.Allowed && classMismatch.ReasonCodeString == PermissionReasonCodes.ApprovalCapabilityMismatch, "Expected capability class mismatch denial.");
 
-        var tierSession = new AgentSessionContext
+        classReplay.Dispose();
+        classReplay = null;
+
+        tierSession = new AgentSessionContext
         {
             SessionId = "capability-fingerprint-tier",
             RuntimeRoot = runtimeRoot,
@@ -4482,9 +4637,12 @@ static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
             policyCategory = (string?)null,
             actionProfile = "delete_file"
         }));
-        var tierReplay = new AgentSessionContext
+        tierSession.Dispose();
+        tierSession = null;
+
+        tierReplay = new AgentSessionContext
         {
-            SessionId = tierSession.SessionId,
+            SessionId = "capability-fingerprint-tier",
             RuntimeRoot = runtimeRoot,
             ActiveWorkspaceRoot = workspaceRoot,
             AccessMode = AgentAccessMode.WorkspaceWrite,
@@ -4501,7 +4659,10 @@ static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
         });
         AssertTrue(!tierMismatch.Allowed && tierMismatch.ReasonCodeString == PermissionReasonCodes.ApprovalCapabilityMismatch, "Expected capability tier mismatch denial.");
 
-        var policySession = new AgentSessionContext
+        tierReplay.Dispose();
+        tierReplay = null;
+
+        policySession = new AgentSessionContext
         {
             SessionId = "capability-fingerprint-policy",
             RuntimeRoot = runtimeRoot,
@@ -4532,9 +4693,12 @@ static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
             policyCategory = "allowed",
             actionProfile = "run_command"
         }));
-        var policyReplay = new AgentSessionContext
+        policySession.Dispose();
+        policySession = null;
+
+        policyReplay = new AgentSessionContext
         {
-            SessionId = policySession.SessionId,
+            SessionId = "capability-fingerprint-policy",
             RuntimeRoot = runtimeRoot,
             ActiveWorkspaceRoot = workspaceRoot,
             AccessMode = AgentAccessMode.WorkspaceWrite,
@@ -4560,9 +4724,12 @@ static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
         AssertTrue(!ledgerText.Contains("\"command\":", StringComparison.OrdinalIgnoreCase), "Denied capability mismatch diagnostics must not persist raw command payload fields.");
 
         await RewriteIssuedRecordAsync(rewritePath, tierProposal.ProposalId, root => CreateIssuedRecordWithoutFingerprint(root));
-        var postCutoverMissing = new AgentSessionContext
+        policyReplay.Dispose();
+        policyReplay = null;
+
+        postCutoverMissing = new AgentSessionContext
         {
-            SessionId = tierSession.SessionId,
+            SessionId = "capability-fingerprint-tier",
             RuntimeRoot = runtimeRoot,
             ActiveWorkspaceRoot = workspaceRoot,
             AccessMode = AgentAccessMode.WorkspaceWrite,
@@ -4581,6 +4748,8 @@ static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
 
         var preCutoverRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalCapabilityFingerprintLegacy_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(preCutoverRoot);
+        AgentSessionContext? preIssue = null;
+        AgentSessionContext? preReplay = null;
         try
         {
             var preWorkspace = Path.Combine(preCutoverRoot, "workspace");
@@ -4588,7 +4757,7 @@ static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
             var prePath = Path.Combine(preWorkspace, "legacy-fingerprint.txt");
             await File.WriteAllTextAsync(prePath, "legacy");
             var preNow = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-            var preIssue = new AgentSessionContext
+            preIssue = new AgentSessionContext
             {
                 SessionId = "capability-fingerprint-legacy",
                 RuntimeRoot = preCutoverRoot,
@@ -4608,9 +4777,12 @@ static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
             var preToken = preIssued.ExpectedApprovalToken ?? string.Empty;
             var preLedgerPath = Path.Combine(preCutoverRoot, "approval-ledger-v2.jsonl");
             await RewriteIssuedRecordAsync(preLedgerPath, preProposal.ProposalId, root => CreateIssuedRecordWithoutFingerprint(root));
-            var preReplay = new AgentSessionContext
+            preIssue.Dispose();
+            preIssue = null;
+
+            preReplay = new AgentSessionContext
             {
-                SessionId = preIssue.SessionId,
+                SessionId = "capability-fingerprint-legacy",
                 RuntimeRoot = preCutoverRoot,
                 ActiveWorkspaceRoot = preWorkspace,
                 AccessMode = AgentAccessMode.WorkspaceWrite,
@@ -4626,14 +4798,32 @@ static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
                 Payload = preToken
             });
             AssertTrue(preAllowed.Allowed, "Expected pre-cutover missing fingerprint legacy compatibility.");
+            preReplay.Dispose();
+            preReplay = null;
         }
         finally
         {
+            preReplay?.Dispose();
+            preIssue?.Dispose();
             if (Directory.Exists(preCutoverRoot))
                 Directory.Delete(preCutoverRoot, recursive: true);
         }
 
-        var genericDenied = guard.Evaluate(session, new ToolAction
+        postCutoverMissing.Dispose();
+        postCutoverMissing = null;
+
+        finalSession = new AgentSessionContext
+        {
+            SessionId = enforcementSessionId,
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot }),
+            UtcNowProvider = () => now
+        };
+        var finalGuard = new PermissionGuard();
+
+        var genericDenied = finalGuard.Evaluate(finalSession, new ToolAction
         {
             Kind = ToolActionKind.RunCommand,
             Payload = "nvidia-smi APPROVED:true",
@@ -4641,7 +4831,7 @@ static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
         });
         AssertTrue(!genericDenied.Allowed, "Expected APPROVED:true semantics unchanged.");
 
-        var readAllowed = guard.Evaluate(session, new ToolAction
+        var readAllowed = finalGuard.Evaluate(finalSession, new ToolAction
         {
             Kind = ToolActionKind.ReadFile,
             TargetPath = readPath
@@ -4652,6 +4842,14 @@ static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
     }
     finally
     {
+        finalSession?.Dispose();
+        postCutoverMissing?.Dispose();
+        policyReplay?.Dispose();
+        policySession?.Dispose();
+        tierReplay?.Dispose();
+        tierSession?.Dispose();
+        classReplay?.Dispose();
+        session?.Dispose();
         if (Directory.Exists(runtimeRoot))
             Directory.Delete(runtimeRoot, recursive: true);
     }
