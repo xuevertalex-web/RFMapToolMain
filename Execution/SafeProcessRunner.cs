@@ -81,7 +81,11 @@ public sealed class SafeProcessRunner
                 decision.ReasonCode,
                 decision.Message,
                 request.Command,
-                workingDirectory);
+                workingDirectory,
+                decision.CapabilityClass,
+                decision.CapabilityTier,
+                decision.CapabilityGate,
+                decision.CapabilityPolicyCategory);
         }
 
         if (!Directory.Exists(workingDirectory))
@@ -209,7 +213,11 @@ public sealed class SafeProcessRunner
             Arguments = string.Join(" ", GetNormalizedArgs(request)),
             WorkingDirectory = workingDirectory,
             ReasonCode = timedOut ? "PROCESS_TIMEOUT" : (canceled ? "PROCESS_CANCELED" : PermissionReasonCodes.Allowed),
-            Message = canceled ? "Process execution was canceled" : string.Empty
+            Message = canceled ? "Process execution was canceled" : string.Empty,
+            CapabilityClass = decision.CapabilityClass,
+            CapabilityTier = decision.CapabilityTier,
+            CapabilityGate = decision.CapabilityGate,
+            CapabilityPolicyCategory = decision.CapabilityPolicyCategory
         };
     }
 
@@ -281,8 +289,20 @@ public sealed class SafeProcessResult
     public string WorkingDirectory { get; init; } = string.Empty;
     public string ReasonCode { get; init; } = PermissionReasonCodes.Allowed;
     public string Message { get; init; } = string.Empty;
+    public string? CapabilityClass { get; init; }
+    public int? CapabilityTier { get; init; }
+    public string? CapabilityGate { get; init; }
+    public string? CapabilityPolicyCategory { get; init; }
 
-    public static SafeProcessResult Denied(PermissionReasonCode reason, string message, string command, string workingDirectory) => new()
+    public static SafeProcessResult Denied(
+        PermissionReasonCode reason,
+        string message,
+        string command,
+        string workingDirectory,
+        string? capabilityClass = null,
+        int? capabilityTier = null,
+        string? capabilityGate = null,
+        string? capabilityPolicyCategory = null) => new()
     {
         Success = false,
         TimedOut = false,
@@ -308,7 +328,11 @@ public sealed class SafeProcessResult
         },
         Message = message,
         Command = command,
-        WorkingDirectory = workingDirectory
+        WorkingDirectory = workingDirectory,
+        CapabilityClass = capabilityClass,
+        CapabilityTier = capabilityTier,
+        CapabilityGate = capabilityGate,
+        CapabilityPolicyCategory = capabilityPolicyCategory
     };
 
     public static SafeProcessResult Failed(string message, string command, string workingDirectory) => new()

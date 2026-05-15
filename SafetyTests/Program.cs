@@ -2624,6 +2624,8 @@ static async Task RunProcessExecutionHardeningRegression()
         Timeout = TimeSpan.FromSeconds(20)
     });
     AssertTrue(allowed.Success, "Expected whitelisted command to pass.");
+    AssertTrue(allowed.CapabilityClass == "mutation" && allowed.CapabilityTier == 1 && allowed.CapabilityGate == "allowed", "Expected safe runner result capability metadata mutation/tier1/allowed.");
+    AssertTrue(string.IsNullOrWhiteSpace(allowed.CapabilityPolicyCategory), "Expected non-command build action to have no command policy category.");
 
     var malformed = await runner.RunAsync(new SafeProcessRequest
     {
@@ -2643,6 +2645,8 @@ static async Task RunProcessExecutionHardeningRegression()
         Timeout = TimeSpan.FromSeconds(5)
     });
     AssertTrue(!injection.Success && injection.ReasonCode == PermissionReasonCodes.CommandUnsupportedShellSyntax, "Expected shell/meta syntax to be denied by canonical command policy.");
+    AssertTrue(injection.CapabilityClass == "kernel_system" && injection.CapabilityTier == 5 && injection.CapabilityGate == "denied", "Expected shell/meta runner denial capability metadata.");
+    AssertTrue(injection.CapabilityPolicyCategory == "unsupported_shell_meta_syntax", "Expected shell/meta runner denial policy category.");
 
     var shellMetaWithApproval = await runner.RunAsync(new SafeProcessRequest
     {
@@ -2664,6 +2668,8 @@ static async Task RunProcessExecutionHardeningRegression()
         Timeout = TimeSpan.FromSeconds(5)
     });
     AssertTrue(!highRiskWithoutApproval.Success && highRiskWithoutApproval.ReasonCode == PermissionReasonCodes.HighRiskApprovalRequired, "Expected high-risk command to require approval before process start.");
+    AssertTrue(highRiskWithoutApproval.CapabilityClass == "kernel_system" && highRiskWithoutApproval.CapabilityTier == 5 && highRiskWithoutApproval.CapabilityGate == "approval_required", "Expected high-risk runner denial capability metadata.");
+    AssertTrue(highRiskWithoutApproval.CapabilityPolicyCategory == "high_risk_approval_required", "Expected high-risk runner denial policy category.");
     var highRiskGenericApproved = await runner.RunAsync(new SafeProcessRequest
     {
         Kind = ToolActionKind.RunCommand,
@@ -2673,6 +2679,8 @@ static async Task RunProcessExecutionHardeningRegression()
         Timeout = TimeSpan.FromSeconds(5)
     });
     AssertTrue(!highRiskGenericApproved.Success && highRiskGenericApproved.ReasonCode == PermissionReasonCodes.HighRiskApprovalRequired, "Expected generic APPROVED:true marker to remain denied in runner path.");
+    AssertTrue(highRiskGenericApproved.CapabilityClass == "kernel_system" && highRiskGenericApproved.CapabilityTier == 5 && highRiskGenericApproved.CapabilityGate == "approval_required", "Expected generic APPROVED:true denial to keep high-risk capability metadata.");
+    AssertTrue(highRiskGenericApproved.CapabilityPolicyCategory == "high_risk_approval_required", "Expected generic APPROVED:true denial policy category.");
 
     var seededHighRisk = guard.Evaluate(session, new ToolAction
     {
