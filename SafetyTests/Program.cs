@@ -4927,6 +4927,63 @@ static async Task RunApprovalCapabilityFingerprintEnforcementRegression()
 
 static async Task RunApprovalProposalIdentityCanonicalizationRegression()
 {
+    static string ComputeLegacyProposalId(string sessionId, ToolActionKind kind, string normalizedTarget, string normalizedWorkspace, PermissionReasonCode code, string payload)
+    {
+        var signature = string.Join("|", new[]
+        {
+            sessionId,
+            kind.ToString(),
+            normalizedTarget,
+            normalizedWorkspace,
+            code.ToString(),
+            payload
+        });
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(signature))).ToLowerInvariant()[..16];
+    }
+
+    static string StripIntegrityMetadata(string line)
+    {
+        using var doc = JsonDocument.Parse(line);
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = false }))
+        {
+            writer.WriteStartObject();
+            foreach (var property in doc.RootElement.EnumerateObject())
+            {
+                if (property.NameEquals("integrityVersion") || property.NameEquals("prevEventHash") || property.NameEquals("eventHash"))
+                    continue;
+                property.WriteTo(writer);
+            }
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    static async Task RewriteIssuedProposalIdAsLegacyAsync(string ledgerPath, string currentProposalId, string legacyProposalId)
+    {
+        var lines = await File.ReadAllLinesAsync(ledgerPath);
+        var replaced = false;
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+            if (line.Contains("\"event\":\"issued\"", StringComparison.Ordinal) &&
+                line.Contains($"\"proposalId\":\"{currentProposalId}\"", StringComparison.Ordinal))
+            {
+                line = line.Replace($"\"proposalId\":\"{currentProposalId}\"", $"\"proposalId\":\"{legacyProposalId}\"", StringComparison.Ordinal);
+                replaced = true;
+            }
+            lines[i] = StripIntegrityMetadata(line);
+        }
+
+        AssertTrue(replaced, "Expected issued proposal record to be rewritten for legacy compatibility test.");
+        await File.WriteAllLinesAsync(ledgerPath, lines, new UTF8Encoding(false));
+        var anchorPath = Path.Combine(Path.GetDirectoryName(ledgerPath) ?? string.Empty, "approval-ledger-v2.anchor.json");
+        if (File.Exists(anchorPath))
+            File.Delete(anchorPath);
+    }
+
     var runtimeRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalProposalIdentity_" + Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(runtimeRoot);
     AgentSessionContext? replayIssueSession = null;
@@ -4968,6 +5025,15 @@ static async Task RunApprovalProposalIdentityCanonicalizationRegression()
             AssertTrue(stableA.RequiresApproval && stableA.ApprovalProposal is not null, "Expected delete approval proposal for canonical identity stability.");
             AssertTrue(stableB.RequiresApproval && stableB.ApprovalProposal is not null, "Expected second delete approval proposal for canonical identity stability.");
             AssertTrue(string.Equals(stableA.ApprovalProposal!.ProposalId, stableB.ApprovalProposal!.ProposalId, StringComparison.Ordinal), "Expected same logical proposal to produce stable canonical proposalId.");
+            var stableToken = stableA.ExpectedApprovalToken ?? string.Empty;
+            var stableAllowed = guard.Evaluate(session, new ToolAction
+            {
+                Kind = ToolActionKind.DeleteFile,
+                TargetPath = targetPath,
+                RunId = stableA.ApprovalProposal.RunId,
+                Payload = $"identity payload {stableToken}"
+            });
+            AssertTrue(stableAllowed.Allowed, "Expected canonical proposal-v1 token validation path to remain valid.");
 
             var delimiterA = guard.Evaluate(session, new ToolAction
             {
@@ -5069,6 +5135,182 @@ static async Task RunApprovalProposalIdentityCanonicalizationRegression()
         AssertTrue(string.Equals(replayLoaded!.ProposalId, replayProposalId, StringComparison.Ordinal), "Expected replayed active proposal identity to remain stable.");
         replayLoadSession.Dispose();
         replayLoadSession = null;
+
+        var legacyRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalProposalIdentityLegacy_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(legacyRoot);
+        try
+        {
+            AgentSessionContext? legacyIssue = null;
+            AgentSessionContext? legacyLoad = null;
+            try
+            {
+                var legacyWorkspace = Path.Combine(legacyRoot, "workspace");
+                Directory.CreateDirectory(legacyWorkspace);
+                var legacyTarget = Path.Combine(legacyWorkspace, "legacy-identity-target.txt");
+                await File.WriteAllTextAsync(legacyTarget, "legacy");
+                var preCutoverNow = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+                legacyIssue = new AgentSessionContext
+                {
+                    SessionId = "proposal-identity-legacy",
+                    RuntimeRoot = legacyRoot,
+                    ActiveWorkspaceRoot = legacyWorkspace,
+                    AccessMode = AgentAccessMode.WorkspaceWrite,
+                    ProtectedPathPolicy = new ProtectedPathPolicy(new[] { legacyRoot }),
+                    UtcNowProvider = () => preCutoverNow
+                };
+                var legacyGuard = new PermissionGuard();
+                var legacyIssued = legacyGuard.Evaluate(legacyIssue, new ToolAction
+                {
+                    Kind = ToolActionKind.DeleteFile,
+                    TargetPath = legacyTarget
+                });
+                AssertTrue(legacyIssued.RequiresApproval && legacyIssued.ApprovalProposal is not null, "Expected pre-cutover proposal for legacy identity compatibility.");
+                var legacyProposal = legacyIssued.ApprovalProposal!;
+                var legacyId = ComputeLegacyProposalId(
+                    sessionId: legacyIssue.SessionId,
+                    kind: ToolActionKind.DeleteFile,
+                    normalizedTarget: legacyProposal.NormalizedTarget ?? string.Empty,
+                    normalizedWorkspace: legacyProposal.SandboxRoot,
+                    code: PermissionReasonCode.WriteModeDeleteDenied,
+                    payload: string.Empty);
+                var legacyLedgerPath = Path.Combine(legacyRoot, "approval-ledger-v2.jsonl");
+                await RewriteIssuedProposalIdAsLegacyAsync(legacyLedgerPath, legacyProposal.ProposalId, legacyId);
+                legacyIssue.Dispose();
+                legacyIssue = null;
+
+                legacyLoad = new AgentSessionContext
+                {
+                    SessionId = "proposal-identity-legacy",
+                    RuntimeRoot = legacyRoot,
+                    ActiveWorkspaceRoot = legacyWorkspace,
+                    AccessMode = AgentAccessMode.WorkspaceWrite,
+                    ProtectedPathPolicy = new ProtectedPathPolicy(new[] { legacyRoot }),
+                    UtcNowProvider = () => preCutoverNow.AddMinutes(1)
+                };
+                var legacyLoadGuard = new PermissionGuard();
+                var runMismatch = legacyLoadGuard.Evaluate(legacyLoad, new ToolAction
+                {
+                    Kind = ToolActionKind.DeleteFile,
+                    TargetPath = legacyTarget,
+                    RunId = "wrong-run",
+                    Payload = $"APPROVED:{legacyId}"
+                });
+                AssertTrue(!runMismatch.Allowed && runMismatch.ReasonCodeString == PermissionReasonCodes.ApprovalRunMismatch, "Expected runId mismatch to remain denied for legacy fallback proposals.");
+
+                var legacyAllowed = legacyLoadGuard.Evaluate(legacyLoad, new ToolAction
+                {
+                    Kind = ToolActionKind.DeleteFile,
+                    TargetPath = legacyTarget,
+                    RunId = legacyProposal.RunId,
+                    Payload = $"APPROVED:{legacyId}"
+                });
+                AssertTrue(legacyAllowed.Allowed, "Expected pre-cutover active legacy proposalId token compatibility.");
+
+                var mismatchedAction = legacyLoadGuard.Evaluate(legacyLoad, new ToolAction
+                {
+                    Kind = ToolActionKind.RunCommand,
+                    CommandExecutable = "nvidia-smi",
+                    CommandArgs = Array.Empty<string>(),
+                    WorkingDirectory = legacyWorkspace,
+                    Payload = $"nvidia-smi APPROVED:{legacyId}",
+                    RunId = legacyProposal.RunId
+                });
+                AssertTrue(!mismatchedAction.Allowed, "Expected mismatched action/executable not to validate through legacy proposalId fallback.");
+
+                AssertTrue(legacyLoad.ConsumeApprovalProposal(legacyId, legacyProposal.RunId), "Expected consumed persistence for legacy fallback proposal.");
+                var consumedReplay = legacyLoadGuard.Evaluate(legacyLoad, new ToolAction
+                {
+                    Kind = ToolActionKind.DeleteFile,
+                    TargetPath = legacyTarget,
+                    RunId = legacyProposal.RunId,
+                    Payload = $"APPROVED:{legacyId}"
+                });
+                AssertTrue(!consumedReplay.Allowed && consumedReplay.ReasonCodeString == PermissionReasonCodes.ApprovalTokenExpired, "Expected consumed replay denial to remain unchanged for legacy fallback proposal.");
+            }
+            finally
+            {
+                legacyLoad?.Dispose();
+                legacyIssue?.Dispose();
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(legacyRoot))
+                Directory.Delete(legacyRoot, recursive: true);
+        }
+
+        var postLegacyRoot = Path.Combine(Path.GetTempPath(), "LcaApprovalProposalIdentityPostCutover_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(postLegacyRoot);
+        try
+        {
+            AgentSessionContext? postIssue = null;
+            AgentSessionContext? postLoad = null;
+            try
+            {
+                var postWorkspace = Path.Combine(postLegacyRoot, "workspace");
+                Directory.CreateDirectory(postWorkspace);
+                var postTarget = Path.Combine(postWorkspace, "post-legacy-identity-target.txt");
+                await File.WriteAllTextAsync(postTarget, "post");
+                var postNow = new DateTime(2045, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+                postIssue = new AgentSessionContext
+                {
+                    SessionId = "proposal-identity-post",
+                    RuntimeRoot = postLegacyRoot,
+                    ActiveWorkspaceRoot = postWorkspace,
+                    AccessMode = AgentAccessMode.WorkspaceWrite,
+                    ProtectedPathPolicy = new ProtectedPathPolicy(new[] { postLegacyRoot }),
+                    UtcNowProvider = () => postNow
+                };
+                var postGuard = new PermissionGuard();
+                var postIssued = postGuard.Evaluate(postIssue, new ToolAction
+                {
+                    Kind = ToolActionKind.DeleteFile,
+                    TargetPath = postTarget
+                });
+                AssertTrue(postIssued.RequiresApproval && postIssued.ApprovalProposal is not null, "Expected post-cutover proposal for legacy compatibility denial.");
+                var postProposal = postIssued.ApprovalProposal!;
+                var postLegacyId = ComputeLegacyProposalId(
+                    sessionId: postIssue.SessionId,
+                    kind: ToolActionKind.DeleteFile,
+                    normalizedTarget: postProposal.NormalizedTarget ?? string.Empty,
+                    normalizedWorkspace: postProposal.SandboxRoot,
+                    code: PermissionReasonCode.WriteModeDeleteDenied,
+                    payload: string.Empty);
+                var postLedgerPath = Path.Combine(postLegacyRoot, "approval-ledger-v2.jsonl");
+                await RewriteIssuedProposalIdAsLegacyAsync(postLedgerPath, postProposal.ProposalId, postLegacyId);
+                postIssue.Dispose();
+                postIssue = null;
+
+                postLoad = new AgentSessionContext
+                {
+                    SessionId = "proposal-identity-post",
+                    RuntimeRoot = postLegacyRoot,
+                    ActiveWorkspaceRoot = postWorkspace,
+                    AccessMode = AgentAccessMode.WorkspaceWrite,
+                    ProtectedPathPolicy = new ProtectedPathPolicy(new[] { postLegacyRoot }),
+                    UtcNowProvider = () => postNow.AddMinutes(1)
+                };
+                var postLoadGuard = new PermissionGuard();
+                var postDenied = postLoadGuard.Evaluate(postLoad, new ToolAction
+                {
+                    Kind = ToolActionKind.DeleteFile,
+                    TargetPath = postTarget,
+                    RunId = postProposal.RunId,
+                    Payload = $"APPROVED:{postLegacyId}"
+                });
+                AssertTrue(!postDenied.Allowed, $"Expected post-cutover non-canonical proposalId token to remain denied (reason={postDenied.ReasonCodeString}).");
+            }
+            finally
+            {
+                postLoad?.Dispose();
+                postIssue?.Dispose();
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(postLegacyRoot))
+                Directory.Delete(postLegacyRoot, recursive: true);
+        }
 
         Console.WriteLine("PASS ApprovalProposalIdentityCanonicalizationRegression");
     }

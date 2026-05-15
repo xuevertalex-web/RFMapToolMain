@@ -8,6 +8,7 @@ internal static class ApprovalProposalIdentityV1
 {
     public const int IdentityVersion = 1;
     private const string Prefix = "proposal-v1:";
+    public static readonly DateTime CutoverUtc = new(2026, 5, 16, 0, 0, 0, DateTimeKind.Utc);
 
     public static string ComputeProposalId(
         string sessionId,
@@ -49,6 +50,26 @@ internal static class ApprovalProposalIdentityV1
             capabilityFingerprint);
         var hash = Convert.ToHexString(SHA256.HashData(canonicalBytes)).ToLowerInvariant();
         return Prefix + hash;
+    }
+
+    public static bool IsCanonicalProposalId(string? proposalId)
+    {
+        if (string.IsNullOrWhiteSpace(proposalId))
+            return false;
+
+        if (!proposalId.StartsWith(Prefix, StringComparison.Ordinal))
+            return false;
+
+        var hash = proposalId[Prefix.Length..];
+        if (hash.Length != 64)
+            return false;
+        foreach (var ch in hash)
+        {
+            if (!char.IsDigit(ch) && (ch < 'a' || ch > 'f'))
+                return false;
+        }
+
+        return true;
     }
 
     private static byte[] BuildCanonicalPayload(

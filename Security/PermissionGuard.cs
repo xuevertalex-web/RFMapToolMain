@@ -326,28 +326,32 @@ public sealed class PermissionGuard
             return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalCapabilityBindingUnavailable, "Approval capability binding unavailable.");
 
         var expected = ComputeProposalId(session, sanitizedAction, code, normalizedTarget, normalizedWorkspace, currentFingerprint);
+        var resolvedProposalId = expected;
         if (!token.Equals(expected, StringComparison.OrdinalIgnoreCase))
         {
-            if (!session.RecordApprovalDeniedEvent(expected, "denied_invalid_token", PermissionDecision.ToReasonCodeString(code), action.RunId))
-                return ApprovalValidationResult.LedgerUnavailable(session);
-            return ApprovalValidationResult.Denied(code, "Approval token mismatch.");
+            if (!TryResolveLegacyProposalIdForValidation(session, sanitizedAction, code, normalizedTarget, normalizedWorkspace, token, out resolvedProposalId))
+            {
+                if (!session.RecordApprovalDeniedEvent(expected, "denied_invalid_token", PermissionDecision.ToReasonCodeString(code), action.RunId))
+                    return ApprovalValidationResult.LedgerUnavailable(session);
+                return ApprovalValidationResult.Denied(code, "Approval token mismatch.");
+            }
         }
-        if (session.IsApprovalProposalConsumed(expected))
+        if (session.IsApprovalProposalConsumed(resolvedProposalId))
         {
-            if (!session.RecordApprovalDeniedEvent(expected, "denied_consumed", PermissionReasonCodes.ApprovalTokenExpired, action.RunId))
+            if (!session.RecordApprovalDeniedEvent(resolvedProposalId, "denied_consumed", PermissionReasonCodes.ApprovalTokenExpired, action.RunId))
                 return ApprovalValidationResult.LedgerUnavailable(session);
             return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalTokenExpired, "Approval token expired.");
         }
-        if (session.IsApprovalProposalExpired(expected))
+        if (session.IsApprovalProposalExpired(resolvedProposalId))
         {
-            if (!session.RecordApprovalDeniedEvent(expected, "denied_expired", PermissionReasonCodes.ApprovalTokenExpired, action.RunId))
+            if (!session.RecordApprovalDeniedEvent(resolvedProposalId, "denied_expired", PermissionReasonCodes.ApprovalTokenExpired, action.RunId))
                 return ApprovalValidationResult.LedgerUnavailable(session);
             return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalTokenExpired, "Approval token expired.");
         }
-        var proposal = session.GetApprovalProposal(expected);
+        var proposal = session.GetApprovalProposal(resolvedProposalId);
         if (proposal is null)
         {
-            if (!session.RecordApprovalDeniedEvent(expected, "denied_invalid_token", PermissionDecision.ToReasonCodeString(code), action.RunId))
+            if (!session.RecordApprovalDeniedEvent(resolvedProposalId, "denied_invalid_token", PermissionDecision.ToReasonCodeString(code), action.RunId))
                 return ApprovalValidationResult.LedgerUnavailable(session);
             return ApprovalValidationResult.Denied(code, "Approval token mismatch.");
         }
@@ -358,7 +362,7 @@ public sealed class PermissionGuard
         {
             if (!legacyRunIdless)
             {
-                if (!session.RecordApprovalDeniedEvent(expected, "denied_run_binding_unavailable", PermissionReasonCodes.ApprovalRunBindingUnavailable, proposalRunId))
+                if (!session.RecordApprovalDeniedEvent(resolvedProposalId, "denied_run_binding_unavailable", PermissionReasonCodes.ApprovalRunBindingUnavailable, proposalRunId))
                     return ApprovalValidationResult.LedgerUnavailable(session);
                 return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalRunBindingUnavailable, "Approval run binding unavailable.");
             }
@@ -369,14 +373,14 @@ public sealed class PermissionGuard
             {
                 if (!legacyRunIdless)
                 {
-                    if (!session.RecordApprovalDeniedEvent(expected, "denied_run_binding_unavailable", PermissionReasonCodes.ApprovalRunBindingUnavailable, currentRunId))
+                    if (!session.RecordApprovalDeniedEvent(resolvedProposalId, "denied_run_binding_unavailable", PermissionReasonCodes.ApprovalRunBindingUnavailable, currentRunId))
                         return ApprovalValidationResult.LedgerUnavailable(session);
                     return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalRunBindingUnavailable, "Approval run binding unavailable.");
                 }
             }
             else if (!currentRunId.Equals(proposalRunId, StringComparison.OrdinalIgnoreCase))
             {
-                if (!session.RecordApprovalDeniedEvent(expected, "denied_run_mismatch", PermissionReasonCodes.ApprovalRunMismatch, currentRunId))
+                if (!session.RecordApprovalDeniedEvent(resolvedProposalId, "denied_run_mismatch", PermissionReasonCodes.ApprovalRunMismatch, currentRunId))
                     return ApprovalValidationResult.LedgerUnavailable(session);
                 return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalRunMismatch, "Approval is bound to a different execution attempt.");
             }
@@ -389,20 +393,66 @@ public sealed class PermissionGuard
         if (proposalFingerprint is not null &&
             !CapabilityFingerprintsEqual(currentFingerprint, proposalFingerprint))
         {
-            if (!session.RecordApprovalDeniedEvent(expected, "denied_capability_mismatch", PermissionReasonCodes.ApprovalCapabilityMismatch, proposalRunId ?? currentRunId))
+            if (!session.RecordApprovalDeniedEvent(resolvedProposalId, "denied_capability_mismatch", PermissionReasonCodes.ApprovalCapabilityMismatch, proposalRunId ?? currentRunId))
                 return ApprovalValidationResult.LedgerUnavailable(session);
             return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalCapabilityMismatch, "Approval is bound to a different capability profile.");
         }
 
         if (session.UtcNowProvider() > proposal.ExpiresAtUtc)
         {
-            if (!session.MarkApprovalProposalExpired(expected, PermissionReasonCodes.ApprovalTokenExpired, proposalRunId ?? currentRunId))
+            if (!session.MarkApprovalProposalExpired(resolvedProposalId, PermissionReasonCodes.ApprovalTokenExpired, proposalRunId ?? currentRunId))
                 return ApprovalValidationResult.LedgerUnavailable(session);
-            if (!session.RecordApprovalDeniedEvent(expected, "denied_expired", PermissionReasonCodes.ApprovalTokenExpired, proposalRunId ?? currentRunId))
+            if (!session.RecordApprovalDeniedEvent(resolvedProposalId, "denied_expired", PermissionReasonCodes.ApprovalTokenExpired, proposalRunId ?? currentRunId))
                 return ApprovalValidationResult.LedgerUnavailable(session);
             return ApprovalValidationResult.Denied(PermissionReasonCode.ApprovalTokenExpired, "Approval token expired.");
         }
         return ApprovalValidationResult.Valid();
+    }
+
+    private static bool TryResolveLegacyProposalIdForValidation(
+        AgentSessionContext session,
+        ToolAction sanitizedAction,
+        PermissionReasonCode code,
+        string normalizedTarget,
+        string normalizedWorkspace,
+        string token,
+        out string resolvedProposalId)
+    {
+        resolvedProposalId = string.Empty;
+        if (string.IsNullOrWhiteSpace(token))
+            return false;
+
+        var proposal = session.GetApprovalProposal(token);
+        if (proposal is null)
+            return false;
+        if (!string.Equals(token, proposal.ProposalId, StringComparison.Ordinal))
+            return false;
+        if (ApprovalProposalIdentityV1.IsCanonicalProposalId(proposal.ProposalId))
+            return false;
+        if (proposal.IssuedAtUtc >= ApprovalProposalIdentityV1.CutoverUtc)
+            return false;
+
+        var legacyExpected = ComputeLegacyProposalId(session, sanitizedAction, code, normalizedTarget, normalizedWorkspace);
+        if (!legacyExpected.Equals(proposal.ProposalId, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        resolvedProposalId = proposal.ProposalId;
+        return true;
+    }
+
+    private static string ComputeLegacyProposalId(AgentSessionContext session, ToolAction action, PermissionReasonCode code, string normalizedTarget, string normalizedWorkspace)
+    {
+        var signature = string.Join("|", new[]
+        {
+            session.SessionId,
+            action.Kind.ToString(),
+            normalizedTarget,
+            normalizedWorkspace,
+            code.ToString(),
+            action.Payload ?? string.Empty
+        });
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(signature)))
+            .ToLowerInvariant()[..16];
     }
 
     private static ToolAction SanitizeActionForIdentity(ToolAction action)
