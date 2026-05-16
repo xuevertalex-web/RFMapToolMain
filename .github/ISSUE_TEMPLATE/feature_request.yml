@@ -1,0 +1,44 @@
+﻿name: Feature request
+about: Suggest an improvement or new parser/export feature
+labels: [enhancement]
+body:
+  - type: input
+    id: map_name
+    attributes:
+      label: Map name (if feature is map-specific)
+      description: Example: bellagsd, cora, dungeon01
+      placeholder: optional
+    validations:
+      required: false
+  - type: input
+    id: client_version
+    attributes:
+      label: RF Online client version/build
+      description: Helps verify compatibility
+      placeholder: 2025-12 build / private server name
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What is difficult now?
+      placeholder: I cannot export ... because ...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should be added/changed?
+      placeholder: Add support for ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs_or_examples
+    attributes:
+      label: Logs/examples
+      description: Add logs, screenshots, or sample files if available
+      placeholder: Paste logs or attach files
+    validations:
+      required: false

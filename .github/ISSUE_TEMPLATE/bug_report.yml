@@ -1,0 +1,62 @@
+﻿name: Bug report
+about: Report a bug in export/parsing
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please fill all required fields.
+  - type: input
+    id: map_name
+    attributes:
+      label: Map name
+      description: Example: bellagsd, cora, dungeon01
+      placeholder: bellagsd
+    validations:
+      required: true
+  - type: input
+    id: client_version
+    attributes:
+      label: RF Online client version/build
+      description: Version, server build, or patch date
+      placeholder: 2025-12 build / private server name
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps from start to error
+      placeholder: |
+        1. Run tool
+        2. Select map ...
+        3. Export fails ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log / console output
+      description: Paste full output or attach file
+      placeholder: Copy full console output here
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Optional files
+      description: Attach sample map files or screenshots if possible
+      placeholder: Drag and drop files/images here
