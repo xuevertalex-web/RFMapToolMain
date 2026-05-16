@@ -59,6 +59,7 @@ await RunProcessExecutionHardeningRegression();
 await RunProcessArgumentListPreservesArgumentsRegression();
 await RunBuildVerifierCanonicalRunnerUnificationRegression();
 RunAuthorityExecutionBoundaryArchitectureGuardsRegression();
+RunWorkspacePathPolicyFoundationRegression();
 await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
 await RunDestructiveFileApprovalMarkerRegression();
 await RunGuardedToolExplicitApprovalHandoffRegression();
@@ -2876,6 +2877,88 @@ static void RunAuthorityExecutionBoundaryArchitectureGuardsRegression()
         "Approval-state unavailable diagnostics must not assign raw exception payloads to public approval ledger error codes.");
 
     Console.WriteLine("PASS AuthorityExecutionBoundary_ArchitectureGuards");
+}
+
+static void RunWorkspacePathPolicyFoundationRegression()
+{
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LcaWorkspacePathPolicy_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(tempRoot);
+    try
+    {
+        var approvedRoot = Path.Combine(tempRoot, "approved");
+        var runtimeRoot = Path.Combine(tempRoot, "runtime");
+        var scratchRoot = Path.Combine(tempRoot, "scratch");
+        var artifactRoot = Path.Combine(tempRoot, "artifacts");
+        var outsideRoot = Path.Combine(tempRoot, "outside");
+        Directory.CreateDirectory(approvedRoot);
+        Directory.CreateDirectory(runtimeRoot);
+        Directory.CreateDirectory(scratchRoot);
+        Directory.CreateDirectory(artifactRoot);
+        Directory.CreateDirectory(outsideRoot);
+
+        var roots = new WorkspacePathPolicyRoots
+        {
+            ApprovedWorkspaceRoot = approvedRoot,
+            RuntimeRoot = runtimeRoot,
+            ScratchRoot = scratchRoot,
+            ArtifactOutputRoot = artifactRoot
+        };
+        var policy = new WorkspacePathPolicy();
+
+        var readInside = policy.Evaluate(roots, WorkspaceRootKind.ApprovedWorkspace, WorkspacePathOperationKind.Read, Path.Combine("src", "file.txt"));
+        AssertTrue(readInside.Decision == WorkspacePathDecisionKind.Allowed, "Expected relative read inside approved root to be allowed.");
+
+        var traversalOutside = policy.Evaluate(roots, WorkspaceRootKind.ApprovedWorkspace, WorkspacePathOperationKind.Read, Path.Combine("..", "outside", "escape.txt"));
+        AssertTrue(traversalOutside.Decision == WorkspacePathDecisionKind.Denied, "Expected traversal outside approved root to be denied.");
+        AssertTrue(string.Equals(traversalOutside.ReasonCode, "path_outside_root", StringComparison.Ordinal), "Expected deterministic path_outside_root denial reason for traversal.");
+
+        var absoluteOutside = policy.Evaluate(roots, WorkspaceRootKind.ApprovedWorkspace, WorkspacePathOperationKind.Read, Path.Combine(outsideRoot, "outside.txt"));
+        AssertTrue(absoluteOutside.Decision == WorkspacePathDecisionKind.Denied, "Expected absolute path outside approved root to be denied.");
+        AssertTrue(string.Equals(absoluteOutside.ReasonCode, "path_outside_root", StringComparison.Ordinal), "Expected deterministic path_outside_root denial reason for absolute outside target.");
+
+        var runtimeWrite = policy.Evaluate(roots, WorkspaceRootKind.Runtime, WorkspacePathOperationKind.Write, "runtime.log");
+        AssertTrue(runtimeWrite.Decision == WorkspacePathDecisionKind.Denied, "Expected runtime root write to be denied.");
+        AssertTrue(string.Equals(runtimeWrite.ReasonCode, "runtime_root_mutation_denied", StringComparison.Ordinal), "Expected deterministic runtime root mutation denial reason.");
+
+        var approvedDelete = policy.Evaluate(roots, WorkspaceRootKind.ApprovedWorkspace, WorkspacePathOperationKind.Delete, "inside.txt");
+        AssertTrue(approvedDelete.Decision == WorkspacePathDecisionKind.ApprovalRequired, "Expected approved workspace delete to require approval.");
+        AssertTrue(string.Equals(approvedDelete.ReasonCode, "destructive_requires_approval", StringComparison.Ordinal), "Expected deterministic approval-required reason for approved workspace delete.");
+
+        var scratchDelete = policy.Evaluate(roots, WorkspaceRootKind.Scratch, WorkspacePathOperationKind.Delete, "scratch.txt");
+        AssertTrue(scratchDelete.Decision == WorkspacePathDecisionKind.Allowed, "Expected scratch root delete to be allowed.");
+
+        if (OperatingSystem.IsWindows())
+        {
+            var adsPath = policy.Evaluate(roots, WorkspaceRootKind.ApprovedWorkspace, WorkspacePathOperationKind.Read, "normal.txt:secret");
+            AssertTrue(adsPath.Decision == WorkspacePathDecisionKind.Denied, "Expected ADS-like path to be denied on Windows.");
+            AssertTrue(string.Equals(adsPath.ReasonCode, "alternate_data_stream_denied", StringComparison.Ordinal), "Expected deterministic ADS denial reason.");
+
+            var driveRelative = policy.Evaluate(roots, WorkspaceRootKind.ApprovedWorkspace, WorkspacePathOperationKind.Read, @"C:foo.txt");
+            AssertTrue(driveRelative.Decision == WorkspacePathDecisionKind.Denied, "Expected drive-relative path to be denied on Windows.");
+            AssertTrue(string.Equals(driveRelative.ReasonCode, "drive_relative_path_denied", StringComparison.Ordinal), "Expected deterministic drive-relative denial reason.");
+
+            var uncPath = policy.Evaluate(roots, WorkspaceRootKind.ApprovedWorkspace, WorkspacePathOperationKind.Read, @"\\server\share\file.txt");
+            AssertTrue(uncPath.Decision == WorkspacePathDecisionKind.Denied, "Expected UNC path to be denied by default.");
+            AssertTrue(string.Equals(uncPath.ReasonCode, "unc_path_denied", StringComparison.Ordinal), "Expected deterministic UNC denial reason.");
+
+            var extendedPath = policy.Evaluate(roots, WorkspaceRootKind.ApprovedWorkspace, WorkspacePathOperationKind.Read, @"\\?\C:\Temp\x.txt");
+            AssertTrue(extendedPath.Decision == WorkspacePathDecisionKind.Denied, "Expected extended path prefix to be denied by default.");
+            AssertTrue(string.Equals(extendedPath.ReasonCode, "extended_path_denied", StringComparison.Ordinal), "Expected deterministic extended-path denial reason.");
+        }
+
+        var noLeakProbe = policy.Evaluate(roots, WorkspaceRootKind.ApprovedWorkspace, WorkspacePathOperationKind.Read, @"..\..\outside\APPROVED:true\secret.txt");
+        AssertTrue(noLeakProbe.Decision == WorkspacePathDecisionKind.Denied, "Expected outside-root probe to be denied.");
+        AssertTrue(!noLeakProbe.ReasonCode.Contains("APPROVED:true", StringComparison.OrdinalIgnoreCase), "Reason code must not leak approval marker payload.");
+        AssertTrue(!noLeakProbe.ReasonCode.Contains("secret.txt", StringComparison.OrdinalIgnoreCase), "Reason code must not leak requested path fragments.");
+        AssertTrue(!noLeakProbe.ReasonCode.Contains("outside", StringComparison.OrdinalIgnoreCase), "Reason code must remain deterministic label only.");
+
+        Console.WriteLine("PASS WorkspacePathPolicy_FoundationRegression");
+    }
+    finally
+    {
+        if (Directory.Exists(tempRoot))
+            Directory.Delete(tempRoot, recursive: true);
+    }
 }
 
 static async Task RunApprovalTokenTtlLifecycleRegression()
