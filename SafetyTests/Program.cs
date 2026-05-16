@@ -58,6 +58,7 @@ await RunHostDiagnosticsCommandApprovalRegression();
 await RunProcessExecutionHardeningRegression();
 await RunProcessArgumentListPreservesArgumentsRegression();
 await RunBuildVerifierCanonicalRunnerUnificationRegression();
+RunAuthorityExecutionBoundaryArchitectureGuardsRegression();
 await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
 await RunDestructiveFileApprovalMarkerRegression();
 await RunGuardedToolExplicitApprovalHandoffRegression();
@@ -2739,6 +2740,142 @@ static async Task RunProcessExecutionHardeningRegression()
     AssertTrue(!outside.Success && outside.ReasonCode == PermissionReasonCodes.AccessDeniedOutsideWorkspace, "Expected out-of-workspace working directory to be blocked.");
 
     Console.WriteLine("PASS ProcessExecution_HardeningValidation");
+}
+
+static void RunAuthorityExecutionBoundaryArchitectureGuardsRegression()
+{
+    static string NormalizeRelativePath(string path) =>
+        path.Replace('\\', '/');
+
+    static bool ShouldSkipPath(string relativePath, IReadOnlySet<string> excludedDirectories)
+    {
+        var segments = NormalizeRelativePath(relativePath)
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var segment in segments)
+        {
+            if (excludedDirectories.Contains(segment))
+                return true;
+        }
+
+        return false;
+    }
+
+    static string ResolveRepositoryRoot()
+    {
+        static string? TryFindRoot(string startPath)
+        {
+            var current = Path.GetFullPath(startPath);
+            while (true)
+            {
+                if (File.Exists(Path.Combine(current, "LocalCursorAgent.sln")) &&
+                    File.Exists(Path.Combine(current, "SafetyTests", "Program.cs")))
+                {
+                    return current;
+                }
+
+                var parent = Directory.GetParent(current);
+                if (parent is null)
+                    return null;
+
+                current = parent.FullName;
+            }
+        }
+
+        var currentDirectoryRoot = TryFindRoot(Environment.CurrentDirectory);
+        if (!string.IsNullOrWhiteSpace(currentDirectoryRoot))
+            return currentDirectoryRoot;
+
+        var appBaseRoot = TryFindRoot(AppContext.BaseDirectory);
+        if (!string.IsNullOrWhiteSpace(appBaseRoot))
+            return appBaseRoot;
+
+        throw new InvalidOperationException("Unable to resolve repository root for architecture guard regression.");
+    }
+
+    var repositoryRoot = ResolveRepositoryRoot();
+    var excludedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ".git",
+        "bin",
+        "obj",
+        "node_modules",
+        "dist",
+        "out",
+        "generated",
+        ".agent-runtime"
+    };
+
+    var processExecutionAllowlist = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "Execution/SafeProcessRunner.cs",
+        "SafetyTests/Program.cs"
+    };
+    var processExecutionPatterns = new[]
+    {
+        "Process.Start(",
+        "new ProcessStartInfo",
+        ".StartInfo",
+        "StartInfo =",
+        ".Start()"
+    };
+
+    var processBoundaryViolations = new List<string>();
+    foreach (var filePath in Directory.EnumerateFiles(repositoryRoot, "*.cs", SearchOption.AllDirectories))
+    {
+        var relativePath = NormalizeRelativePath(Path.GetRelativePath(repositoryRoot, filePath));
+        if (ShouldSkipPath(relativePath, excludedDirectories))
+            continue;
+
+        var source = File.ReadAllText(filePath);
+        var matchedPatterns = processExecutionPatterns
+            .Where(pattern => source.Contains(pattern, StringComparison.Ordinal))
+            .ToArray();
+        if (matchedPatterns.Length == 0)
+            continue;
+
+        if (!processExecutionAllowlist.Contains(relativePath))
+            processBoundaryViolations.Add($"{relativePath} => {string.Join(", ", matchedPatterns)}");
+    }
+
+    AssertTrue(
+        processBoundaryViolations.Count == 0,
+        "Unexpected direct process execution usage outside authority boundary files: " + string.Join(" | ", processBoundaryViolations));
+
+    var buildVerifierPath = Path.Combine(repositoryRoot, "Execution", "BuildVerifier.cs");
+    var buildVerifierSource = File.ReadAllText(buildVerifierPath);
+    AssertTrue(!buildVerifierSource.Contains("Process.Start(", StringComparison.Ordinal), "BuildVerifier must not call Process.Start directly.");
+    AssertTrue(!buildVerifierSource.Contains("new ProcessStartInfo", StringComparison.Ordinal), "BuildVerifier must not construct ProcessStartInfo directly.");
+    AssertTrue(!buildVerifierSource.Contains(".StartInfo", StringComparison.Ordinal) && !buildVerifierSource.Contains("StartInfo =", StringComparison.Ordinal), "BuildVerifier must not set StartInfo directly.");
+    AssertTrue(!buildVerifierSource.Contains(".Start()", StringComparison.Ordinal), "BuildVerifier must not directly start process instances.");
+    AssertTrue(buildVerifierSource.Contains("SafeProcessRunner", StringComparison.Ordinal), "BuildVerifier must depend on SafeProcessRunner boundary.");
+    AssertTrue(buildVerifierSource.Contains("RunAsync(new SafeProcessRequest", StringComparison.Ordinal), "BuildVerifier must route build execution through SafeProcessRunner request path.");
+
+    var permissionGuardPath = Path.Combine(repositoryRoot, "Security", "PermissionGuard.cs");
+    var permissionGuardSource = File.ReadAllText(permissionGuardPath);
+    var approvalUnavailableLines = permissionGuardSource
+        .Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)
+        .Where(line => line.Contains("Approval state unavailable:", StringComparison.Ordinal))
+        .ToArray();
+    AssertTrue(approvalUnavailableLines.Length > 0, "Expected approval-state unavailable denial message construction.");
+    AssertTrue(
+        approvalUnavailableLines.All(line => line.Contains("session.ApprovalLedgerError", StringComparison.Ordinal)),
+        "Approval-state unavailable public message must surface only sanitized session approval error code.");
+    AssertTrue(
+        approvalUnavailableLines.All(line => !line.Contains("ex.", StringComparison.OrdinalIgnoreCase)),
+        "Approval-state unavailable public message must not include raw exception tails.");
+
+    var sessionContextPath = Path.Combine(repositoryRoot, "Security", "AgentSessionContext.cs");
+    var sessionContextSource = File.ReadAllText(sessionContextPath);
+    AssertTrue(sessionContextSource.Contains("unknown_state_unavailable", StringComparison.Ordinal), "Expected deterministic unknown approval-state unavailable fallback code.");
+    AssertTrue(sessionContextSource.Contains("NormalizeApprovalLedgerErrorCode", StringComparison.Ordinal), "Expected approval-state unavailable error code normalization path.");
+    AssertTrue(sessionContextSource.Contains("var separator = normalized.IndexOf(':');", StringComparison.Ordinal), "Expected approval-state unavailable error code tail stripping.");
+    AssertTrue(
+        !sessionContextSource.Contains("SetApprovalLedgerErrorCode(ex.", StringComparison.Ordinal) &&
+        !sessionContextSource.Contains("SetApprovalLedgerErrorCode($", StringComparison.Ordinal) &&
+        !sessionContextSource.Contains("_approvalLedgerError = ex.", StringComparison.Ordinal),
+        "Approval-state unavailable diagnostics must not assign raw exception payloads to public approval ledger error codes.");
+
+    Console.WriteLine("PASS AuthorityExecutionBoundary_ArchitectureGuards");
 }
 
 static async Task RunApprovalTokenTtlLifecycleRegression()
