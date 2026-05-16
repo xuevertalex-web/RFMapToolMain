@@ -61,6 +61,7 @@ await RunBuildVerifierCanonicalRunnerUnificationRegression();
 RunAuthorityExecutionBoundaryArchitectureGuardsRegression();
 RunWorkspacePathPolicyFoundationRegression();
 await RunWorkspacePathPolicyReparseContainmentRegression();
+await RunWorkspaceReadFileIntegrationRegression();
 await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
 await RunDestructiveFileApprovalMarkerRegression();
 await RunGuardedToolExplicitApprovalHandoffRegression();
@@ -240,8 +241,10 @@ static void RunRuntimeDiagnosticsMutationProtectionRegression()
     AssertTrue(!moveDenied.Allowed, "Expected move from .agent-runtime to be denied.");
     AssertTrue(moveDenied.ReasonCodeString == PermissionReasonCodes.ProtectedRuntimeDiagnosticsPathDenied, "Expected protected runtime diagnostics reason code for move denial.");
 
-    var readAllowed = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.ReadFile, TargetPath = runtimeFile });
-    AssertTrue(readAllowed.Allowed, "Expected read under .agent-runtime to remain allowed.");
+    var readDenied = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.ReadFile, TargetPath = runtimeFile });
+    AssertTrue(!readDenied.Allowed, "Expected read under .agent-runtime to be denied.");
+    AssertTrue(readDenied.ReasonCodeString == PermissionReasonCodes.ToolDeniedByPolicy, "Expected sanitized runtime-state read denial reason code.");
+    AssertTrue(string.Equals(readDenied.Message, "runtime_state_read_denied", StringComparison.Ordinal), "Expected deterministic runtime-state read denial label.");
 
     var normalWrite = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.WriteFile, TargetPath = Path.Combine(workspaceRoot, "a.txt") });
     AssertTrue(normalWrite.Allowed, "Expected normal workspace write outside .agent-runtime to remain allowed.");
@@ -1471,9 +1474,8 @@ static async Task RunExternalActionApprovalProposalRegression()
     var outsidePath = Path.Combine(tempRoot, "outside.txt");
     var outside = guard.Evaluate(session, new ToolAction { Kind = ToolActionKind.ReadFile, TargetPath = outsidePath });
     AssertTrue(!outside.Allowed, "Expected outside-workspace file action to be blocked.");
-    AssertTrue(outside.RequiresApproval, "Expected outside-workspace file action to require approval.");
-    AssertTrue(outside.ApprovalStatus == ApprovalStatus.ApprovalRequired, "Expected ApprovalRequired status.");
-    AssertTrue(outside.ApprovalProposal is not null && !outside.ApprovalProposal.IsInsideSandbox, "Expected structured outside-sandbox proposal.");
+    AssertTrue(!outside.RequiresApproval, "Expected outside-workspace read action to be denied without approval proposal.");
+    AssertTrue(outside.ReasonCodeString == PermissionReasonCodes.AccessDeniedOutsideWorkspace, "Expected outside-workspace read denial reason.");
 
     var runner = new SafeProcessRunner(session, guard);
     var cmdResult = await runner.RunAsync(new SafeProcessRequest
@@ -1514,7 +1516,7 @@ static async Task RunActionLifecycleLedgerRegression()
     tracer.StartRun("ledger", "ledger", workspaceRoot, runtimeRoot, AgentAccessMode.WorkspaceWrite.ToString(), "test", "test");
     var guard = new PermissionGuard();
 
-    var outsideAction = new ToolAction { Kind = ToolActionKind.ReadFile, TargetPath = Path.Combine(tempRoot, "outside.txt") };
+    var outsideAction = new ToolAction { Kind = ToolActionKind.DeleteFile, TargetPath = Path.Combine(tempRoot, "outside.txt") };
     var outsideDecision = guard.Evaluate(session, outsideAction);
     tracer.LogPermissionDecision(session, "file", outsideAction, outsideDecision);
 
@@ -1589,7 +1591,7 @@ static async Task RunStructuredActionLifecycleReportingRegression()
     };
 
     var guard = new PermissionGuard();
-    var outsideAction = new ToolAction { Kind = ToolActionKind.ReadFile, TargetPath = Path.Combine(tempRoot, "outside.txt") };
+    var outsideAction = new ToolAction { Kind = ToolActionKind.DeleteFile, TargetPath = Path.Combine(tempRoot, "outside.txt") };
     var outsideDecision = guard.Evaluate(session, outsideAction);
     tracer.LogPermissionDecision(session, "file", outsideAction, outsideDecision);
 
@@ -3200,6 +3202,232 @@ static async Task RunWorkspacePathPolicyReparseContainmentRegression()
         TryDeleteDirectoryLink(Path.Combine(approvedRootForCleanup, "link-out"));
         TryDeleteDirectoryLink(Path.Combine(approvedRootForCleanup, "link-in"));
         TryDeleteDirectoryLink(Path.Combine(approvedRootForCleanup, "link-broken"));
+        if (Directory.Exists(tempRoot))
+            Directory.Delete(tempRoot, recursive: true);
+    }
+}
+
+static async Task RunWorkspaceReadFileIntegrationRegression()
+{
+    static async Task<bool> TryCreateWindowsJunctionAsync(string linkPath, string targetPath)
+    {
+        try
+        {
+            if (Directory.Exists(linkPath))
+                Directory.Delete(linkPath, recursive: true);
+
+            var mklink = new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            mklink.ArgumentList.Add("/c");
+            mklink.ArgumentList.Add("mklink");
+            mklink.ArgumentList.Add("/J");
+            mklink.ArgumentList.Add(linkPath);
+            mklink.ArgumentList.Add(targetPath);
+
+            using var p = Process.Start(mklink);
+            if (p is null)
+                return false;
+            await p.WaitForExitAsync();
+            return p.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
+    {
+        try
+        {
+            if (Directory.Exists(linkPath))
+                Directory.Delete(linkPath, recursive: true);
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static void TryDeleteDirectoryLink(string linkPath)
+    {
+        if (!Directory.Exists(linkPath))
+            return;
+
+        try
+        {
+            Directory.Delete(linkPath, recursive: false);
+            return;
+        }
+        catch
+        {
+        }
+
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        try
+        {
+            var deleteLink = new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            deleteLink.ArgumentList.Add("/c");
+            deleteLink.ArgumentList.Add("rmdir");
+            deleteLink.ArgumentList.Add(linkPath);
+            using var p = Process.Start(deleteLink);
+            p?.WaitForExit();
+        }
+        catch
+        {
+        }
+    }
+
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LcaWorkspaceReadIntegration_" + Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    var outsideRoot = Path.Combine(tempRoot, "outside");
+    var approvedForCleanup = workspaceRoot;
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    Directory.CreateDirectory(outsideRoot);
+
+    try
+    {
+        var approvedDir = Path.Combine(workspaceRoot, "normal");
+        Directory.CreateDirectory(approvedDir);
+        var approvedFile = Path.Combine(approvedDir, "inside.txt");
+        await File.WriteAllTextAsync(approvedFile, "inside-ok");
+
+        var outsideFile = Path.Combine(outsideRoot, "outside.txt");
+        await File.WriteAllTextAsync(outsideFile, "outside");
+
+        var runtimeStateFile = Path.Combine(runtimeRoot, "ledger.json");
+        await File.WriteAllTextAsync(runtimeStateFile, "{\"ledger\":true}");
+
+        var workspaceRuntimeDir = Path.Combine(workspaceRoot, ".agent-runtime");
+        Directory.CreateDirectory(workspaceRuntimeDir);
+        await File.WriteAllTextAsync(Path.Combine(workspaceRuntimeDir, "agent.jsonl"), "{\"runtime\":true}");
+
+        var oversizedFile = Path.Combine(workspaceRoot, "oversized.txt");
+        var oversizedContent = new string('a', WorkspaceFileAccessService.DefaultMaxTextBytes + 4096);
+        await File.WriteAllTextAsync(oversizedFile, oversizedContent);
+
+        var binaryFile = Path.Combine(workspaceRoot, "binary.bin");
+        await File.WriteAllBytesAsync(binaryFile, new byte[] { 0x00, 0x01, 0x02, 0x03, 0xFF, 0xD8, 0xFF, 0xE0 });
+
+        var insideTargetDir = Path.Combine(workspaceRoot, "inside-target");
+        Directory.CreateDirectory(insideTargetDir);
+        await File.WriteAllTextAsync(Path.Combine(insideTargetDir, "inside-link.txt"), "inside-link-ok");
+
+        var session = new AgentSessionContext
+        {
+            SessionId = Guid.NewGuid().ToString("N"),
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+        };
+
+        var guard = new PermissionGuard();
+        var tracer = new ExecutionTracer(runtimeRoot);
+        var sandbox = new SandboxManager(workspaceRoot, runtimeRoot);
+        var patchGate = new PatchSafetyGate(session, guard, tracer);
+        var destructiveGate = new DestructiveOperationSafetyGate(session, guard, tracer);
+        var fileTool = new FileTool(session, guard, patchGate, destructiveGate, sandbox, tracer);
+
+        var readInside = await fileTool.Execute("read:normal/inside.txt");
+        AssertTrue(string.Equals(readInside, "inside-ok", StringComparison.Ordinal), "Expected inside-workspace read to succeed.");
+
+        var readOutside = await fileTool.Execute($"read:{outsideFile}");
+        AssertTrue(readOutside.StartsWith($"DENIED [{PermissionReasonCodes.AccessDeniedOutsideWorkspace}]", StringComparison.Ordinal), "Expected outside-workspace read to be denied.");
+        AssertTrue(!readOutside.Contains(outsideFile, StringComparison.OrdinalIgnoreCase), "Denied read must not leak raw outside path.");
+
+        var readRuntimeRoot = await fileTool.Execute($"read:{runtimeStateFile}");
+        AssertTrue(readRuntimeRoot.StartsWith($"DENIED [{PermissionReasonCodes.ToolDeniedByPolicy}]", StringComparison.Ordinal), "Expected runtime-root read to be denied.");
+        AssertTrue(readRuntimeRoot.Contains("runtime_state_read_denied", StringComparison.Ordinal), "Expected deterministic runtime-state denial label.");
+        AssertTrue(!readRuntimeRoot.Contains(runtimeRoot, StringComparison.OrdinalIgnoreCase), "Runtime-state denial must not leak runtime root path.");
+
+        var readWorkspaceRuntime = await fileTool.Execute("read:.agent-runtime/agent.jsonl");
+        AssertTrue(readWorkspaceRuntime.StartsWith($"DENIED [{PermissionReasonCodes.ToolDeniedByPolicy}]", StringComparison.Ordinal), "Expected .agent-runtime read to be denied.");
+        AssertTrue(readWorkspaceRuntime.Contains("runtime_state_read_denied", StringComparison.Ordinal), "Expected deterministic runtime-state denial label for .agent-runtime.");
+
+        var service = new WorkspaceFileAccessService(workspaceRoot, runtimeRoot);
+        var oversizedServiceResult = service.ReadText(oversizedFile);
+        AssertTrue(oversizedServiceResult.Success, "Expected oversized read to succeed with truncation.");
+        AssertTrue(oversizedServiceResult.Truncated, "Expected oversized read to be truncated.");
+        AssertTrue(oversizedServiceResult.BytesRead == WorkspaceFileAccessService.DefaultMaxTextBytes, "Expected deterministic bounded bytes read for oversized file.");
+        AssertTrue(string.Equals(oversizedServiceResult.ReasonCode, "read_truncated", StringComparison.Ordinal), "Expected deterministic truncated read reason code.");
+
+        var readOversized = await fileTool.Execute("read:oversized.txt");
+        AssertTrue(readOversized.Contains("[read_truncated]", StringComparison.Ordinal), "Expected truncated read marker in tool output.");
+
+        var readBinary = await fileTool.Execute("read:binary.bin");
+        AssertTrue(readBinary.StartsWith("DENIED [binary_file_not_supported]", StringComparison.Ordinal), "Expected binary file read to be denied.");
+        AssertTrue(!readBinary.Contains("APPROVED:true", StringComparison.OrdinalIgnoreCase), "Binary deny output must not leak approval marker text.");
+        AssertTrue(!readBinary.Contains("binary.bin", StringComparison.OrdinalIgnoreCase), "Binary deny output must not leak target path.");
+
+        var linkOutside = Path.Combine(workspaceRoot, "read-link-out");
+        var linkInside = Path.Combine(workspaceRoot, "read-link-in");
+        bool outsideLinkCreated;
+        bool insideLinkCreated;
+        if (OperatingSystem.IsWindows())
+        {
+            outsideLinkCreated = await TryCreateWindowsJunctionAsync(linkOutside, outsideRoot);
+            insideLinkCreated = await TryCreateWindowsJunctionAsync(linkInside, insideTargetDir);
+        }
+        else
+        {
+            outsideLinkCreated = TryCreateDirectorySymlink(linkOutside, outsideRoot);
+            insideLinkCreated = TryCreateDirectorySymlink(linkInside, insideTargetDir);
+        }
+
+        if (outsideLinkCreated)
+        {
+            var readOutsideViaLink = await fileTool.Execute("read:read-link-out/outside.txt");
+            AssertTrue(readOutsideViaLink.StartsWith($"DENIED [{PermissionReasonCodes.AccessDeniedOutsideWorkspace}]", StringComparison.Ordinal), "Expected read via escaping reparse chain to be denied.");
+        }
+        else
+        {
+            Console.WriteLine("PASS WorkspaceReadFileIntegrationRegression (note: outside reparse link unavailable, escape assertions skipped)");
+        }
+
+        if (insideLinkCreated)
+        {
+            var readInsideViaLink = await fileTool.Execute("read:read-link-in/inside-link.txt");
+            AssertTrue(string.Equals(readInsideViaLink, "inside-link-ok", StringComparison.Ordinal), "Expected read via inside-root reparse chain to succeed.");
+        }
+        else
+        {
+            Console.WriteLine("PASS WorkspaceReadFileIntegrationRegression (note: inside reparse link unavailable, inside-link assertions skipped)");
+        }
+
+        var mutationDecision = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.WriteFile,
+            TargetPath = Path.Combine(workspaceRoot, "mutation-check.txt"),
+            Payload = "ok"
+        });
+        AssertTrue(mutationDecision.Allowed, "Expected mutation permission behavior to remain unchanged for workspace write.");
+
+        Console.WriteLine("PASS WorkspaceReadFileIntegrationRegression");
+    }
+    finally
+    {
+        TryDeleteDirectoryLink(Path.Combine(approvedForCleanup, "read-link-out"));
+        TryDeleteDirectoryLink(Path.Combine(approvedForCleanup, "read-link-in"));
         if (Directory.Exists(tempRoot))
             Directory.Delete(tempRoot, recursive: true);
     }

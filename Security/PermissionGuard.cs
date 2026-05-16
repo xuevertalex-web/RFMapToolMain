@@ -57,10 +57,12 @@ public sealed class PermissionGuard
         string? normalizedTarget = null;
         string? normalizedSource = null;
         string? normalizedDestination = null;
+        string normalizedRuntimeRoot;
 
         try
         {
             normalizedWorkspace = _paths.Normalize(workspaceRoot);
+            normalizedRuntimeRoot = _paths.Normalize(session.RuntimeRoot);
 
             if (!string.IsNullOrWhiteSpace(action.TargetPath))
                 normalizedTarget = _paths.Normalize(action.TargetPath);
@@ -74,6 +76,37 @@ public sealed class PermissionGuard
         catch
         {
             return WithCapability(PermissionDecision.Deny(PermissionReasonCode.PathNormalizationFailed, "Path normalization failed"));
+        }
+
+        if (action.Kind == ToolActionKind.ReadFile)
+        {
+            if (string.IsNullOrWhiteSpace(normalizedTarget))
+                return WithCapability(PermissionDecision.Deny(PermissionReasonCode.PathNormalizationFailed, "workspace_read_target_unavailable"));
+
+            if (IsRuntimeStateReadDenied(normalizedTarget, normalizedWorkspace, normalizedRuntimeRoot))
+                return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ToolDeniedByPolicy, "runtime_state_read_denied", normalizedTarget, normalizedWorkspace));
+
+            var workspacePathPolicy = new WorkspacePathPolicy();
+            var workspaceRoots = new WorkspacePathPolicyRoots
+            {
+                ApprovedWorkspaceRoot = normalizedWorkspace,
+                RuntimeRoot = normalizedRuntimeRoot,
+                ScratchRoot = Path.Combine(normalizedWorkspace, ".scratch"),
+                ArtifactOutputRoot = Path.Combine(normalizedWorkspace, ".artifacts")
+            };
+            var workspaceDecision = workspacePathPolicy.Evaluate(
+                workspaceRoots,
+                WorkspaceRootKind.ApprovedWorkspace,
+                WorkspacePathOperationKind.Read,
+                normalizedTarget);
+
+            if (workspaceDecision.Decision != WorkspacePathDecisionKind.Allowed)
+            {
+                var mappedReason = MapWorkspacePathPolicyReadDeniedReason(workspaceDecision.ReasonCode);
+                return WithCapability(PermissionDecision.Deny(mappedReason, $"workspace_read_denied:{workspaceDecision.ReasonCode}", normalizedTarget, normalizedWorkspace));
+            }
+
+            return WithCapability(PermissionDecision.Allow(normalizedTarget, normalizedWorkspace));
         }
 
         if (normalizedTarget is not null && PathSafetyPolicy.IsUncPath(normalizedTarget))
@@ -152,14 +185,26 @@ public sealed class PermissionGuard
         if (normalizedDestination is not null && session.ProtectedPathPolicy.IsProtected(normalizedDestination) && !IsWithinExecutionWorkspace(normalizedDestination, session))
             return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ProtectedPathDenied, "Destination is protected", normalizedDestination, normalizedWorkspace));
 
-        if (normalizedTarget is not null && PathSafetyPolicy.ContainsReparsePoint(normalizedTarget))
+        if (action.Kind != ToolActionKind.ReadFile &&
+            normalizedTarget is not null &&
+            PathSafetyPolicy.ContainsReparsePoint(normalizedTarget))
+        {
             return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ReparsePointDenied, "Target path contains a reparse point", normalizedTarget, normalizedWorkspace));
+        }
 
-        if (normalizedSource is not null && PathSafetyPolicy.ContainsReparsePoint(normalizedSource))
+        if (action.Kind != ToolActionKind.ReadFile &&
+            normalizedSource is not null &&
+            PathSafetyPolicy.ContainsReparsePoint(normalizedSource))
+        {
             return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ReparsePointDenied, "Source path contains a reparse point", normalizedSource, normalizedWorkspace));
+        }
 
-        if (normalizedDestination is not null && PathSafetyPolicy.ContainsReparsePoint(normalizedDestination))
+        if (action.Kind != ToolActionKind.ReadFile &&
+            normalizedDestination is not null &&
+            PathSafetyPolicy.ContainsReparsePoint(normalizedDestination))
+        {
             return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ReparsePointDenied, "Destination path contains a reparse point", normalizedDestination, normalizedWorkspace));
+        }
 
         if (IsRuntimeDiagnosticsMutation(action.Kind))
         {
@@ -248,6 +293,33 @@ public sealed class PermissionGuard
     private static bool IsRuntimeDiagnosticsMutation(ToolActionKind kind) => IsWriteLike(kind) || IsDeleteLike(kind) || IsRenameLike(kind) || IsMoveLike(kind);
     private static bool IsWithinRuntimeDiagnosticsPath(string path, string workspaceRoot) =>
         IsWithinWorkspace(path, Path.Combine(workspaceRoot, ".agent-runtime"));
+
+    private static bool IsRuntimeStateReadDenied(string normalizedTarget, string normalizedWorkspace, string normalizedRuntimeRoot)
+    {
+        var workspaceRuntimeDiagnostics = Path.TrimEndingDirectorySeparator(Path.Combine(normalizedWorkspace, ".agent-runtime"));
+        if (IsWithinWorkspace(normalizedTarget, normalizedWorkspace))
+            return IsWithinWorkspace(normalizedTarget, workspaceRuntimeDiagnostics);
+
+        return IsWithinWorkspace(normalizedTarget, normalizedRuntimeRoot);
+    }
+
+    private static PermissionReasonCode MapWorkspacePathPolicyReadDeniedReason(string reasonCode) => reasonCode switch
+    {
+        "path_outside_root" => PermissionReasonCode.PathOutsideWorkspace,
+        "reparse_escape_denied" => PermissionReasonCode.PathOutsideWorkspace,
+        "unc_path_denied" => PermissionReasonCode.NetworkPathDenied,
+        "extended_path_denied" => PermissionReasonCode.ExtendedLengthPathDenied,
+        "alternate_data_stream_denied" => PermissionReasonCode.AlternateDataStreamDenied,
+        "drive_relative_path_denied" => PermissionReasonCode.InvalidPathSyntaxDenied,
+        "reparse_state_unavailable" => PermissionReasonCode.ReparsePointDenied,
+        "reparse_resolution_unavailable" => PermissionReasonCode.ReparsePointDenied,
+        "root_state_unavailable" => PermissionReasonCode.PathNormalizationFailed,
+        "path_state_unavailable" => PermissionReasonCode.PathNormalizationFailed,
+        "path_parent_unavailable" => PermissionReasonCode.PathNormalizationFailed,
+        "requested_path_empty" => PermissionReasonCode.PathNormalizationFailed,
+        "path_normalization_failed" => PermissionReasonCode.PathNormalizationFailed,
+        _ => PermissionReasonCode.PathNormalizationFailed
+    };
 
     private static PermissionDecision CreateApprovalRequired(AgentSessionContext session, ToolAction action, PermissionReasonCode code, string message, string normalizedTarget, string normalizedWorkspace, string riskLevel = "high")
     {

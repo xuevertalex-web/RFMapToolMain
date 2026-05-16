@@ -19,6 +19,7 @@ namespace LocalCursorAgent.Tools
         private readonly DestructiveOperationSafetyGate _destructiveOperationSafetyGate;
         private readonly SandboxManager _sandboxManager;
         private readonly TextFileService _textFileService;
+        private readonly WorkspaceFileAccessService _workspaceFileAccessService;
         private readonly ExecutionTracer? _tracer;
         private readonly Dictionary<string, string> _proposalRunBindings = new(StringComparer.OrdinalIgnoreCase);
         private readonly object _proposalRunBindingsLock = new();
@@ -31,6 +32,7 @@ namespace LocalCursorAgent.Tools
             _destructiveOperationSafetyGate = destructiveOperationSafetyGate ?? throw new ArgumentNullException(nameof(destructiveOperationSafetyGate));
             _sandboxManager = sandboxManager ?? throw new ArgumentNullException(nameof(sandboxManager));
             _textFileService = new TextFileService();
+            _workspaceFileAccessService = new WorkspaceFileAccessService(_session.ActiveWorkspaceRoot, _session.RuntimeRoot);
             _tracer = tracer;
         }
 
@@ -57,7 +59,7 @@ namespace LocalCursorAgent.Tools
             return "Error: Unknown command. Use 'read', 'write', 'delete', 'rename', or 'move'";
         }
 
-        private async Task<string> ReadFile(string path)
+        private Task<string> ReadFile(string path)
         {
             var action = new ToolAction
             {
@@ -67,20 +69,25 @@ namespace LocalCursorAgent.Tools
 
             var decision = _permissionGuard.Evaluate(_session, action);
             if (!decision.Allowed)
-                return FormatDenied(decision);
+                return Task.FromResult(FormatDenied(decision));
 
-            if (!File.Exists(action.TargetPath))
-                return $"Error: File not found - {path}";
+            var readResult = _workspaceFileAccessService.ReadText(decision.NormalizedTargetPath ?? action.TargetPath);
+            if (!readResult.Success)
+                return Task.FromResult($"DENIED [{readResult.ReasonCode}]: {readResult.ReasonCode}");
 
-            var snapshot = await _textFileService.ReadAsync(action.TargetPath!);
             _tracer?.LogActionEvent("FileAction", "FileTool", ExecutionTracer.ActionLogLevel.Info, "completed", metadata: new Dictionary<string, object?>
             {
                 { "operation", "read" },
                 { "requested_path", path },
                 { "normalized_path", action.TargetPath! },
-                { "file_state_changed", false }
+                { "file_state_changed", false },
+                { "read_bytes", readResult.BytesRead },
+                { "truncated", readResult.Truncated },
+                { "read_reason_code", readResult.ReasonCode }
             });
-            return snapshot.TextContent;
+            return Task.FromResult(readResult.Truncated
+                ? $"{readResult.Content}{Environment.NewLine}{Environment.NewLine}[read_truncated]"
+                : readResult.Content);
         }
 
         private async Task<string> WriteFileCommand(string payload)
