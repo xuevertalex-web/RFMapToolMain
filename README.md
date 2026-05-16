@@ -66,3 +66,7 @@ dotnet run
 - Более точная реконструкция материалов и шейдерных параметров RF.
 - Интеграция данных `.ebp`, `.rvp`, `.r3x` в GLB-сцену.
 - Чистка warning'ов, исправление кодировок в исходниках и обновление уязвимых пакетов.
+
+## Поисковые ключи
+
+RF Online, RFOnline, Rising Force Online, RF map tool, RF Online map export, RF Online BSP, RF Online R3M, RF Online R3T, RF Online SPT, RF Online GLB, RF Online GLTF, RF Online modding, RF Online tools.
