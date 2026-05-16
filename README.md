@@ -46,6 +46,11 @@ When a new workspace is initialized from `targetWorkspacePath`, extension can ap
   - `scripts/devtools/Update-VSCodeExtension.ps1`
   - `scripts/devtools/Start-VSCodeAgent.cmd`
 
+## Security Notes
+
+- Security invariants and checkpointed guarantees:
+  - `SECURITY_INVARIANTS.md`
+
 ## Project Layout
 
 - Backend: `Core/`, `Security/`, `Execution/`, `Context/`, `Indexing/`, `LLM/`, `Tools/`
