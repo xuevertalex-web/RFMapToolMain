@@ -11,7 +11,7 @@ namespace LocalCursorAgent.Tools
     public class FileTool : ITool
     {
         public string Name => "file";
-        public string Description => "Read/write/delete/rename/move files. Format: 'read:<path>', 'write:<path>:<content>', 'delete:<path>', 'rename:<source>:<destination>', 'move:<source>:<destination>'";
+        public string Description => "Read/list/write/delete/rename/move files. Format: 'read:<path>', 'list:<path>', 'list:recursive:<path>', 'write:<path>:<content>', 'delete:<path>', 'rename:<source>:<destination>', 'move:<source>:<destination>'";
 
         private readonly AgentSessionContext _session;
         private readonly PermissionGuard _permissionGuard;
@@ -44,6 +44,9 @@ namespace LocalCursorAgent.Tools
             if (input.StartsWith("read:", StringComparison.OrdinalIgnoreCase))
                 return await ReadFile(input.Substring(5).Trim());
 
+            if (input.StartsWith("list:", StringComparison.OrdinalIgnoreCase))
+                return await ListDirectory(input.Substring(5));
+
             if (input.StartsWith("write:", StringComparison.OrdinalIgnoreCase))
                 return await WriteFileCommand(input.Substring(6));
 
@@ -56,7 +59,7 @@ namespace LocalCursorAgent.Tools
             if (input.StartsWith("move:", StringComparison.OrdinalIgnoreCase))
                 return await RenameOrMove(input.Substring(5), isMove: true);
 
-            return "Error: Unknown command. Use 'read', 'write', 'delete', 'rename', or 'move'";
+            return "Error: Unknown command. Use 'read', 'list', 'write', 'delete', 'rename', or 'move'";
         }
 
         private Task<string> ReadFile(string path)
@@ -88,6 +91,51 @@ namespace LocalCursorAgent.Tools
             return Task.FromResult(readResult.Truncated
                 ? $"{readResult.Content}{Environment.NewLine}{Environment.NewLine}[read_truncated]"
                 : readResult.Content);
+        }
+
+        private Task<string> ListDirectory(string payload)
+        {
+            var recursive = false;
+            var path = payload.Trim();
+            if (path.StartsWith("recursive:", StringComparison.OrdinalIgnoreCase))
+            {
+                recursive = true;
+                path = path["recursive:".Length..].Trim();
+            }
+
+            var action = new ToolAction
+            {
+                Kind = ToolActionKind.ListDirectory,
+                TargetPath = ResolvePath(path)
+            };
+
+            var decision = _permissionGuard.Evaluate(_session, action);
+            if (!decision.Allowed)
+                return Task.FromResult(FormatDenied(decision));
+
+            var listResult = _workspaceFileAccessService.ListDirectory(
+                decision.NormalizedTargetPath ?? action.TargetPath,
+                recursive: recursive);
+            if (!listResult.Success)
+                return Task.FromResult($"DENIED [{listResult.ReasonCode}]: {listResult.ReasonCode}");
+
+            _tracer?.LogActionEvent("FileAction", "FileTool", ExecutionTracer.ActionLogLevel.Info, "completed", metadata: new Dictionary<string, object?>
+            {
+                { "operation", "list" },
+                { "requested_path", path },
+                { "normalized_path", action.TargetPath! },
+                { "recursive", recursive },
+                { "entry_count", listResult.EntryCount },
+                { "truncated", listResult.Truncated },
+                { "list_reason_code", listResult.ReasonCode }
+            });
+
+            var content = listResult.Entries.Count == 0
+                ? "(empty)"
+                : string.Join(Environment.NewLine, listResult.Entries);
+            if (listResult.Truncated)
+                content = $"{content}{Environment.NewLine}{Environment.NewLine}[list_truncated]";
+            return Task.FromResult(content);
         }
 
         private async Task<string> WriteFileCommand(string payload)

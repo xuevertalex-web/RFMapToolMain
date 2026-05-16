@@ -62,6 +62,7 @@ RunAuthorityExecutionBoundaryArchitectureGuardsRegression();
 RunWorkspacePathPolicyFoundationRegression();
 await RunWorkspacePathPolicyReparseContainmentRegression();
 await RunWorkspaceReadFileIntegrationRegression();
+await RunWorkspaceListDirectoryIntegrationRegression();
 await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
 await RunDestructiveFileApprovalMarkerRegression();
 await RunGuardedToolExplicitApprovalHandoffRegression();
@@ -3428,6 +3429,246 @@ static async Task RunWorkspaceReadFileIntegrationRegression()
     {
         TryDeleteDirectoryLink(Path.Combine(approvedForCleanup, "read-link-out"));
         TryDeleteDirectoryLink(Path.Combine(approvedForCleanup, "read-link-in"));
+        if (Directory.Exists(tempRoot))
+            Directory.Delete(tempRoot, recursive: true);
+    }
+}
+
+static async Task RunWorkspaceListDirectoryIntegrationRegression()
+{
+    static async Task<bool> TryCreateWindowsJunctionAsync(string linkPath, string targetPath)
+    {
+        try
+        {
+            if (Directory.Exists(linkPath))
+                Directory.Delete(linkPath, recursive: true);
+
+            var mklink = new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            mklink.ArgumentList.Add("/c");
+            mklink.ArgumentList.Add("mklink");
+            mklink.ArgumentList.Add("/J");
+            mklink.ArgumentList.Add(linkPath);
+            mklink.ArgumentList.Add(targetPath);
+
+            using var p = Process.Start(mklink);
+            if (p is null)
+                return false;
+            await p.WaitForExitAsync();
+            return p.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
+    {
+        try
+        {
+            if (Directory.Exists(linkPath))
+                Directory.Delete(linkPath, recursive: true);
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static void TryDeleteDirectoryLink(string linkPath)
+    {
+        if (!Directory.Exists(linkPath))
+            return;
+
+        try
+        {
+            Directory.Delete(linkPath, recursive: false);
+            return;
+        }
+        catch
+        {
+        }
+
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        try
+        {
+            var deleteLink = new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            deleteLink.ArgumentList.Add("/c");
+            deleteLink.ArgumentList.Add("rmdir");
+            deleteLink.ArgumentList.Add(linkPath);
+            using var p = Process.Start(deleteLink);
+            p?.WaitForExit();
+        }
+        catch
+        {
+        }
+    }
+
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LcaWorkspaceListIntegration_" + Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    var outsideRoot = Path.Combine(tempRoot, "outside");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    Directory.CreateDirectory(outsideRoot);
+
+    try
+    {
+        var normalDir = Path.Combine(workspaceRoot, "normal");
+        var nestedDir = Path.Combine(normalDir, "nested");
+        Directory.CreateDirectory(nestedDir);
+        await File.WriteAllTextAsync(Path.Combine(normalDir, "inside.txt"), "inside-ok");
+        await File.WriteAllTextAsync(Path.Combine(nestedDir, "child.txt"), "nested-ok");
+
+        var treeDir = Path.Combine(workspaceRoot, "tree");
+        Directory.CreateDirectory(Path.Combine(treeDir, "sub1", "sub2"));
+        await File.WriteAllTextAsync(Path.Combine(treeDir, "a.txt"), "a");
+        await File.WriteAllTextAsync(Path.Combine(treeDir, "sub1", "b.txt"), "b");
+        await File.WriteAllTextAsync(Path.Combine(treeDir, "sub1", "sub2", "c.txt"), "c");
+        Directory.CreateDirectory(Path.Combine(treeDir, "node_modules"));
+        await File.WriteAllTextAsync(Path.Combine(treeDir, "node_modules", "skip.txt"), "skip");
+        Directory.CreateDirectory(Path.Combine(treeDir, ".git"));
+        await File.WriteAllTextAsync(Path.Combine(treeDir, ".git", "config"), "skip");
+
+        var runtimeStateFile = Path.Combine(runtimeRoot, "approval-ledger.jsonl");
+        await File.WriteAllTextAsync(runtimeStateFile, "{\"runtime\":true}");
+        var workspaceRuntimeDir = Path.Combine(workspaceRoot, ".agent-runtime");
+        Directory.CreateDirectory(workspaceRuntimeDir);
+        await File.WriteAllTextAsync(Path.Combine(workspaceRuntimeDir, "agent.jsonl"), "{\"runtime\":true}");
+
+        var outsideFile = Path.Combine(outsideRoot, "outside.txt");
+        await File.WriteAllTextAsync(outsideFile, "outside");
+
+        var bigDir = Path.Combine(workspaceRoot, "big");
+        Directory.CreateDirectory(bigDir);
+        for (var i = 0; i < 160; i++)
+            await File.WriteAllTextAsync(Path.Combine(bigDir, $"item-{i:D4}.txt"), "x");
+
+        var insideTargetDir = Path.Combine(workspaceRoot, "inside-list-target");
+        Directory.CreateDirectory(insideTargetDir);
+        await File.WriteAllTextAsync(Path.Combine(insideTargetDir, "inside-link.txt"), "inside-link-ok");
+
+        var session = new AgentSessionContext
+        {
+            SessionId = Guid.NewGuid().ToString("N"),
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+        };
+
+        var guard = new PermissionGuard();
+        var tracer = new ExecutionTracer(runtimeRoot);
+        var sandbox = new SandboxManager(workspaceRoot, runtimeRoot);
+        var patchGate = new PatchSafetyGate(session, guard, tracer);
+        var destructiveGate = new DestructiveOperationSafetyGate(session, guard, tracer);
+        var fileTool = new FileTool(session, guard, patchGate, destructiveGate, sandbox, tracer);
+
+        var listInside = await fileTool.Execute("list:normal");
+        AssertTrue(!listInside.StartsWith("DENIED", StringComparison.Ordinal), "Expected inside workspace list to succeed.");
+        AssertTrue(listInside.Contains("inside.txt", StringComparison.Ordinal), "Expected list output to include inside file.");
+        AssertTrue(listInside.Contains("nested/", StringComparison.Ordinal), "Expected list output to include nested directory.");
+
+        var listOutside = await fileTool.Execute($"list:{outsideRoot}");
+        AssertTrue(listOutside.StartsWith($"DENIED [{PermissionReasonCodes.AccessDeniedOutsideWorkspace}]", StringComparison.Ordinal), "Expected outside list to be denied.");
+        AssertTrue(!listOutside.Contains(outsideRoot, StringComparison.OrdinalIgnoreCase), "Denied outside list must not leak raw outside path.");
+        AssertTrue(!listOutside.Contains("APPROVED:", StringComparison.OrdinalIgnoreCase), "Denied outside list must not leak approval marker.");
+
+        var listRuntimeRoot = await fileTool.Execute($"list:{runtimeRoot}");
+        AssertTrue(listRuntimeRoot.StartsWith($"DENIED [{PermissionReasonCodes.ToolDeniedByPolicy}]", StringComparison.Ordinal), "Expected runtime-root list to be denied.");
+        AssertTrue(listRuntimeRoot.Contains("runtime_state_list_denied", StringComparison.Ordinal), "Expected deterministic runtime list deny reason.");
+        AssertTrue(!listRuntimeRoot.Contains(runtimeRoot, StringComparison.OrdinalIgnoreCase), "Runtime list denial must not leak runtime root path.");
+
+        var listWorkspaceRuntime = await fileTool.Execute("list:.agent-runtime");
+        AssertTrue(listWorkspaceRuntime.StartsWith($"DENIED [{PermissionReasonCodes.ToolDeniedByPolicy}]", StringComparison.Ordinal), "Expected .agent-runtime list to be denied.");
+        AssertTrue(listWorkspaceRuntime.Contains("runtime_state_list_denied", StringComparison.Ordinal), "Expected deterministic .agent-runtime list deny reason.");
+
+        var recursiveList = await fileTool.Execute("list:recursive:tree");
+        AssertTrue(recursiveList.Contains("a.txt", StringComparison.Ordinal), "Expected recursive list to include top-level file.");
+        AssertTrue(recursiveList.Contains("sub1/", StringComparison.Ordinal), "Expected recursive list to include nested directory.");
+        AssertTrue(recursiveList.Contains("sub1/b.txt", StringComparison.Ordinal), "Expected recursive list to include nested file.");
+        AssertTrue(recursiveList.Contains("sub1/sub2/c.txt", StringComparison.Ordinal), "Expected recursive list to include deep nested file.");
+        AssertTrue(!recursiveList.Contains("node_modules", StringComparison.OrdinalIgnoreCase), "Expected node_modules to be skipped.");
+        AssertTrue(!recursiveList.Contains(".git", StringComparison.OrdinalIgnoreCase), "Expected .git to be skipped.");
+
+        var listService = new WorkspaceFileAccessService(workspaceRoot, runtimeRoot);
+        var listTruncated = listService.ListDirectory(bigDir, recursive: false, maxEntries: 25);
+        AssertTrue(listTruncated.Success, "Expected bounded list to succeed.");
+        AssertTrue(listTruncated.Truncated, "Expected bounded list truncation.");
+        AssertTrue(listTruncated.EntryCount == 25, "Expected deterministic truncated entry count.");
+        AssertTrue(string.Equals(listTruncated.ReasonCode, "list_truncated", StringComparison.Ordinal), "Expected deterministic list truncated reason code.");
+
+        var linkOutside = Path.Combine(workspaceRoot, "list-link-out");
+        var linkInside = Path.Combine(workspaceRoot, "list-link-in");
+        bool outsideLinkCreated;
+        bool insideLinkCreated;
+        if (OperatingSystem.IsWindows())
+        {
+            outsideLinkCreated = await TryCreateWindowsJunctionAsync(linkOutside, outsideRoot);
+            insideLinkCreated = await TryCreateWindowsJunctionAsync(linkInside, insideTargetDir);
+        }
+        else
+        {
+            outsideLinkCreated = TryCreateDirectorySymlink(linkOutside, outsideRoot);
+            insideLinkCreated = TryCreateDirectorySymlink(linkInside, insideTargetDir);
+        }
+
+        if (outsideLinkCreated)
+        {
+            var listOutsideViaLink = await fileTool.Execute("list:list-link-out");
+            AssertTrue(listOutsideViaLink.StartsWith($"DENIED [{PermissionReasonCodes.AccessDeniedOutsideWorkspace}]", StringComparison.Ordinal), "Expected escaping reparse list to be denied.");
+        }
+        else
+        {
+            Console.WriteLine("PASS WorkspaceListDirectoryIntegrationRegression (note: outside reparse link unavailable, escape assertions skipped)");
+        }
+
+        if (insideLinkCreated)
+        {
+            var listInsideViaLink = await fileTool.Execute("list:list-link-in");
+            AssertTrue(!listInsideViaLink.StartsWith("DENIED", StringComparison.Ordinal), "Expected inside-root reparse list to be allowed.");
+            AssertTrue(listInsideViaLink.Contains("inside-link.txt", StringComparison.Ordinal), "Expected inside-root reparse list to include target entries.");
+        }
+        else
+        {
+            Console.WriteLine("PASS WorkspaceListDirectoryIntegrationRegression (note: inside reparse link unavailable, inside-link assertions skipped)");
+        }
+
+        var insideRead = await fileTool.Execute("read:normal/inside.txt");
+        AssertTrue(string.Equals(insideRead, "inside-ok", StringComparison.Ordinal), "Expected ReadFile behavior unchanged.");
+
+        var mutationDecision = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.WriteFile,
+            TargetPath = Path.Combine(workspaceRoot, "mutation-check-list.txt"),
+            Payload = "ok"
+        });
+        AssertTrue(mutationDecision.Allowed, "Expected mutation behavior to remain unchanged.");
+
+        Console.WriteLine("PASS WorkspaceListDirectoryIntegrationRegression");
+    }
+    finally
+    {
+        TryDeleteDirectoryLink(Path.Combine(workspaceRoot, "list-link-out"));
+        TryDeleteDirectoryLink(Path.Combine(workspaceRoot, "list-link-in"));
         if (Directory.Exists(tempRoot))
             Directory.Delete(tempRoot, recursive: true);
     }

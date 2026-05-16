@@ -16,13 +16,40 @@ public sealed record WorkspaceFileReadResult(
         new(false, reasonCode, string.Empty, false, bytesRead);
 }
 
+public sealed record WorkspaceDirectoryListResult(
+    bool Success,
+    string ReasonCode,
+    IReadOnlyList<string> Entries,
+    bool Truncated,
+    int EntryCount)
+{
+    public static WorkspaceDirectoryListResult Allowed(IReadOnlyList<string> entries, bool truncated) =>
+        new(true, truncated ? "list_truncated" : "allowed", entries, truncated, entries.Count);
+
+    public static WorkspaceDirectoryListResult Denied(string reasonCode) =>
+        new(false, reasonCode, Array.Empty<string>(), false, 0);
+}
+
 public sealed class WorkspaceFileAccessService
 {
     public const int DefaultMaxTextBytes = 1024 * 1024;
+    public const int DefaultMaxDirectoryEntries = 2000;
+    public const int DefaultMaxRecursionDepth = 6;
 
     private readonly string _approvedWorkspaceRoot;
     private readonly string _runtimeRoot;
     private readonly int _maxTextBytes;
+    private static readonly HashSet<string> DefaultSkippedDirectoryNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".git",
+        "node_modules",
+        "bin",
+        "obj",
+        ".vs",
+        "dist",
+        "packages",
+        ".agent-runtime"
+    };
 
     public WorkspaceFileAccessService(string approvedWorkspaceRoot, string runtimeRoot, int maxTextBytes = DefaultMaxTextBytes)
     {
@@ -102,6 +129,101 @@ public sealed class WorkspaceFileAccessService
         }
     }
 
+    public WorkspaceDirectoryListResult ListDirectory(
+        string? canonicalAuthorizedPath,
+        bool recursive = false,
+        int maxEntries = DefaultMaxDirectoryEntries,
+        int maxRecursionDepth = DefaultMaxRecursionDepth)
+    {
+        if (string.IsNullOrWhiteSpace(canonicalAuthorizedPath))
+            return WorkspaceDirectoryListResult.Denied("list_path_unavailable");
+
+        string normalizedPath;
+        try
+        {
+            normalizedPath = NormalizeFullPath(Path.GetFullPath(canonicalAuthorizedPath));
+        }
+        catch
+        {
+            return WorkspaceDirectoryListResult.Denied("path_normalization_failed");
+        }
+
+        if (IsRuntimeStatePath(normalizedPath))
+            return WorkspaceDirectoryListResult.Denied("runtime_state_list_denied");
+
+        if (!Directory.Exists(normalizedPath))
+        {
+            if (File.Exists(normalizedPath))
+                return WorkspaceDirectoryListResult.Denied("target_not_directory");
+            return WorkspaceDirectoryListResult.Denied("target_directory_not_found");
+        }
+
+        var boundedMaxEntries = Math.Max(1, maxEntries);
+        var boundedMaxDepth = Math.Max(0, maxRecursionDepth);
+        var entries = new List<string>(Math.Min(256, boundedMaxEntries));
+        var truncated = false;
+
+        try
+        {
+            var queue = new Queue<(string DirectoryPath, int Depth)>();
+            queue.Enqueue((normalizedPath, 0));
+
+            while (queue.Count > 0)
+            {
+                var (currentDirectory, depth) = queue.Dequeue();
+                IEnumerable<string> children = Directory.EnumerateFileSystemEntries(currentDirectory);
+                var orderedChildren = children
+                    .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(x => x, StringComparer.Ordinal);
+
+                foreach (var child in orderedChildren)
+                {
+                    var childName = Path.GetFileName(child);
+                    var childIsDirectory = Directory.Exists(child);
+
+                    if (childIsDirectory && IsSkippedDirectoryName(childName))
+                        continue;
+
+                    var relative = NormalizeListEntry(Path.GetRelativePath(normalizedPath, child), childIsDirectory);
+                    if (string.IsNullOrWhiteSpace(relative) || relative == ".")
+                        continue;
+
+                    entries.Add(relative);
+                    if (entries.Count >= boundedMaxEntries)
+                    {
+                        truncated = true;
+                        break;
+                    }
+
+                    if (recursive &&
+                        childIsDirectory &&
+                        depth < boundedMaxDepth &&
+                        !IsReparsePointDirectory(child))
+                    {
+                        queue.Enqueue((child, depth + 1));
+                    }
+                }
+
+                if (truncated)
+                    break;
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return WorkspaceDirectoryListResult.Denied("list_access_denied");
+        }
+        catch (IOException)
+        {
+            return WorkspaceDirectoryListResult.Denied("list_io_unavailable");
+        }
+        catch
+        {
+            return WorkspaceDirectoryListResult.Denied("list_io_unavailable");
+        }
+
+        return WorkspaceDirectoryListResult.Allowed(entries, truncated);
+    }
+
     private bool IsRuntimeStatePath(string normalizedPath)
     {
         if (string.IsNullOrWhiteSpace(_approvedWorkspaceRoot))
@@ -150,6 +272,32 @@ public sealed class WorkspaceFileAccessService
         var normalized = value.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
         return Path.TrimEndingDirectorySeparator(normalized);
     }
+
+    private static string NormalizeListEntry(string relativePath, bool isDirectory)
+    {
+        var normalized = relativePath
+            .Replace(Path.DirectorySeparatorChar, '/')
+            .Replace(Path.AltDirectorySeparatorChar, '/');
+        if (isDirectory && !normalized.EndsWith("/", StringComparison.Ordinal))
+            normalized += "/";
+        return normalized;
+    }
+
+    private static bool IsReparsePointDirectory(string path)
+    {
+        try
+        {
+            var attributes = File.GetAttributes(path);
+            return (attributes & FileAttributes.ReparsePoint) != 0;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    private static bool IsSkippedDirectoryName(string? name) =>
+        !string.IsNullOrWhiteSpace(name) && DefaultSkippedDirectoryNames.Contains(name);
 
     private static bool LooksBinary(byte[] bytes)
     {
