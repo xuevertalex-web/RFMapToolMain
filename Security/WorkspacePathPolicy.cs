@@ -79,6 +79,21 @@ public sealed class WorkspacePathPolicy
                 normalization.CanonicalRequestedPath);
         }
 
+        var reparseContainment = EvaluateReparseContainment(
+            normalization.CanonicalRootPath!,
+            normalization.CanonicalRequestedPath!,
+            operation);
+        if (!reparseContainment.Safe)
+        {
+            return new WorkspacePathPolicyResult(
+                WorkspacePathDecisionKind.Denied,
+                reparseContainment.ReasonCode,
+                operation,
+                rootKind,
+                normalization.CanonicalRootPath,
+                normalization.CanonicalRequestedPath);
+        }
+
         var (decision, reasonCode) = EvaluateOperationMatrix(rootKind, operation);
         return new WorkspacePathPolicyResult(
             decision,
@@ -125,6 +140,208 @@ public sealed class WorkspacePathPolicy
 
             _ => (WorkspacePathDecisionKind.Denied, "operation_not_supported")
         };
+    }
+
+    private ReparseContainmentResult EvaluateReparseContainment(
+        string canonicalRoot,
+        string canonicalCandidate,
+        WorkspacePathOperationKind operation)
+    {
+        if (!TryResolveExistingProbePath(canonicalRoot, canonicalCandidate, out var probePath, out var probeReasonCode))
+            return ReparseContainmentResult.Deny(probeReasonCode ?? "reparse_state_unavailable");
+
+        var hasReparse = false;
+        foreach (var segment in EnumerateExistingSegments(canonicalRoot, probePath!))
+        {
+            if (!TryGetPathAttributes(segment, out var attributes))
+            {
+                // Fail closed: ambiguous filesystem state cannot be trusted for containment.
+                return ReparseContainmentResult.Deny("reparse_state_unavailable");
+            }
+
+            if ((attributes & FileAttributes.ReparsePoint) == 0)
+                continue;
+
+            hasReparse = true;
+
+            if (!TryResolveReparseTargetPath(segment, out var canonicalResolvedTarget))
+                return ReparseContainmentResult.Deny("reparse_resolution_unavailable");
+
+            if (!IsLexicallyContained(canonicalRoot, canonicalResolvedTarget!))
+                return ReparseContainmentResult.Deny("reparse_escape_denied");
+        }
+
+        if (hasReparse && IsMutationOperation(operation))
+        {
+            // Mutation through any reparse chain stays fail-closed in this slice.
+            return ReparseContainmentResult.Deny("reparse_mutation_denied");
+        }
+
+        return ReparseContainmentResult.Allow();
+    }
+
+    private static bool IsMutationOperation(WorkspacePathOperationKind operation) =>
+        operation is WorkspacePathOperationKind.Write
+            or WorkspacePathOperationKind.CreateDirectory
+            or WorkspacePathOperationKind.Delete
+            or WorkspacePathOperationKind.RenameMove
+            or WorkspacePathOperationKind.ExtractArchive;
+
+    private static IEnumerable<string> EnumerateExistingSegments(string canonicalRoot, string probePath)
+    {
+        yield return canonicalRoot;
+        if (probePath.Equals(canonicalRoot, StringComparison.OrdinalIgnoreCase))
+            yield break;
+
+        var relative = Path.GetRelativePath(canonicalRoot, probePath);
+        if (relative is "." or "")
+            yield break;
+
+        var segments = relative.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+        var current = canonicalRoot;
+        foreach (var segment in segments)
+        {
+            current = NormalizeFullPath(Path.Combine(current, segment));
+            yield return current;
+        }
+    }
+
+    private static bool TryResolveExistingProbePath(
+        string canonicalRoot,
+        string canonicalCandidate,
+        out string? probePath,
+        out string? reasonCode)
+    {
+        probePath = null;
+        reasonCode = null;
+
+        if (!TryPathExists(canonicalRoot, out var rootExists, out var rootAmbiguous) || rootAmbiguous)
+        {
+            reasonCode = "root_state_unavailable";
+            return false;
+        }
+
+        if (!rootExists)
+        {
+            reasonCode = "root_path_not_found";
+            return false;
+        }
+
+        if (!TryPathExists(canonicalCandidate, out var candidateExists, out var candidateAmbiguous))
+        {
+            reasonCode = "path_state_unavailable";
+            return false;
+        }
+
+        if (candidateAmbiguous)
+        {
+            reasonCode = "path_state_unavailable";
+            return false;
+        }
+
+        if (candidateExists)
+        {
+            probePath = canonicalCandidate;
+            return true;
+        }
+
+        var cursor = canonicalCandidate;
+        while (!cursor.Equals(canonicalRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            var parent = Path.GetDirectoryName(cursor);
+            if (string.IsNullOrWhiteSpace(parent))
+            {
+                reasonCode = "path_parent_unavailable";
+                return false;
+            }
+
+            cursor = NormalizeFullPath(parent);
+            if (!IsLexicallyContained(canonicalRoot, cursor))
+            {
+                reasonCode = "path_outside_root";
+                return false;
+            }
+
+            if (!TryPathExists(cursor, out var exists, out var ambiguous))
+            {
+                reasonCode = "path_state_unavailable";
+                return false;
+            }
+
+            if (ambiguous)
+            {
+                reasonCode = "path_state_unavailable";
+                return false;
+            }
+
+            if (exists)
+            {
+                probePath = cursor;
+                return true;
+            }
+        }
+
+        probePath = canonicalRoot;
+        return true;
+    }
+
+    private static bool TryPathExists(string path, out bool exists, out bool ambiguous)
+    {
+        exists = false;
+        ambiguous = false;
+        try
+        {
+            exists = Directory.Exists(path) || File.Exists(path);
+            return true;
+        }
+        catch
+        {
+            ambiguous = true;
+            return false;
+        }
+    }
+
+    private static bool TryGetPathAttributes(string path, out FileAttributes attributes)
+    {
+        attributes = default;
+        try
+        {
+            attributes = File.GetAttributes(path);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryResolveReparseTargetPath(string reparsePath, out string? canonicalResolvedTarget)
+    {
+        canonicalResolvedTarget = null;
+
+        try
+        {
+            FileSystemInfo linkInfo = Directory.Exists(reparsePath)
+                ? new DirectoryInfo(reparsePath)
+                : new FileInfo(reparsePath);
+            var resolved = linkInfo.ResolveLinkTarget(returnFinalTarget: true);
+            if (resolved is null)
+                return false;
+
+            var fullName = resolved.FullName;
+            if (string.IsNullOrWhiteSpace(fullName))
+                return false;
+
+            var resolvedPath = Path.IsPathFullyQualified(fullName)
+                ? Path.GetFullPath(fullName)
+                : Path.GetFullPath(Path.Combine(Path.GetDirectoryName(reparsePath) ?? string.Empty, fullName));
+            canonicalResolvedTarget = NormalizeFullPath(resolvedPath);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private NormalizationResult TryNormalizeForRoot(string rootPath, string? requestedPath)
@@ -237,5 +454,11 @@ public sealed class WorkspacePathPolicy
 
         public static NormalizationResult Denied(string reasonCode, string? canonicalRootPath = null, string? canonicalRequestedPath = null) =>
             new(false, reasonCode, canonicalRootPath, canonicalRequestedPath);
+    }
+
+    private sealed record ReparseContainmentResult(bool Safe, string ReasonCode)
+    {
+        public static ReparseContainmentResult Allow() => new(true, "allowed");
+        public static ReparseContainmentResult Deny(string reasonCode) => new(false, reasonCode);
     }
 }

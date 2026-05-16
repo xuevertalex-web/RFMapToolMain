@@ -60,6 +60,7 @@ await RunProcessArgumentListPreservesArgumentsRegression();
 await RunBuildVerifierCanonicalRunnerUnificationRegression();
 RunAuthorityExecutionBoundaryArchitectureGuardsRegression();
 RunWorkspacePathPolicyFoundationRegression();
+await RunWorkspacePathPolicyReparseContainmentRegression();
 await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
 await RunDestructiveFileApprovalMarkerRegression();
 await RunGuardedToolExplicitApprovalHandoffRegression();
@@ -2956,6 +2957,249 @@ static void RunWorkspacePathPolicyFoundationRegression()
     }
     finally
     {
+        if (Directory.Exists(tempRoot))
+            Directory.Delete(tempRoot, recursive: true);
+    }
+}
+
+static async Task RunWorkspacePathPolicyReparseContainmentRegression()
+{
+    static async Task<bool> TryCreateWindowsJunctionAsync(string linkPath, string targetPath)
+    {
+        try
+        {
+            if (Directory.Exists(linkPath))
+                Directory.Delete(linkPath, recursive: true);
+
+            var mklink = new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            mklink.ArgumentList.Add("/c");
+            mklink.ArgumentList.Add("mklink");
+            mklink.ArgumentList.Add("/J");
+            mklink.ArgumentList.Add(linkPath);
+            mklink.ArgumentList.Add(targetPath);
+
+            using var p = Process.Start(mklink);
+            if (p is null)
+                return false;
+            await p.WaitForExitAsync();
+            return p.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
+    {
+        try
+        {
+            if (Directory.Exists(linkPath))
+                Directory.Delete(linkPath, recursive: true);
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static bool TryCreateBrokenDirectorySymlink(string linkPath, string missingTargetPath)
+    {
+        try
+        {
+            if (Directory.Exists(linkPath))
+                Directory.Delete(linkPath, recursive: true);
+
+            if (OperatingSystem.IsWindows())
+            {
+                var mklink = new ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                mklink.ArgumentList.Add("/c");
+                mklink.ArgumentList.Add("mklink");
+                mklink.ArgumentList.Add("/D");
+                mklink.ArgumentList.Add(linkPath);
+                mklink.ArgumentList.Add(missingTargetPath);
+                using var p = Process.Start(mklink);
+                if (p is null)
+                    return false;
+                p.WaitForExit();
+                return p.ExitCode == 0;
+            }
+
+            Directory.CreateSymbolicLink(linkPath, missingTargetPath);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static void TryDeleteDirectoryLink(string linkPath)
+    {
+        if (!Directory.Exists(linkPath))
+            return;
+
+        try
+        {
+            Directory.Delete(linkPath, recursive: false);
+            return;
+        }
+        catch
+        {
+            // Fall back to rmdir for stubborn junction/symlink cases on Windows.
+        }
+
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        try
+        {
+            var deleteLink = new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            deleteLink.ArgumentList.Add("/c");
+            deleteLink.ArgumentList.Add("rmdir");
+            deleteLink.ArgumentList.Add(linkPath);
+            using var p = Process.Start(deleteLink);
+            p?.WaitForExit();
+        }
+        catch
+        {
+            // best-effort cleanup for test temporary links
+        }
+    }
+
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LcaWorkspacePathPolicyReparse_" + Guid.NewGuid().ToString("N"));
+    var approvedRootForCleanup = Path.Combine(tempRoot, "approved");
+    Directory.CreateDirectory(tempRoot);
+    try
+    {
+        var approvedRoot = Path.Combine(tempRoot, "approved");
+        var runtimeRoot = Path.Combine(tempRoot, "runtime");
+        var scratchRoot = Path.Combine(tempRoot, "scratch");
+        var artifactRoot = Path.Combine(tempRoot, "artifacts");
+        var outsideRoot = Path.Combine(tempRoot, "outside");
+        Directory.CreateDirectory(approvedRoot);
+        Directory.CreateDirectory(runtimeRoot);
+        Directory.CreateDirectory(scratchRoot);
+        Directory.CreateDirectory(artifactRoot);
+        Directory.CreateDirectory(outsideRoot);
+
+        var normalDir = Path.Combine(approvedRoot, "normal");
+        Directory.CreateDirectory(normalDir);
+        var normalFile = Path.Combine(normalDir, "inside.txt");
+        await File.WriteAllTextAsync(normalFile, "ok");
+        await File.WriteAllTextAsync(Path.Combine(outsideRoot, "escape.txt"), "escape");
+
+        var insideTargetDir = Path.Combine(approvedRoot, "inside-target");
+        Directory.CreateDirectory(insideTargetDir);
+        await File.WriteAllTextAsync(Path.Combine(insideTargetDir, "inside-target.txt"), "ok");
+
+        var roots = new WorkspacePathPolicyRoots
+        {
+            ApprovedWorkspaceRoot = approvedRoot,
+            RuntimeRoot = runtimeRoot,
+            ScratchRoot = scratchRoot,
+            ArtifactOutputRoot = artifactRoot
+        };
+        var policy = new WorkspacePathPolicy();
+
+        var existingInsideRead = policy.Evaluate(roots, WorkspaceRootKind.ApprovedWorkspace, WorkspacePathOperationKind.Read, Path.Combine("normal", "inside.txt"));
+        AssertTrue(existingInsideRead.Decision == WorkspacePathDecisionKind.Allowed, "Expected existing inside-root read to be allowed.");
+
+        var normalParentWrite = policy.Evaluate(roots, WorkspaceRootKind.ApprovedWorkspace, WorkspacePathOperationKind.Write, Path.Combine("normal", "new-child.txt"));
+        AssertTrue(normalParentWrite.Decision == WorkspacePathDecisionKind.Allowed, "Expected non-existing child under normal parent to follow matrix decision (allow).");
+
+        var linkOutside = Path.Combine(approvedRoot, "link-out");
+        var linkInside = Path.Combine(approvedRoot, "link-in");
+        bool outsideLinkCreated;
+        bool insideLinkCreated;
+        if (OperatingSystem.IsWindows())
+        {
+            outsideLinkCreated = await TryCreateWindowsJunctionAsync(linkOutside, outsideRoot);
+            insideLinkCreated = await TryCreateWindowsJunctionAsync(linkInside, insideTargetDir);
+        }
+        else
+        {
+            outsideLinkCreated = TryCreateDirectorySymlink(linkOutside, outsideRoot);
+            insideLinkCreated = TryCreateDirectorySymlink(linkInside, insideTargetDir);
+        }
+
+        if (outsideLinkCreated)
+        {
+            var readOutsideViaLink = policy.Evaluate(roots, WorkspaceRootKind.ApprovedWorkspace, WorkspacePathOperationKind.Read, Path.Combine("link-out", "escape.txt"));
+            AssertTrue(readOutsideViaLink.Decision == WorkspacePathDecisionKind.Denied, "Expected read via escaping reparse chain to be denied.");
+            AssertTrue(string.Equals(readOutsideViaLink.ReasonCode, "reparse_escape_denied", StringComparison.Ordinal), "Expected deterministic reparse escape denial reason.");
+
+            var writeUnderEscapingParent = policy.Evaluate(roots, WorkspaceRootKind.ApprovedWorkspace, WorkspacePathOperationKind.Write, Path.Combine("link-out", "future", "file.txt"));
+            AssertTrue(writeUnderEscapingParent.Decision == WorkspacePathDecisionKind.Denied, "Expected non-existing child under escaping reparse parent to be denied.");
+            AssertTrue(string.Equals(writeUnderEscapingParent.ReasonCode, "reparse_escape_denied", StringComparison.Ordinal), "Expected escaping parent write to fail with reparse_escape_denied.");
+            AssertTrue(!writeUnderEscapingParent.ReasonCode.Contains("future", StringComparison.OrdinalIgnoreCase), "Reparse denial reason must not leak requested path fragments.");
+        }
+        else
+        {
+            Console.WriteLine("PASS WorkspacePathPolicy_ReparseContainmentRegression (note: outside reparse link unavailable, escape assertions skipped)");
+        }
+
+        if (insideLinkCreated)
+        {
+            var readInsideViaLink = policy.Evaluate(roots, WorkspaceRootKind.ApprovedWorkspace, WorkspacePathOperationKind.Read, Path.Combine("link-in", "inside-target.txt"));
+            AssertTrue(readInsideViaLink.Decision == WorkspacePathDecisionKind.Allowed, "Expected read via inside-target reparse chain to be allowed.");
+
+            var listInsideViaLink = policy.Evaluate(roots, WorkspaceRootKind.ApprovedWorkspace, WorkspacePathOperationKind.List, "link-in");
+            AssertTrue(listInsideViaLink.Decision == WorkspacePathDecisionKind.Allowed, "Expected list via inside-target reparse chain to be allowed.");
+
+            var writeInsideViaLink = policy.Evaluate(roots, WorkspaceRootKind.ApprovedWorkspace, WorkspacePathOperationKind.Write, Path.Combine("link-in", "new.txt"));
+            AssertTrue(writeInsideViaLink.Decision == WorkspacePathDecisionKind.Denied, "Expected mutation via reparse chain to be denied by explicit conservative policy.");
+            AssertTrue(string.Equals(writeInsideViaLink.ReasonCode, "reparse_mutation_denied", StringComparison.Ordinal), "Expected deterministic mutation-via-reparse denial reason.");
+        }
+        else
+        {
+            Console.WriteLine("PASS WorkspacePathPolicy_ReparseContainmentRegression (note: inside reparse link unavailable, inside-link assertions skipped)");
+        }
+
+        var brokenLink = Path.Combine(approvedRoot, "link-broken");
+        var missingTarget = Path.Combine(outsideRoot, "missing-target-dir");
+        var brokenCreated = TryCreateBrokenDirectorySymlink(brokenLink, missingTarget);
+        if (brokenCreated)
+        {
+            var brokenMutation = policy.Evaluate(roots, WorkspaceRootKind.ApprovedWorkspace, WorkspacePathOperationKind.Write, Path.Combine("link-broken", "new.txt"));
+            AssertTrue(brokenMutation.Decision == WorkspacePathDecisionKind.Denied, "Expected unresolved reparse target mutation to fail closed.");
+            AssertTrue(string.Equals(brokenMutation.ReasonCode, "reparse_resolution_unavailable", StringComparison.Ordinal), "Expected deterministic unresolved reparse denial reason.");
+        }
+        else
+        {
+            Console.WriteLine("PASS WorkspacePathPolicy_ReparseContainmentRegression (note: broken symlink unavailable, ambiguity assertion skipped)");
+        }
+
+        Console.WriteLine("PASS WorkspacePathPolicy_ReparseContainmentRegression");
+    }
+    finally
+    {
+        TryDeleteDirectoryLink(Path.Combine(approvedRootForCleanup, "link-out"));
+        TryDeleteDirectoryLink(Path.Combine(approvedRootForCleanup, "link-in"));
+        TryDeleteDirectoryLink(Path.Combine(approvedRootForCleanup, "link-broken"));
         if (Directory.Exists(tempRoot))
             Directory.Delete(tempRoot, recursive: true);
     }
