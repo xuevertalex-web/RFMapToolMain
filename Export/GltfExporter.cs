@@ -202,9 +202,21 @@ namespace RFMapToolSharp.Export
                         var resolved = ResolveModelPath(mapRootPath, obj.ModelName);
                         if (resolved != null)
                         {
-                            // Current project has no RF MOD/MSH parser yet.
-                            // We only mark resolved path and keep marker mesh for now.
-                            usedRealMesh = true;
+                            if (SptModelBridge.TryCreateMesh(gltfScene.LogicalParent, resolved, out var realMesh, out var reason) && realMesh != null)
+                            {
+                                node.Mesh = realMesh;
+                                usedRealMesh = true;
+                            }
+                            else
+                            {
+                                resolveLog.Add(new
+                                {
+                                    SourceFile = file,
+                                    obj.ModelName,
+                                    ResolvedModelPath = resolved,
+                                    MeshLoadError = reason
+                                });
+                            }
                         }
                     }
 
