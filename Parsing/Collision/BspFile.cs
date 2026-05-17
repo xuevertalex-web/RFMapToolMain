@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Numerics;
 
 namespace RFMapToolSharp.Collision;
 
@@ -11,6 +12,24 @@ namespace RFMapToolSharp.Collision;
 /// </summary>
 public sealed class BspFile
 {
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    private struct ReadAniObject
+    {
+        public ushort Flag;
+        public ushort Parent;
+        public int Frames;
+        public int PosCnt;
+        public int RotCnt;
+        public int ScaleCnt;
+        public Vector3f Scale;
+        public Vector4f ScaleQuat;
+        public Vector3f Pos;
+        public Vector4f Quat;
+        public uint PosOffset;
+        public uint RotOffset;
+        public uint ScaleOffset;
+    }
+
     public BspHeader Header { get; private set; } = default!;
 
     public IReadOnlyList<Vector4f> CPlanes { get; private set; } = Array.Empty<Vector4f>();
@@ -41,6 +60,7 @@ public sealed class BspFile
     public byte[] ObjectRaw { get; private set; } = Array.Empty<byte>();
     public byte[] TrackRaw { get; private set; } = Array.Empty<byte>();
     public IReadOnlyList<ushort> EventObjectIds { get; private set; } = Array.Empty<ushort>();
+    private Matrix4x4[] ObjectMatrices { get; set; } = Array.Empty<Matrix4x4>();
 
     public static BspFile Load(string path)
     {
@@ -75,6 +95,7 @@ public sealed class BspFile
         file.MatGroups = ReadStructs(br, fs, file.Header.ReadMatGroup, ReadReadMatGroup);
 
         file.BuildRealGeometry();
+        file.BuildObjectMatrices();
 
         return file;
     }
@@ -231,7 +252,7 @@ public sealed class BspFile
                 if (face.VertexCount < 3)
                     continue;
 
-                var realIndices = new int[face.VertexCount];
+                var realIndices = new List<int>(face.VertexCount);
                 for (int k = 0; k < face.VertexCount; k++)
                 {
                     int vIdx = (int)(face.VertexStartId + (uint)k);
@@ -239,8 +260,20 @@ public sealed class BspFile
                         continue;
                     uint vid = VertexId[vIdx];
 
+                    if (!IsValidCompressedVertex(functionId, vid))
+                        continue;
+
                     // Дублируем вершину для каждого угла полигона
                     var pos = DecompressVertex(functionId, vid, mg);
+                    if (mg.ObjectId > 0)
+                    {
+                        int oid = mg.ObjectId - 1;
+                        if (oid >= 0 && oid < ObjectMatrices.Length)
+                        {
+                            var p = Vector3.Transform(new Vector3(pos.X, pos.Y, pos.Z), ObjectMatrices[oid]);
+                            pos = new Vector3f { X = p.X, Y = p.Y, Z = p.Z };
+                        }
+                    }
                     var uv = (UV.Count > vIdx) ? UV[vIdx] : new Vector2f();
                     var lgtUv = (LgtUV.Count > vIdx) ? new Vector2f { X = LgtUV[vIdx].X / 32767f, Y = LgtUV[vIdx].Y / 32767f } : new Vector2f();
                     var color = (VertexColors.Count > vid) ? VertexColors[(int)vid] : 0xffffffff;
@@ -251,11 +284,14 @@ public sealed class BspFile
                     outLgtUvs.Add(lgtUv);
                     outColors.Add(color);
                     refs.Add(new BspVertexRef(m, vIdx));
-                    realIndices[k] = newIndex;
+                    realIndices.Add(newIndex);
                 }
 
-                // Фан-треугольники
-                for (int k = 1; k < face.VertexCount - 1; k++)
+                if (realIndices.Count < 3)
+                    continue;
+
+                // Fan triangulation over validated corners only.
+                for (int k = 1; k < realIndices.Count - 1; k++)
                 {
                     tris.Add(new BspTriangle
                     {
@@ -277,6 +313,69 @@ public sealed class BspFile
         VertexRefs = refs;
     }
 
+    private void BuildObjectMatrices()
+    {
+        if (ObjectRaw.Length == 0)
+        {
+            ObjectMatrices = Array.Empty<Matrix4x4>();
+            return;
+        }
+
+        int sz = Marshal.SizeOf<ReadAniObject>();
+        int count = ObjectRaw.Length / sz;
+        if (count <= 0)
+        {
+            ObjectMatrices = Array.Empty<Matrix4x4>();
+            return;
+        }
+
+        var read = new ReadAniObject[count];
+        var h = GCHandle.Alloc(ObjectRaw, GCHandleType.Pinned);
+        try
+        {
+            nint ptr = h.AddrOfPinnedObject();
+            for (int i = 0; i < count; i++)
+            {
+                read[i] = Marshal.PtrToStructure<ReadAniObject>(ptr + i * sz);
+            }
+        }
+        finally
+        {
+            h.Free();
+        }
+
+        var locals = new Matrix4x4[count];
+        for (int i = 0; i < count; i++)
+        {
+            var s = Quaternion.Normalize(new Quaternion(read[i].ScaleQuat.X, read[i].ScaleQuat.Y, read[i].ScaleQuat.Z, read[i].ScaleQuat.W));
+            var r = Quaternion.Normalize(new Quaternion(read[i].Quat.X, read[i].Quat.Y, read[i].Quat.Z, read[i].Quat.W));
+            var scale = Matrix4x4.CreateScale(read[i].Scale.X, read[i].Scale.Y, read[i].Scale.Z);
+            var sq = Matrix4x4.CreateFromQuaternion(s);
+            Matrix4x4.Invert(sq, out var invSq);
+            var sMatrix = sq * scale * invSq;
+            var rot = Matrix4x4.CreateFromQuaternion(r);
+            rot.Translation = new Vector3(read[i].Pos.X, read[i].Pos.Y, read[i].Pos.Z);
+            locals[i] = sMatrix * rot;
+        }
+
+        var world = new Matrix4x4[count];
+        for (int i = 0; i < count; i++)
+        {
+            world[i] = BuildWorld(i, read, locals, world);
+        }
+
+        ObjectMatrices = world;
+    }
+
+    private static Matrix4x4 BuildWorld(int i, ReadAniObject[] read, Matrix4x4[] locals, Matrix4x4[] world)
+    {
+        if (world[i] != default) return world[i];
+        int p = read[i].Parent - 1;
+        if (p < 0 || p >= read.Length) return locals[i];
+        var pw = BuildWorld(p, read, locals, world);
+        return pw * locals[i];
+    }
+
     internal void OverrideUv(Vector2f[] newUv)
     {
         RealUv = newUv;
@@ -285,6 +384,16 @@ public sealed class BspFile
     internal void OverrideLightUv(Vector2f[] newUv)
     {
         RealLightUv = newUv;
+    }
+
+    private bool IsValidCompressedVertex(int functionId, uint vid)
+    {
+        return functionId switch
+        {
+            1 => vid < BVertices.Count,
+            2 => vid < WVertices.Count,
+            _ => vid < FVertices.Count
+        };
     }
 
     private Vector3f DecompressVertex(int functionId, uint vid, BspReadMatGroup mg)
