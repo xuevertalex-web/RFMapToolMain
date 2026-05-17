@@ -23,6 +23,25 @@
 - Базовое применение материалов и текстур (где данные корректно читаются).
 - Обработка прозрачности для части материалов (эвристики по имени и alpha type).
 - Пакетная обработка нескольких карт.
+- Для карты `Sette` добавлен экспорт BSP-анимации для `ObjectId 1/2` в `glTF animations` (TRS-каналы).
+- Для `Sette` добавлен расширенный диагностический пакет по `mg89..92`:
+  - `build_trace_mg89_92.json`
+  - `mg_face_vertices_89_92.json`
+  - `mg_face_index_stream_89_92.json`
+  - `mg_triangles_emitted_89_92.json`
+  - `vertex_pool_ranges.json`
+  - `face_plane_metrics_89_92.json`
+  - `transform_usage_89_92.json`
+  - `corner_order_signature_89_92.json`
+  - `triangle_quality_89_92.json`
+  - `uv_gradient_89_92.json`
+  - `face_neighbor_graph_89_92.json`
+
+## Актуальный статус (2026-05-18)
+
+- Временный donor-режим удален из рабочего пайплайна.
+- Основной экспорт снова формирует `RF_Release/<map>/<map>.glb` без отдельного `Sette_Donor`.
+- Диагностика по `mg89..92` оставлена только для `Sette`, чтобы не засорять остальные карты.
 
 ## Ограничения и что пока не работает полноценно
 

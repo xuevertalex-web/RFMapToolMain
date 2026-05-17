@@ -138,6 +138,7 @@ namespace RFMapToolSharp.Export
             var normalAnomalyFaces = new List<object>();
             var bspNodeIndex = new List<object>();
             var mgTrace = new List<object>();
+            var mgNodesByObjectId = new Dictionary<int, List<Node>>();
 
             foreach (var matGroup in groups)
             {
@@ -263,6 +264,15 @@ namespace RFMapToolSharp.Export
                 var nodeName = $"BSP_mg{mgId}_mtl{mgMtlId}_obj{mgObjectId}_attr{mgAttr}";
                 var node = gltfScene.CreateNode(nodeName);
                 node.Mesh = model.CreateMesh(meshBuilder);
+                if (mgObjectId > 0)
+                {
+                    if (!mgNodesByObjectId.TryGetValue(mgObjectId, out var lst))
+                    {
+                        lst = new List<Node>();
+                        mgNodesByObjectId[mgObjectId] = lst;
+                    }
+                    lst.Add(node);
+                }
                 bspNodeIndex.Add(new
                 {
                     NodeName = nodeName,
@@ -272,6 +282,26 @@ namespace RFMapToolSharp.Export
                     Attr = mgAttr,
                     TriangleCount = matGroup.Count()
                 });
+            }
+
+            if (string.Equals(name, "Sette", StringComparison.OrdinalIgnoreCase) && scene.Bsp != null)
+            {
+                var anim = model.CreateAnimation("Sette_BSP_Objects");
+                foreach (var oid in new[] { 1, 2 })
+                {
+                    if (!mgNodesByObjectId.TryGetValue(oid, out var nodes) || nodes.Count == 0) continue;
+                    var samples = scene.Bsp.GetObjectAnimationSamples(oid);
+                    if (samples.Count <= 1) continue;
+                    var trs = samples.ToDictionary(s => s.Time, s => s.Translation);
+                    var rts = samples.ToDictionary(s => s.Time, s => s.Rotation);
+                    var scs = samples.ToDictionary(s => s.Time, s => s.Scale);
+                    foreach (var node in nodes)
+                    {
+                        anim.CreateTranslationChannel(node, trs, true);
+                        anim.CreateRotationChannel(node, rts, true);
+                        anim.CreateScaleChannel(node, scs, true);
+                    }
+                }
             }
 
             // --- SPT (OBJECT MARKERS) ---
@@ -293,8 +323,11 @@ namespace RFMapToolSharp.Export
             var traceJson = JsonSerializer.Serialize(mgTrace, SafeJson);
             File.WriteAllText(Path.Combine(exportDir, "mg_trace_89_92.json"), traceJson);
             scene.Bsp.WriteMgFaceTrace89_92Report(Path.Combine(exportDir, "mg_face_trace_89_92_bspbuild.json"));
-            var mg91Only = mgTrace.Where(x => (int)x.GetType().GetProperty("MatGroup")!.GetValue(x)! == 91).ToList();
-            File.WriteAllText(Path.Combine(exportDir, "mg91_face_rebuild_log.json"), JsonSerializer.Serialize(mg91Only, SafeJson));
+            if (string.Equals(name, "Sette", StringComparison.OrdinalIgnoreCase))
+            {
+                var mg91Only = mgTrace.Where(x => (int)x.GetType().GetProperty("MatGroup")!.GetValue(x)! == 91).ToList();
+                File.WriteAllText(Path.Combine(exportDir, "mg91_face_rebuild_log.json"), JsonSerializer.Serialize(mg91Only, SafeJson));
+            }
             Console.WriteLine("[GLTF] Saved!");
         }
 

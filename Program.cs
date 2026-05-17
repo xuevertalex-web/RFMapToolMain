@@ -35,7 +35,6 @@ class Program
         bool entityReport = args.Any(a => string.Equals(a, "--entity-report", StringComparison.OrdinalIgnoreCase));
         bool setteCleanIsolated = args.Any(a => string.Equals(a, "--sette-clean-isolated", StringComparison.OrdinalIgnoreCase));
         bool setteRaw = args.Any(a => string.Equals(a, "--sette-raw", StringComparison.OrdinalIgnoreCase));
-        bool setteDonorPath = args.Any(a => string.Equals(a, "--sette-donor-path", StringComparison.OrdinalIgnoreCase));
         string sptMode = "markers";
         bool sptPivotFix = true;
         string sptRotOrder = "XYZ";
@@ -390,10 +389,10 @@ class Program
 
             try
             {
-                MapScene? donorScene = null;
                 // Sette requires legacy-like handling for Attr=8192 object groups.
                 RFMapToolSharp.Collision.BspFile.SkipTransformForAttr8192 =
                     !string.Equals(mapName, "Sette", StringComparison.OrdinalIgnoreCase);
+                RFMapToolSharp.Collision.BspFile.SkipTransformObjectIds.Clear();
 
                 var scene = new MapScene
                 {
@@ -479,31 +478,16 @@ class Program
 
 
                 GltfExporter.Export(scene, targetDir, mapName);
-                if (setteDonorPath && string.Equals(mapName, "Sette", StringComparison.OrdinalIgnoreCase))
-                {
-                    string donorRootDir = Path.Combine(exportRoot, "Sette_Donor");
-                    Directory.CreateDirectory(donorRootDir);
-                    Console.WriteLine("[INFO] --sette-donor-path enabled: exporting isolated Sette donor output.");
-                    donorScene = new MapScene
-                    {
-                        Name = mapName,
-                        RootPath = dir,
-                        MaterialFile = scene.MaterialFile,
-                        Textures = scene.Textures
-                    };
-                    RFMapToolSharp.Collision.BspFile.DonorFullPipelineMode = true;
-                    donorScene.Bsp = RFMapToolSharp.Collision.BspFile.Load(bspPath);
-                    GltfExporter.Export(donorScene, donorRootDir, "Sette_Donor");
-                    donorScene.Bsp?.WriteDonor89_92Diagnostics(donorRootDir);
-                    RFMapToolSharp.Collision.BspFile.DonorFullPipelineMode = false;
-                }
                 try
                 {
                     scene.Bsp?.WriteBrokenFacesReport(Path.Combine(targetDir, "broken_faces.json"));
                     scene.Bsp?.WriteObjectMatricesReport(Path.Combine(targetDir, "object_matrices.json"));
                     scene.Bsp?.WriteAnimatedObjectsReport(Path.Combine(targetDir, "animated_objects.json"));
                     scene.Bsp?.WriteMatGroupDebugReport(Path.Combine(targetDir, "matgroup_debug.json"));
-                    // donor-specific mg91 debug traces disabled in full donor pipeline mode
+                    if (string.Equals(mapName, "Sette", StringComparison.OrdinalIgnoreCase))
+                    {
+                        scene.Bsp?.WriteDonor89_92Diagnostics(targetDir);
+                    }
                 }
                 catch (OutOfMemoryException)
                 {

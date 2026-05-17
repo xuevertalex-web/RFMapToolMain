@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -6,11 +6,13 @@ using System.Text;
 using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Security.Cryptography;
+using System.Collections.Generic;
 
 namespace RFMapToolSharp.Collision;
 
 /// <summary>
-/// Подробный парсер BSP/EBP на основе структур R3bsp.h.
+/// РџРѕРґСЂРѕР±РЅС‹Р№ РїР°СЂСЃРµСЂ BSP/EBP РЅР° РѕСЃРЅРѕРІРµ СЃС‚СЂСѓРєС‚СѓСЂ R3bsp.h.
 /// </summary>
 public sealed class BspFile
 {
@@ -38,7 +40,7 @@ public sealed class BspFile
     public static int ObjectTransformTarget { get; set; } = 0; // 0=all,1=animated-only,2=static-only,3=none
     public static int DecompressMode { get; set; } = 0;
     public static bool SkipTransformForAttr8192 { get; set; } = true;
-    public static bool DonorFullPipelineMode { get; set; } = false;
+    public static HashSet<int> SkipTransformObjectIds { get; } = new();
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct ReadAniObject
     {
@@ -63,6 +65,21 @@ public sealed class BspFile
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct ScaleTrack { public float Frame; public Vector3f Scale; public Vector4f ScaleAxis; }
 
+    public readonly struct BspObjectAnimSample
+    {
+        public BspObjectAnimSample(float time, Vector3 t, Quaternion r, Vector3 s)
+        {
+            Time = time;
+            Translation = t;
+            Rotation = r;
+            Scale = s;
+        }
+        public float Time { get; }
+        public Vector3 Translation { get; }
+        public Quaternion Rotation { get; }
+        public Vector3 Scale { get; }
+    }
+
     public BspHeader Header { get; private set; } = default!;
 
     public IReadOnlyList<Vector4f> CPlanes { get; private set; } = Array.Empty<Vector4f>();
@@ -82,7 +99,7 @@ public sealed class BspFile
     public IReadOnlyList<uint> VertexId { get; private set; } = Array.Empty<uint>();
     public IReadOnlyList<BspReadMatGroup> MatGroups { get; private set; } = Array.Empty<BspReadMatGroup>();
 
-    // Декодированные вершины/треугольники
+    // Р”РµРєРѕРґРёСЂРѕРІР°РЅРЅС‹Рµ РІРµСЂС€РёРЅС‹/С‚СЂРµСѓРіРѕР»СЊРЅРёРєРё
     public IReadOnlyList<Vector3f> Vertices { get; private set; } = Array.Empty<Vector3f>();
     public IReadOnlyList<BspTriangle> RealFaces { get; private set; } = Array.Empty<BspTriangle>();
     public IReadOnlyList<Vector2f> RealUv { get; private set; } = Array.Empty<Vector2f>();
@@ -123,7 +140,7 @@ public sealed class BspFile
             Header = ReadHeader(br)
         };
 
-        // Далее читаем чанки по Header
+        // Р”Р°Р»РµРµ С‡РёС‚Р°РµРј С‡Р°РЅРєРё РїРѕ Header
         file.CPlanes = ReadArray<Vector4f>(br, fs, file.Header.CPlanes);
         file.CFaceId = ReadUIntArray(br, fs, file.Header.CFaceId);
         file.Nodes = ReadStructs(br, fs, file.Header.Node, ReadNode);
@@ -282,14 +299,8 @@ public sealed class BspFile
 
     private void BuildRealGeometry()
     {
-        if (DonorFullPipelineMode)
-        {
-            BuildRealGeometryDonorCompatible();
-            return;
-        }
-
-        // Вместо попытки шарить вершины по VertexId (что сбивает UV на швах),
-        // строим финальные списки "угол-полигона -> отдельная вершина".
+        // Р’РјРµСЃС‚Рѕ РїРѕРїС‹С‚РєРё С€Р°СЂРёС‚СЊ РІРµСЂС€РёРЅС‹ РїРѕ VertexId (С‡С‚Рѕ СЃР±РёРІР°РµС‚ UV РЅР° С€РІР°С…),
+        // СЃС‚СЂРѕРёРј С„РёРЅР°Р»СЊРЅС‹Рµ СЃРїРёСЃРєРё "СѓРіРѕР»-РїРѕР»РёРіРѕРЅР° -> РѕС‚РґРµР»СЊРЅР°СЏ РІРµСЂС€РёРЅР°".
         var outVerts = new List<Vector3f>();
         var outUvs = new List<Vector2f>();
         var outLgtUvs = new List<Vector2f>();
@@ -347,7 +358,7 @@ public sealed class BspFile
                     if (!IsValidCompressedVertex(functionId, vid))
                         continue;
 
-                    // Дублируем вершину для каждого угла полигона
+                    // Р”СѓР±Р»РёСЂСѓРµРј РІРµСЂС€РёРЅСѓ РґР»СЏ РєР°Р¶РґРѕРіРѕ СѓРіР»Р° РїРѕР»РёРіРѕРЅР°
                     var pos = DecompressVertex(functionId, vid, mg);
                     bool appliedTransform = false;
                     if (!DisableObjectTransform && mg.ObjectId > 0)
@@ -359,6 +370,10 @@ public sealed class BspFile
                         else if (SkipTransformForAttr8192 && mg.Attr == 8192)
                         {
                             // Global safety override: these groups frequently produce displaced geometry after object transform.
+                        }
+                        else if (SkipTransformObjectIds.Contains(mg.ObjectId))
+                        {
+                            // Per-object override for known problematic animated groups.
                         }
                         else
                         {
@@ -483,83 +498,6 @@ public sealed class BspFile
         // legacy donor experiment hooks disabled
     }
 
-    private void BuildRealGeometryDonorCompatible()
-    {
-        // Exact donor loader behavior:
-        // 1) base vertex pool = raw FVertex
-        // 2) index stream = VertexId via face fan
-        // 3) UV/lightUV are assigned by corner to shared vertex index (last write wins)
-        // 4) no object transform in this path
-        var outVerts = FVertices.ToList();
-        var outUvs = Enumerable.Repeat(new Vector2f(), outVerts.Count).ToList();
-        var outLgtUvs = Enumerable.Repeat(new Vector2f(), outVerts.Count).ToList();
-        var outColors = Enumerable.Repeat(0xffffffffu, outVerts.Count).ToList();
-        var tris = new List<BspTriangle>();
-        var refs = new List<BspVertexRef>(outVerts.Count);
-        _matGroupDebug.Clear();
-        _mgFaceTrace89_92.Clear();
-        for (int i = 0; i < outVerts.Count; i++)
-            refs.Add(new BspVertexRef(-1, i));
-
-        for (int m = 0; m < MatGroups.Count; m++)
-        {
-            var mg = MatGroups[m];
-            int functionId = ResolveFunctionId(mg);
-            for (int j = 0; j < mg.FaceNum; j++)
-            {
-                int faceIndex = (int)(mg.FaceStartId + (uint)j);
-                if (faceIndex < 0 || faceIndex >= Faces.Count) continue;
-                var face = Faces[faceIndex];
-                if (face.VertexCount < 3) continue;
-                if ((uint)face.VertexStartId + face.VertexCount > VertexId.Count) continue;
-
-                uint base0 = VertexId[(int)face.VertexStartId];
-                ApplyDonorUv(base0, (int)face.VertexStartId);
-                for (int k = 0; k < face.VertexCount; k++)
-                {
-                    int vIdx = (int)(face.VertexStartId + (uint)k);
-                    uint vid = VertexId[vIdx];
-                    ApplyDonorUv(vid, vIdx);
-                }
-
-                for (int k = 1; k < face.VertexCount - 1; k++)
-                {
-                    uint i1 = VertexId[(int)face.VertexStartId + k];
-                    uint i2 = VertexId[(int)face.VertexStartId + k + 1];
-                    if (base0 >= outVerts.Count || i1 >= outVerts.Count || i2 >= outVerts.Count) continue;
-                    tris.Add(new BspTriangle
-                    {
-                        A = (int)base0,
-                        B = (int)i1,
-                        C = (int)i2,
-                        MatGroup = m,
-                        MatId = mg.MtlId
-                    });
-                }
-
-                void ApplyDonorUv(uint vid, int cornerId)
-                {
-                    if (vid >= outUvs.Count) return;
-                    if (cornerId >= 0 && cornerId < UV.Count)
-                        outUvs[(int)vid] = UV[cornerId];
-                    if (cornerId >= 0 && cornerId < LgtUV.Count)
-                        outLgtUvs[(int)vid] = new Vector2f { X = LgtUV[cornerId].X / 32767f, Y = LgtUV[cornerId].Y / 32767f };
-                    if (vid < VertexColors.Count)
-                        outColors[(int)vid] = VertexColors[(int)vid];
-                    refs[(int)vid] = new BspVertexRef(m, cornerId);
-                }
-            }
-        }
-
-        Vertices = outVerts;
-        RealFaces = tris;
-        RealUv = outUvs;
-        RealLightUv = outLgtUvs;
-        RealColors = outColors;
-        VertexRefs = refs;
-    }
-
-
     public void OverrideMatGroupGeometryFrom(BspFile source, int matGroupId)
     {
         if (source == null) return;
@@ -664,7 +602,6 @@ public sealed class BspFile
         Directory.CreateDirectory(outputDir);
 
         var mgRange = Enumerable.Range(89, 4).ToHashSet();
-        var traceAll = new List<object>();
         var trace89_92 = new List<object>();
         var faceVertices = new List<object>();
         var indexStreams = new List<object>();
@@ -692,19 +629,6 @@ public sealed class BspFile
                 if ((uint)rf.VertexStartId + rf.VertexCount > VertexId.Count) continue;
                 triCount += rf.VertexCount - 2;
             }
-
-            traceAll.Add(new
-            {
-                mg = mgId,
-                attr = mg.Attr,
-                objectId = mg.ObjectId,
-                mtlId = mg.MtlId,
-                faceStartId = fs,
-                faceNum = mg.FaceNum,
-                scale = mg.Scale,
-                pos = new[] { mg.Pos.X, mg.Pos.Y, mg.Pos.Z },
-                triangles = triCount
-            });
 
             if (!mgRange.Contains(mgId)) continue;
             transformUsage.Add(new { mg = mgId, transformApplied = false, mode = "viewer_raw" });
@@ -887,8 +811,6 @@ public sealed class BspFile
             _ = (minVid, maxVid, mgId, functionId, fs, mg.FaceNum);
         }
 
-        File.WriteAllText(Path.Combine(outputDir, "build_trace_all_matgroups.json"),
-            JsonSerializer.Serialize(new { matgroups = traceAll }, SafeJson), Encoding.UTF8);
         File.WriteAllText(Path.Combine(outputDir, "build_trace_mg89_92.json"),
             JsonSerializer.Serialize(new { matgroups = trace89_92 }, SafeJson), Encoding.UTF8);
         File.WriteAllText(Path.Combine(outputDir, "mg_face_vertices_89_92.json"),
@@ -942,6 +864,39 @@ public sealed class BspFile
             float dx = a.X - b.X, dy = a.Y - b.Y, dz = a.Z - b.Z;
             return MathF.Sqrt(dx * dx + dy * dy + dz * dz);
         }
+    }
+
+    public void WriteFVertexProbe(string outputPath, string bspPath)
+    {
+        var probeVids = new[] { 41848, 41849, 41850, 41851, 41852, 41853, 41854, 41855, 41856, 41857, 41858, 41859, 41860, 41864, 41866, 41867, 41869, 41870, 41871, 41874, 41875, 41876, 41878, 41880, 41883 };
+        var rows = new List<object>(probeVids.Length);
+        foreach (var vid in probeVids)
+        {
+            if (vid < 0 || vid >= FVertices.Count)
+            {
+                rows.Add(new { vid, exists = false });
+                continue;
+            }
+            var p = FVertices[vid];
+            rows.Add(new { vid, exists = true, pos = new[] { p.X, p.Y, p.Z } });
+        }
+
+        string sha = "";
+        if (File.Exists(bspPath))
+        {
+            using var fs = File.OpenRead(bspPath);
+            using var h = SHA256.Create();
+            sha = Convert.ToHexString(h.ComputeHash(fs));
+        }
+
+        var payload = new
+        {
+            bsp_path = bspPath,
+            bsp_sha256 = sha,
+            fvertex_count = FVertices.Count,
+            probes = rows
+        };
+        File.WriteAllText(outputPath, JsonSerializer.Serialize(payload, SafeJson), Encoding.UTF8);
     }
 
     private void BuildObjectMatrices()
@@ -1336,6 +1291,57 @@ public sealed class BspFile
         return locals[i] * pw;
     }
 
+    public int ObjectCount => ObjectRaw.Length == 0 ? 0 : (ObjectRaw.Length / Marshal.SizeOf<ReadAniObject>());
+
+    public int GetObjectParentId(int objectId1Based)
+    {
+        if (objectId1Based <= 0) return 0;
+        var read = ReadAniObjects();
+        int idx = objectId1Based - 1;
+        if (idx < 0 || idx >= read.Length) return 0;
+        return read[idx].Parent;
+    }
+
+    public IReadOnlyList<BspObjectAnimSample> GetObjectAnimationSamples(int objectId1Based)
+    {
+        var read = ReadAniObjects();
+        int idx = objectId1Based - 1;
+        if (idx < 0 || idx >= read.Length) return Array.Empty<BspObjectAnimSample>();
+
+        var obj = read[idx];
+        int total = Math.Max(1, obj.Frames > 0 ? obj.Frames : 1);
+        var list = new List<BspObjectAnimSample>(total + 1);
+        for (int f = 0; f <= total; f++)
+        {
+            float nowFrame = obj.Frames == 0 ? 0f : GetFloatMod(f, obj.Frames);
+            var local = GetAniMatrix(read, idx, nowFrame);
+            local = ConvertFrom3dsMaxMatrix(local);
+            if (!Matrix4x4.Decompose(local, out var s, out var r, out var t))
+            {
+                s = Vector3.One; r = Quaternion.Identity; t = local.Translation;
+            }
+            list.Add(new BspObjectAnimSample(f / 30f, t, Quaternion.Normalize(r), s));
+        }
+        return list;
+    }
+
+    private ReadAniObject[] ReadAniObjects()
+    {
+        if (ObjectRaw.Length == 0) return Array.Empty<ReadAniObject>();
+        int sz = Marshal.SizeOf<ReadAniObject>();
+        int count = ObjectRaw.Length / sz;
+        if (count <= 0) return Array.Empty<ReadAniObject>();
+        var read = new ReadAniObject[count];
+        var h = GCHandle.Alloc(ObjectRaw, GCHandleType.Pinned);
+        try
+        {
+            nint ptr = h.AddrOfPinnedObject();
+            for (int i = 0; i < count; i++) read[i] = Marshal.PtrToStructure<ReadAniObject>(ptr + i * sz);
+        }
+        finally { h.Free(); }
+        return read;
+    }
+
     internal void OverrideUv(Vector2f[] newUv)
     {
         RealUv = newUv;
@@ -1647,3 +1653,4 @@ public sealed class ExtBspFile
         throw new NotSupportedException($"Unsupported struct read: {typeof(T).Name}");
     }
 }
+
