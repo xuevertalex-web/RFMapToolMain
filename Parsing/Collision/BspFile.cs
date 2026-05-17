@@ -485,14 +485,21 @@ public sealed class BspFile
 
     private void BuildRealGeometryDonorCompatible()
     {
-        var outVerts = new List<Vector3f>();
-        var outUvs = new List<Vector2f>();
-        var outLgtUvs = new List<Vector2f>();
-        var outColors = new List<uint>();
+        // Exact donor loader behavior:
+        // 1) base vertex pool = raw FVertex
+        // 2) index stream = VertexId via face fan
+        // 3) UV/lightUV are assigned by corner to shared vertex index (last write wins)
+        // 4) no object transform in this path
+        var outVerts = FVertices.ToList();
+        var outUvs = Enumerable.Repeat(new Vector2f(), outVerts.Count).ToList();
+        var outLgtUvs = Enumerable.Repeat(new Vector2f(), outVerts.Count).ToList();
+        var outColors = Enumerable.Repeat(0xffffffffu, outVerts.Count).ToList();
         var tris = new List<BspTriangle>();
-        var refs = new List<BspVertexRef>();
+        var refs = new List<BspVertexRef>(outVerts.Count);
         _matGroupDebug.Clear();
         _mgFaceTrace89_92.Clear();
+        for (int i = 0; i < outVerts.Count; i++)
+            refs.Add(new BspVertexRef(-1, i));
 
         for (int m = 0; m < MatGroups.Count; m++)
         {
@@ -504,61 +511,42 @@ public sealed class BspFile
                 if (faceIndex < 0 || faceIndex >= Faces.Count) continue;
                 var face = Faces[faceIndex];
                 if (face.VertexCount < 3) continue;
+                if ((uint)face.VertexStartId + face.VertexCount > VertexId.Count) continue;
 
-                var realIndices = new List<int>(face.VertexCount);
+                uint base0 = VertexId[(int)face.VertexStartId];
+                ApplyDonorUv(base0, (int)face.VertexStartId);
                 for (int k = 0; k < face.VertexCount; k++)
                 {
                     int vIdx = (int)(face.VertexStartId + (uint)k);
-                    if (vIdx < 0 || vIdx >= VertexId.Count) continue;
                     uint vid = VertexId[vIdx];
-                    if (!IsValidCompressedVertex(functionId, vid)) continue;
-
-                    Vector3f pos = functionId switch
-                    {
-                        1 => new Vector3f
-                        {
-                            X = (BVertices[(int)vid].X / 127f) * mg.Scale + mg.Pos.X,
-                            Y = (BVertices[(int)vid].Y / 127f) * mg.Scale + mg.Pos.Y,
-                            Z = (BVertices[(int)vid].Z / 127f) * mg.Scale + mg.Pos.Z
-                        },
-                        2 => new Vector3f
-                        {
-                            X = (WVertices[(int)vid].X / 32767f) * mg.Scale + mg.Pos.X,
-                            Y = (WVertices[(int)vid].Y / 32767f) * mg.Scale + mg.Pos.Y,
-                            Z = (WVertices[(int)vid].Z / 32767f) * mg.Scale + mg.Pos.Z
-                        },
-                        _ => new Vector3f
-                        {
-                            X = FVertices[(int)vid].X,
-                            Y = FVertices[(int)vid].Y,
-                            Z = FVertices[(int)vid].Z
-                        }
-                    };
-
-                    var uv = (UV.Count > vIdx) ? UV[vIdx] : new Vector2f();
-                    var lgtUv = (LgtUV.Count > vIdx) ? new Vector2f { X = LgtUV[vIdx].X / 32767f, Y = LgtUV[vIdx].Y / 32767f } : new Vector2f();
-                    var color = (VertexColors.Count > vid) ? VertexColors[(int)vid] : 0xffffffff;
-
-                    int newIndex = outVerts.Count;
-                    outVerts.Add(pos);
-                    outUvs.Add(uv);
-                    outLgtUvs.Add(lgtUv);
-                    outColors.Add(color);
-                    refs.Add(new BspVertexRef(m, vIdx));
-                    realIndices.Add(newIndex);
+                    ApplyDonorUv(vid, vIdx);
                 }
 
-                if (realIndices.Count < 3) continue;
-                for (int k = 1; k < realIndices.Count - 1; k++)
+                for (int k = 1; k < face.VertexCount - 1; k++)
                 {
+                    uint i1 = VertexId[(int)face.VertexStartId + k];
+                    uint i2 = VertexId[(int)face.VertexStartId + k + 1];
+                    if (base0 >= outVerts.Count || i1 >= outVerts.Count || i2 >= outVerts.Count) continue;
                     tris.Add(new BspTriangle
                     {
-                        A = realIndices[0],
-                        B = realIndices[k],
-                        C = realIndices[k + 1],
+                        A = (int)base0,
+                        B = (int)i1,
+                        C = (int)i2,
                         MatGroup = m,
                         MatId = mg.MtlId
                     });
+                }
+
+                void ApplyDonorUv(uint vid, int cornerId)
+                {
+                    if (vid >= outUvs.Count) return;
+                    if (cornerId >= 0 && cornerId < UV.Count)
+                        outUvs[(int)vid] = UV[cornerId];
+                    if (cornerId >= 0 && cornerId < LgtUV.Count)
+                        outLgtUvs[(int)vid] = new Vector2f { X = LgtUV[cornerId].X / 32767f, Y = LgtUV[cornerId].Y / 32767f };
+                    if (vid < VertexColors.Count)
+                        outColors[(int)vid] = VertexColors[(int)vid];
+                    refs[(int)vid] = new BspVertexRef(m, cornerId);
                 }
             }
         }
