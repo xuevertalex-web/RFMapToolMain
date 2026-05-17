@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Linq;
@@ -8,7 +8,7 @@ using RFMapToolSharp.Textures;
 using RFMapToolSharp;
 using RFMapToolSharp.Export;
 using RFMapToolSharp.Models;     // MapScene, MapTexture, MapMaterial*
-using RFMapToolSharp.Collision;  // BspFile (структура для сцены)
+using RFMapToolSharp.Collision;  // BspFile (СЃС‚СЂСѓРєС‚СѓСЂР° РґР»СЏ СЃС†РµРЅС‹)
 using RFMapToolSharp.Materials;
 
 class Program
@@ -17,24 +17,145 @@ class Program
 
     static void Main(string[] args)
     {
+        bool noObjectTransform = args.Any(a => string.Equals(a, "--no-object-transform", StringComparison.OrdinalIgnoreCase));
+        bool strictLegacyObjectTransform = args.Any(a => string.Equals(a, "--strict-legacy-object-transform", StringComparison.OrdinalIgnoreCase));
+        float objectFrame = 0f;
+        int objectTransformMode = 0;
+        int objectTranslationMode = 0;
+        int animatedObjectsMode = 0;
+        int objectTransformTarget = 0;
+        int decompressMode = 0;
+        bool forceObjectTransform = args.Any(a => string.Equals(a, "--force-object-transform", StringComparison.OrdinalIgnoreCase));
+        string? mapFilterArg = null;
+        string sptMode = "markers";
+        bool sptPivotFix = true;
+        string sptRotOrder = "XYZ";
+        float sptScaleMultiplier = 1.0f;
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--frame", StringComparison.OrdinalIgnoreCase))
+            {
+                float.TryParse(args[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out objectFrame);
+                break;
+            }
+        }
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--object-transform-mode", StringComparison.OrdinalIgnoreCase))
+            {
+                int.TryParse(args[i + 1], out objectTransformMode);
+                break;
+            }
+        }
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--object-translation-mode", StringComparison.OrdinalIgnoreCase))
+            {
+                int.TryParse(args[i + 1], out objectTranslationMode);
+                break;
+            }
+        }
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--animated-objects-mode", StringComparison.OrdinalIgnoreCase))
+            {
+                int.TryParse(args[i + 1], out animatedObjectsMode);
+                break;
+            }
+        }
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--object-transform-target", StringComparison.OrdinalIgnoreCase))
+            {
+                int.TryParse(args[i + 1], out objectTransformTarget);
+                break;
+            }
+        }
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--decompress-mode", StringComparison.OrdinalIgnoreCase))
+            {
+                int.TryParse(args[i + 1], out decompressMode);
+                break;
+            }
+        }
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--map", StringComparison.OrdinalIgnoreCase))
+            {
+                mapFilterArg = args[i + 1];
+                break;
+            }
+        }
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--spt-mode", StringComparison.OrdinalIgnoreCase))
+            {
+                sptMode = args[i + 1];
+                break;
+            }
+        }
+        sptPivotFix = !args.Any(a => string.Equals(a, "--no-spt-pivot-fix", StringComparison.OrdinalIgnoreCase));
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--spt-rot-order", StringComparison.OrdinalIgnoreCase))
+            {
+                sptRotOrder = args[i + 1];
+                break;
+            }
+        }
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--spt-scale-mul", StringComparison.OrdinalIgnoreCase))
+            {
+                float.TryParse(args[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out sptScaleMultiplier);
+                break;
+            }
+        }
+        RFMapToolSharp.Collision.BspFile.DisableObjectTransform = noObjectTransform;
+        RFMapToolSharp.Collision.BspFile.ObjectTransformFrame = objectFrame;
+        RFMapToolSharp.Collision.BspFile.StrictLegacyObjectTransform = strictLegacyObjectTransform;
+        RFMapToolSharp.Collision.BspFile.ObjectTransformMode = objectTransformMode;
+        RFMapToolSharp.Collision.BspFile.ObjectTranslationMode = objectTranslationMode;
+        RFMapToolSharp.Collision.BspFile.AnimatedObjectsMode = animatedObjectsMode;
+        RFMapToolSharp.Collision.BspFile.ObjectTransformTarget = objectTransformTarget;
+        RFMapToolSharp.Collision.BspFile.DecompressMode = decompressMode;
+        if (forceObjectTransform) RFMapToolSharp.Collision.BspFile.ObjectTransformTarget = 99;
+        GltfExporter.SptOptions.Mode = sptMode;
+        GltfExporter.SptOptions.PivotFix = sptPivotFix;
+        GltfExporter.SptOptions.RotationOrder = sptRotOrder;
+        GltfExporter.SptOptions.ScaleMultiplier = sptScaleMultiplier;
         Console.InputEncoding = Encoding.UTF8;
         Console.OutputEncoding = Encoding.UTF8;
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
         Console.ForegroundColor = ConsoleColor.Cyan;
         Console.WriteLine("=== RF ONLINE MAP BATCH CONVERTER ===\n");
+        if (noObjectTransform) Console.WriteLine("[INFO] Object transforms disabled (--no-object-transform).\n");
+        if (strictLegacyObjectTransform) Console.WriteLine("[INFO] Strict legacy object transforms enabled (--strict-legacy-object-transform).\n");
+        Console.WriteLine($"[INFO] Object transform frame: {objectFrame.ToString(System.Globalization.CultureInfo.InvariantCulture)}\n");
+        Console.WriteLine($"[INFO] Object transform mode: {objectTransformMode}\n");
+        Console.WriteLine($"[INFO] Object translation mode: {objectTranslationMode}\n");
+        Console.WriteLine($"[INFO] Animated objects mode: {animatedObjectsMode}\n");
+        Console.WriteLine($"[INFO] Object transform target: {objectTransformTarget}\n");
+        Console.WriteLine($"[INFO] Decompress mode: {decompressMode}\n");
+        if (forceObjectTransform) Console.WriteLine("[INFO] Force object transform enabled (--force-object-transform)\n");
+        Console.WriteLine($"[INFO] SPT mode: {sptMode}\n");
+        Console.WriteLine($"[INFO] SPT pivot fix: {sptPivotFix}\n");
+        Console.WriteLine($"[INFO] SPT rotation order: {sptRotOrder}\n");
+        Console.WriteLine($"[INFO] SPT scale multiplier: {sptScaleMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}\n");
         Console.ResetColor();
 
         string? mapRoot = FindMapRoot();
         if (mapRoot == null)
         {
-            Console.WriteLine("ОШИБКА: Папка 'Map' не найдена.");
+            Console.WriteLine("ERROR: Map folder not found.");
             Console.ReadKey();
             return;
         }
-        Console.WriteLine($"Найдена папка map: {mapRoot}\n");
+        Console.WriteLine($"Map folder found: {mapRoot}\n");
 
-        // Ищем корень проекта по наличию .csproj/.sln, чтобы корректно писать RF_Release вне bin\Debug
+        // РС‰РµРј РєРѕСЂРµРЅСЊ РїСЂРѕРµРєС‚Р° РїРѕ РЅР°Р»РёС‡РёСЋ .csproj/.sln, С‡С‚РѕР±С‹ РєРѕСЂСЂРµРєС‚РЅРѕ РїРёСЃР°С‚СЊ RF_Release РІРЅРµ bin\Debug
         var exeDir = AppContext.BaseDirectory;
         var current = new DirectoryInfo(exeDir);
         string rootDir = Environment.CurrentDirectory;
@@ -52,75 +173,90 @@ class Program
             current = current.Parent;
         }
 
-        // Экспорт всегда в RFMapToolSharp\RF_Release
+        // Р­РєСЃРїРѕСЂС‚ РІСЃРµРіРґР° РІ RFMapToolSharp\RF_Release
         var exportRoot = Path.Combine(rootDir, "RF_Release");
         Directory.CreateDirectory(exportRoot);
 
 
 
         var mapDirs = Directory.GetDirectories(mapRoot);
-        Console.WriteLine($"Найдено карт: {mapDirs.Length}.\n");
+        Console.WriteLine($"Maps found: {mapDirs.Length}.\n");
 
-        // === РЕЖИМ ВЫБОРА КАРТ ===
+        // === Р Р•Р–РРњ Р’Р«Р‘РћР Рђ РљРђР Рў ===
         string[] mapsToProcess = mapDirs;
 
-        Console.WriteLine("Выбери режим:");
-        Console.WriteLine("  1 - экспорт всех карт");
-        Console.WriteLine("  2 - экспорт одной карты (по номеру)");
-        Console.WriteLine("  3 - экспорт по имени / части имени");
-        Console.Write("Режим (Enter = 1): ");
-
-        var modeInput = Console.ReadLine();
-        int mode = 1;
-        int.TryParse(modeInput, out mode);
-        if (mode < 1 || mode > 3) mode = 1;
-
-        if (mode == 2)
+        if (!string.IsNullOrWhiteSpace(mapFilterArg))
         {
-            Console.WriteLine("\nСписок карт:");
-            for (int i = 0; i < mapDirs.Length; i++)
-                Console.WriteLine($"{i + 1,2}. {Path.GetFileName(mapDirs[i])}");
-
-            Console.Write("\nВведите номер карты: ");
-            var sel = Console.ReadLine();
-            if (!int.TryParse(sel, out int idx) || idx < 1 || idx > mapDirs.Length)
-            {
-                Console.WriteLine("Неверный номер, выходим.");
-                Console.ReadKey();
-                return;
-            }
-
-            mapsToProcess = new[] { mapDirs[idx - 1] };
-            Console.WriteLine($"\nВыбрана карта: {Path.GetFileName(mapsToProcess[0])}\n");
-        }
-        else if (mode == 3)
-        {
-            Console.Write("\nВведите имя или часть имени карты: ");
-            var filter = (Console.ReadLine() ?? "").Trim();
-
-            if (string.IsNullOrEmpty(filter))
-            {
-                Console.WriteLine("Пустой фильтр, выходим.");
-                Console.ReadKey();
-                return;
-            }
-
             mapsToProcess = mapDirs
-                .Where(d => Path.GetFileName(d)
-                    .IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
+                .Where(d => Path.GetFileName(d).IndexOf(mapFilterArg, StringComparison.OrdinalIgnoreCase) >= 0)
                 .ToArray();
-
             if (mapsToProcess.Length == 0)
             {
-                Console.WriteLine("По фильтру карты не найдены.");
-                Console.ReadKey();
+                Console.WriteLine($"No maps found by --map '{mapFilterArg}'.");
                 return;
             }
+            Console.WriteLine($"Non-interactive mode: --map {mapFilterArg}");
+        }
+        else
+        {
+            Console.WriteLine("Select mode:");
+            Console.WriteLine("  1 - export all maps");
+            Console.WriteLine("  2 - export one map (by number)");
+            Console.WriteLine("  3 - export by name / partial name");
+            Console.Write("Mode (Enter = 1): ");
 
-            Console.WriteLine($"\nБудут экспортированы {mapsToProcess.Length} карт(ы):");
-            foreach (var d in mapsToProcess)
-                Console.WriteLine(" - " + Path.GetFileName(d));
-            Console.WriteLine();
+            var modeInput = Console.ReadLine();
+            int mode = 1;
+            int.TryParse(modeInput, out mode);
+            if (mode < 1 || mode > 3) mode = 1;
+
+            if (mode == 2)
+            {
+                Console.WriteLine("\nMap list:");
+                for (int i = 0; i < mapDirs.Length; i++)
+                    Console.WriteLine($"{i + 1,2}. {Path.GetFileName(mapDirs[i])}");
+
+                Console.Write("\nEnter map number: ");
+                var sel = Console.ReadLine();
+                if (!int.TryParse(sel, out int idx) || idx < 1 || idx > mapDirs.Length)
+                {
+                    Console.WriteLine("Invalid number, exiting.");
+                    Console.ReadKey();
+                    return;
+                }
+
+                mapsToProcess = new[] { mapDirs[idx - 1] };
+                Console.WriteLine($"\nSelected map: {Path.GetFileName(mapsToProcess[0])}\n");
+            }
+            else if (mode == 3)
+            {
+                Console.Write("\nEnter map name or part of name: ");
+                var filter = (Console.ReadLine() ?? "").Trim();
+
+                if (string.IsNullOrEmpty(filter))
+                {
+                    Console.WriteLine("Empty filter, exiting.");
+                    Console.ReadKey();
+                    return;
+                }
+
+                mapsToProcess = mapDirs
+                    .Where(d => Path.GetFileName(d)
+                        .IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
+                    .ToArray();
+
+                if (mapsToProcess.Length == 0)
+                {
+                    Console.WriteLine("No maps found by filter.");
+                    Console.ReadKey();
+                    return;
+                }
+
+                Console.WriteLine($"\nWill be exported {mapsToProcess.Length} map(s):");
+                foreach (var d in mapsToProcess)
+                    Console.WriteLine(" - " + Path.GetFileName(d));
+                Console.WriteLine();
+            }
         }
 
         int success = 0;
@@ -133,7 +269,7 @@ class Program
 
             if (bspPath == null) continue;
 
-            Console.WriteLine($"---> Обработка: {mapName}");
+            Console.WriteLine($"---> Processing: {mapName}");
 
             try
             {
@@ -146,66 +282,73 @@ class Program
                 /// === 1. BSP ===
                 scene.Bsp = RFMapToolSharp.Collision.BspFile.Load(bspPath);
 
-                // === 2. МАТЕРИАЛЫ ===
+                // === 2. РњРђРўР•Р РРђР›Р« ===
                 string materialPath = Path.Combine(dir, "materials.r3m");
+                string rootMapR3m = Path.Combine(dir, $"{mapName}.r3m");
 
-                // если materials.r3m нет – ищем любой *.r3m внутри папки карты
+                // РµСЃР»Рё materials.r3m РЅРµС‚ вЂ“ РёС‰РµРј Р»СЋР±РѕР№ *.r3m РІРЅСѓС‚СЂРё РїР°РїРєРё РєР°СЂС‚С‹
                 if (!File.Exists(materialPath))
                 {
-                    // Ищем во всех подпапках текущей карты
-                    var r3mFiles = Directory.GetFiles(dir, "*.r3m", SearchOption.AllDirectories);
-
-                    if (r3mFiles.Length > 0)
+                    if (File.Exists(rootMapR3m))
                     {
-                        // Сначала пытаемся найти файл с именем карты: mapName.r3m
-                        materialPath =
-                            r3mFiles.FirstOrDefault(p =>
-                                string.Equals(
-                                    Path.GetFileNameWithoutExtension(p),
-                                    mapName,
-                                    StringComparison.OrdinalIgnoreCase))
-                            // если такого нет – берём первый попавшийся .r3m
-                            ?? r3mFiles[0];
+                        materialPath = rootMapR3m;
+                    }
+                    else
+                    {
+                        var r3mFiles = Directory.GetFiles(dir, "*.r3m", SearchOption.TopDirectoryOnly);
+                        if (r3mFiles.Length > 0)
+                        {
+                            materialPath =
+                                r3mFiles.FirstOrDefault(p =>
+                                    string.Equals(
+                                        Path.GetFileNameWithoutExtension(p),
+                                        mapName,
+                                        StringComparison.OrdinalIgnoreCase))
+                                ?? r3mFiles[0];
+                        }
                     }
                 }
 
                 if (File.Exists(materialPath))
                 {
-                    Console.WriteLine($"[DEBUG] {mapName}: R3M = {Path.GetFileName(materialPath)}");
+                    Console.WriteLine($"[DEBUG] {mapName}: R3M = {materialPath}");
                     scene.MaterialFile = R3MMaterialFile.Load(materialPath);
                 }
                 else
                 {
-                    Console.WriteLine($"[WARNING] {mapName}: .r3m не найден, будут белые материалы.");
+                    Console.WriteLine($"[WARNING] {mapName}: .r3m not found, using default materials.");
                     scene.MaterialFile = new R3MMaterialFile();
                 }
 
-                // === 3. ТЕКСТУРЫ ===
+                // === 3. РўР•РљРЎРўРЈР Р« ===
                 string texturePath = Path.Combine(dir, $"{mapName}.r3t");
 
                 scene.Textures = new List<RFMapToolSharp.Textures.R3TTextureEntry>();
 
-                // если mapName.r3t нет — берём первый попавшийся *.r3t
+                // РµСЃР»Рё mapName.r3t РЅРµС‚ вЂ” Р±РµСЂС‘Рј РїРµСЂРІС‹Р№ РїРѕРїР°РІС€РёР№СЃСЏ *.r3t
                 if (!File.Exists(texturePath))
                 {
-                    var r3tFiles = Directory.GetFiles(dir, "*.r3t");
+                    var r3tFiles = Directory.GetFiles(dir, "*.r3t", SearchOption.TopDirectoryOnly);
                     if (r3tFiles.Length > 0)
                         texturePath = r3tFiles[0];
                 }
 
                 if (File.Exists(texturePath))
                 {
+                    Console.WriteLine($"[DEBUG] {mapName}: R3T = {texturePath}");
                     var r3tFile = RFMapToolSharp.Textures.R3TFile.Load(texturePath);
                     scene.Textures.AddRange(r3tFile.Textures);
                 }
 
-                // === 4. ЭКСПОРТ ===
+                // === 4. Р­РљРЎРџРћР Рў ===
                 string targetDir = Path.Combine(exportRoot, mapName);
                 Directory.CreateDirectory(targetDir);
 
                 string sourceSpt = Path.Combine(dir, "Spt");
                 string destSpt = Path.Combine(targetDir, "Spt");
                 CopySptFolder(sourceSpt, destSpt);
+                Console.WriteLine($"[DEBUG] {mapName}: BSP = {bspPath}");
+                Console.WriteLine($"[DEBUG] {mapName}: SPT root = {sourceSpt}");
 
                 int texCount = scene.Textures?.Count ?? 0;
                 int matCount = scene.MaterialFile?.Materials?.Count ?? 0;
@@ -214,23 +357,27 @@ class Program
 
 
                 GltfExporter.Export(scene, targetDir, mapName);
+                scene.Bsp?.WriteBrokenFacesReport(Path.Combine(targetDir, "broken_faces.json"));
+                scene.Bsp?.WriteObjectMatricesReport(Path.Combine(targetDir, "object_matrices.json"));
+                scene.Bsp?.WriteAnimatedObjectsReport(Path.Combine(targetDir, "animated_objects.json"));
+                scene.Bsp?.WriteMatGroupDebugReport(Path.Combine(targetDir, "matgroup_debug.json"));
 
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"[OK] {mapName} завершена.");
+                Console.WriteLine($"[OK] {mapName} completed.");
                 Console.ResetColor();
                 success++;
             }
             catch (Exception ex)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"[FAIL] Ошибка {mapName}: {ex.Message}");
+                Console.WriteLine($"[FAIL] Error {mapName}: {ex.Message}");
                 Console.ResetColor();
             }
         }
 
-        Console.WriteLine($"\nОбработка завершена. Успешно экспортировано карт: {success} из {mapDirs.Length}.");
-        Console.WriteLine($"Экспортированные карты находятся в папке: {exportRoot}");
-        Console.WriteLine("Нажмите любую клавишу для выхода...");
+        Console.WriteLine($"\nProcessing complete. Exported maps: {success} of {mapDirs.Length}.");
+        Console.WriteLine($"Exported maps path: {exportRoot}");
+        Console.WriteLine("Press any key to exit...");
         Console.ReadKey();
     }
 
@@ -320,3 +467,4 @@ class Program
             File.Copy(f, Path.Combine(dest, Path.GetFileName(f)), true);
     }
 }
+

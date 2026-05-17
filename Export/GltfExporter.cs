@@ -22,6 +22,16 @@ namespace RFMapToolSharp.Export
 
     public static class GltfExporter
     {
+        public sealed class SptExportOptions
+        {
+            public string Mode { get; set; } = "markers"; // off|markers
+            public bool PivotFix { get; set; } = true;
+            public string RotationOrder { get; set; } = "XYZ"; // XYZ|XZY|YXZ|YZX|ZXY|ZYX
+            public float ScaleMultiplier { get; set; } = 1.0f;
+        }
+
+        public static SptExportOptions SptOptions { get; } = new();
+
         public static void Export(MapScene scene, string exportDir, string name)
         {
             if (scene.Bsp == null) throw new InvalidOperationException("BSP not loaded.");
@@ -148,17 +158,21 @@ namespace RFMapToolSharp.Export
             }
 
             // --- SPT (OBJECT MARKERS) ---
-            var debugMesh = CreateDebugCube(model);
-            ProcessSpt(scene.RootPath, gltfScene, MirrorWorldY, debugMesh);
+            if (!string.Equals(SptOptions.Mode, "off", StringComparison.OrdinalIgnoreCase))
+            {
+                var debugMesh = CreateDebugCube(model);
+                ProcessSpt(scene.RootPath, gltfScene, MirrorWorldY, debugMesh, exportDir);
+            }
 
             model.SaveGLB(Path.Combine(exportDir, $"{name}.glb"));
             Console.WriteLine("[GLTF] Saved!");
         }
 
-        private static void ProcessSpt(string mapRootPath, Scene gltfScene, bool mirrorY, Mesh debugMesh)
+        private static void ProcessSpt(string mapRootPath, Scene gltfScene, bool mirrorY, Mesh debugMesh, string exportDir)
         {
             var sptDir = Path.Combine(mapRootPath, "Spt");
             var files = new List<string>();
+            var resolveLog = new List<object>();
 
             if (Directory.Exists(sptDir))
                 files.AddRange(Directory.GetFiles(sptDir, "*.spt", SearchOption.TopDirectoryOnly));
@@ -184,17 +198,55 @@ namespace RFMapToolSharp.Export
                     
                     node.Mesh = debugMesh;
 
+                    var objScale = obj.Scale == Vector3.Zero ? Vector3.One : obj.Scale;
+                    objScale *= SptOptions.ScaleMultiplier;
+
                     var transform = Matrix4x4.CreateTranslation(pos);
-                    if (obj.Scale != Vector3.Zero) transform = Matrix4x4.CreateScale(obj.Scale) * transform;
-                    
+                    if (objScale != Vector3.One) transform = Matrix4x4.CreateScale(objScale) * transform;
+
                     var radRot = obj.Rotation * (MathF.PI / 180f);
-                    transform = Matrix4x4.CreateRotationX(radRot.X) * Matrix4x4.CreateRotationY(radRot.Y) * Matrix4x4.CreateRotationZ(radRot.Z) * transform;
+                    transform = BuildRotation(radRot, SptOptions.RotationOrder) * transform;
+                    if (SptOptions.PivotFix)
+                    {
+                        // RF helper pivot compensation for marker mode.
+                        transform = Matrix4x4.CreateTranslation(0, mirrorY ? 0.5f : -0.5f, 0) * transform;
+                    }
 
                     node.LocalTransform = transform;
+                    resolveLog.Add(new
+                    {
+                        SourceFile = file,
+                        obj.ModelName,
+                        obj.Position,
+                        obj.Rotation,
+                        Scale = objScale,
+                        SptOptions.Mode,
+                        SptOptions.PivotFix,
+                        SptOptions.RotationOrder,
+                        SptOptions.ScaleMultiplier
+                    });
                     count++;
                 }
             }
             Console.WriteLine($"[SPT] Created markers: {count}");
+            var logJson = System.Text.Json.JsonSerializer.Serialize(resolveLog, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(Path.Combine(exportDir, "spt_resolve_log.json"), logJson);
+        }
+
+        private static Matrix4x4 BuildRotation(Vector3 r, string order)
+        {
+            var rx = Matrix4x4.CreateRotationX(r.X);
+            var ry = Matrix4x4.CreateRotationY(r.Y);
+            var rz = Matrix4x4.CreateRotationZ(r.Z);
+            return order.ToUpperInvariant() switch
+            {
+                "XZY" => rx * rz * ry,
+                "YXZ" => ry * rx * rz,
+                "YZX" => ry * rz * rx,
+                "ZXY" => rz * rx * ry,
+                "ZYX" => rz * ry * rx,
+                _ => rx * ry * rz
+            };
         }
 
         private static Mesh CreateDebugCube(ModelRoot model)

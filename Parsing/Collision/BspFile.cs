@@ -4,6 +4,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Numerics;
+using System.Text.Json;
 
 namespace RFMapToolSharp.Collision;
 
@@ -12,6 +13,24 @@ namespace RFMapToolSharp.Collision;
 /// </summary>
 public sealed class BspFile
 {
+    private sealed class SkippedFaceInfo
+    {
+        public int MatGroup { get; init; }
+        public int FaceIndex { get; init; }
+        public int Reason { get; init; } // 1=face<3,2=badFaceId,3=noValidCorners
+        public int Attr { get; init; }
+        public int ObjectId { get; init; }
+        public int FunctionId { get; init; }
+    }
+
+    public static bool DisableObjectTransform { get; set; }
+    public static float ObjectTransformFrame { get; set; } = 0f;
+    public static bool StrictLegacyObjectTransform { get; set; }
+    public static int ObjectTransformMode { get; set; } = 0;
+    public static int ObjectTranslationMode { get; set; } = 0;
+    public static int AnimatedObjectsMode { get; set; } = 0;
+    public static int ObjectTransformTarget { get; set; } = 0; // 0=all,1=animated-only,2=static-only,3=none
+    public static int DecompressMode { get; set; } = 0;
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct ReadAniObject
     {
@@ -29,6 +48,12 @@ public sealed class BspFile
         public uint RotOffset;
         public uint ScaleOffset;
     }
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    private struct PosTrack { public float Frame; public Vector3f Pos; }
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    private struct RotTrack { public float Frame; public Vector4f Quat; }
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    private struct ScaleTrack { public float Frame; public Vector3f Scale; public Vector4f ScaleAxis; }
 
     public BspHeader Header { get; private set; } = default!;
 
@@ -56,11 +81,27 @@ public sealed class BspFile
     public IReadOnlyList<Vector2f> RealLightUv { get; private set; } = Array.Empty<Vector2f>();
     public IReadOnlyList<uint> RealColors { get; private set; } = Array.Empty<uint>();
     public IReadOnlyList<BspVertexRef> VertexRefs { get; private set; } = Array.Empty<BspVertexRef>();
+    private readonly List<SkippedFaceInfo> _skippedFaces = new();
+    private sealed class ObjectMatrixDumpInfo
+    {
+        public int Index { get; init; }
+        public int Parent { get; init; }
+        public int Frames { get; init; }
+        public float FrameUsed { get; init; }
+        public float ParentFrameUsed { get; init; }
+        public float[] Matrix { get; init; } = Array.Empty<float>();
+    }
 
     public byte[] ObjectRaw { get; private set; } = Array.Empty<byte>();
     public byte[] TrackRaw { get; private set; } = Array.Empty<byte>();
     public IReadOnlyList<ushort> EventObjectIds { get; private set; } = Array.Empty<ushort>();
     private Matrix4x4[] ObjectMatrices { get; set; } = Array.Empty<Matrix4x4>();
+    private readonly List<ObjectMatrixDumpInfo> _objectMatrixDump = new();
+    private readonly HashSet<int> _animatedObjectIds = new();
+    private readonly Dictionary<(int Obj, int FrameKey, int ParentFrameKey), Matrix4x4> _aniMatrixCache = new();
+    private readonly List<object> _matGroupDebug = new();
+
+    private static int FrameToKey(float f) => (int)MathF.Round(f * 1000f);
 
     public static BspFile Load(string path)
     {
@@ -94,8 +135,8 @@ public sealed class BspFile
         file.VertexId = ReadUIntArray(br, fs, file.Header.VertexId);
         file.MatGroups = ReadStructs(br, fs, file.Header.ReadMatGroup, ReadReadMatGroup);
 
-        file.BuildRealGeometry();
         file.BuildObjectMatrices();
+        file.BuildRealGeometry();
 
         return file;
     }
@@ -239,18 +280,33 @@ public sealed class BspFile
         var outColors = new List<uint>();
         var tris = new List<BspTriangle>();
         var refs = new List<BspVertexRef>();
+        _matGroupDebug.Clear();
 
         for (int m = 0; m < MatGroups.Count; m++)
         {
             var mg = MatGroups[m];
-            int functionId = (mg.Attr & 0x8000) != 0 ? 1 : (mg.Attr & 0x4000) != 0 ? 2 : 4;
+            int functionId = ResolveFunctionId(mg);
 
             for (int j = 0; j < mg.FaceNum; j++)
             {
-                int faceIndex = (int)FaceId[(int)(mg.FaceStartId + (uint)j)];
+                int faceIdIndex = (int)(mg.FaceStartId + (uint)j);
+                if (faceIdIndex < 0 || faceIdIndex >= FaceId.Count)
+                {
+                    _skippedFaces.Add(new SkippedFaceInfo { MatGroup = m, FaceIndex = faceIdIndex, Reason = 2, Attr = mg.Attr, ObjectId = mg.ObjectId, FunctionId = functionId });
+                    continue;
+                }
+                int faceIndex = (int)FaceId[faceIdIndex];
+                if (faceIndex < 0 || faceIndex >= Faces.Count)
+                {
+                    _skippedFaces.Add(new SkippedFaceInfo { MatGroup = m, FaceIndex = faceIndex, Reason = 2, Attr = mg.Attr, ObjectId = mg.ObjectId, FunctionId = functionId });
+                    continue;
+                }
                 var face = Faces[faceIndex];
                 if (face.VertexCount < 3)
+                {
+                    _skippedFaces.Add(new SkippedFaceInfo { MatGroup = m, FaceIndex = faceIndex, Reason = 1, Attr = mg.Attr, ObjectId = mg.ObjectId, FunctionId = functionId });
                     continue;
+                }
 
                 var realIndices = new List<int>(face.VertexCount);
                 for (int k = 0; k < face.VertexCount; k++)
@@ -265,13 +321,20 @@ public sealed class BspFile
 
                     // Дублируем вершину для каждого угла полигона
                     var pos = DecompressVertex(functionId, vid, mg);
-                    if (mg.ObjectId > 0)
+                    bool appliedTransform = false;
+                    if (!DisableObjectTransform && mg.ObjectId > 0)
                     {
                         int oid = mg.ObjectId - 1;
                         if (oid >= 0 && oid < ObjectMatrices.Length)
                         {
-                            var p = Vector3.Transform(new Vector3(pos.X, pos.Y, pos.Z), ObjectMatrices[oid]);
-                            pos = new Vector3f { X = p.X, Y = p.Y, Z = p.Z };
+                            bool isAnimated = _animatedObjectIds.Contains(mg.ObjectId);
+                            if (ShouldApplyObjectTransform(isAnimated) || ObjectTransformTarget == 99)
+                            {
+                                var objMat = GetBspObjectMatrixLikeLegacy(mg.ObjectId);
+                                var p = ApplyObjectTransform(new Vector3(pos.X, pos.Y, pos.Z), objMat, isAnimated);
+                                pos = new Vector3f { X = p.X, Y = p.Y, Z = p.Z };
+                                appliedTransform = true;
+                            }
                         }
                     }
                     var uv = (UV.Count > vIdx) ? UV[vIdx] : new Vector2f();
@@ -285,10 +348,21 @@ public sealed class BspFile
                     outColors.Add(color);
                     refs.Add(new BspVertexRef(m, vIdx));
                     realIndices.Add(newIndex);
+                    _matGroupDebug.Add(new
+                    {
+                        MatGroupId = m,
+                        mg.Attr,
+                        mg.ObjectId,
+                        FunctionId = functionId,
+                        AppliedTransform = appliedTransform
+                    });
                 }
 
                 if (realIndices.Count < 3)
+                {
+                    _skippedFaces.Add(new SkippedFaceInfo { MatGroup = m, FaceIndex = faceIndex, Reason = 3, Attr = mg.Attr, ObjectId = mg.ObjectId, FunctionId = functionId });
                     continue;
+                }
 
                 // Fan triangulation over validated corners only.
                 for (int k = 1; k < realIndices.Count - 1; k++)
@@ -313,8 +387,63 @@ public sealed class BspFile
         VertexRefs = refs;
     }
 
+    public void WriteBrokenFacesReport(string outputPath)
+    {
+        var payload = new
+        {
+            skipped = _skippedFaces.Count,
+            reasons = new
+            {
+                face_lt_3 = _skippedFaces.Count(x => x.Reason == 1),
+                bad_face_id = _skippedFaces.Count(x => x.Reason == 2),
+                no_valid_corners = _skippedFaces.Count(x => x.Reason == 3),
+            },
+            faces = _skippedFaces
+        };
+        var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(outputPath, json, Encoding.UTF8);
+    }
+
+    public void WriteObjectMatricesReport(string outputPath)
+    {
+        var payload = new
+        {
+            frame = ObjectTransformFrame,
+            strictLegacy = StrictLegacyObjectTransform,
+            disabled = DisableObjectTransform,
+            objects = _objectMatrixDump
+        };
+        var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(outputPath, json, Encoding.UTF8);
+    }
+
+    public void WriteAnimatedObjectsReport(string outputPath)
+    {
+        var payload = new
+        {
+            mode = AnimatedObjectsMode,
+            objectIds = _animatedObjectIds.OrderBy(x => x).ToArray()
+        };
+        var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(outputPath, json, Encoding.UTF8);
+    }
+
+    public void WriteMatGroupDebugReport(string outputPath)
+    {
+        var json = JsonSerializer.Serialize(_matGroupDebug, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(outputPath, json, Encoding.UTF8);
+    }
+
     private void BuildObjectMatrices()
     {
+        _aniMatrixCache.Clear();
+        _objectMatrixDump.Clear();
+        _animatedObjectIds.Clear();
+        if (DisableObjectTransform)
+        {
+            ObjectMatrices = Array.Empty<Matrix4x4>();
+            return;
+        }
         if (ObjectRaw.Length == 0)
         {
             ObjectMatrices = Array.Empty<Matrix4x4>();
@@ -347,24 +476,336 @@ public sealed class BspFile
         var locals = new Matrix4x4[count];
         for (int i = 0; i < count; i++)
         {
-            var s = Quaternion.Normalize(new Quaternion(read[i].ScaleQuat.X, read[i].ScaleQuat.Y, read[i].ScaleQuat.Z, read[i].ScaleQuat.W));
-            var r = Quaternion.Normalize(new Quaternion(read[i].Quat.X, read[i].Quat.Y, read[i].Quat.Z, read[i].Quat.W));
-            var scale = Matrix4x4.CreateScale(read[i].Scale.X, read[i].Scale.Y, read[i].Scale.Z);
-            var sq = Matrix4x4.CreateFromQuaternion(s);
-            Matrix4x4.Invert(sq, out var invSq);
-            var sMatrix = sq * scale * invSq;
-            var rot = Matrix4x4.CreateFromQuaternion(r);
-            rot.Translation = new Vector3(read[i].Pos.X, read[i].Pos.Y, read[i].Pos.Z);
-            locals[i] = sMatrix * rot;
+            float targetFrame = ObjectTransformFrame;
+            float parentFrame = 0f;
+            int parent = read[i].Parent - 1;
+            if (parent >= 0 && parent < count && read[parent].Frames != 0)
+                parentFrame = GetFloatMod(targetFrame, read[parent].Frames);
+            float nowFrame = read[i].Frames == 0 ? 0f : GetFloatMod(targetFrame, read[i].Frames);
+            locals[i] = GetAniMatrixWithParentFrame(read, i, nowFrame, parentFrame);
         }
 
         var world = new Matrix4x4[count];
-        for (int i = 0; i < count; i++)
+        if (StrictLegacyObjectTransform)
         {
-            world[i] = BuildWorld(i, read, locals, world);
+            var localsLegacy = new Matrix4x4[count];
+            for (int i = 0; i < count; i++)
+                localsLegacy[i] = ConvertFrom3dsMaxMatrix(locals[i]);
+            for (int i = 0; i < count; i++)
+                world[i] = BuildWorldLegacy(i, read, localsLegacy, world);
+        }
+        else
+        {
+            for (int i = 0; i < count; i++)
+                world[i] = BuildWorld(i, read, locals, world);
+            for (int i = 0; i < world.Length; i++)
+                world[i] = ConvertFrom3dsMaxMatrix(world[i]);
         }
 
         ObjectMatrices = world;
+
+        for (int i = 0; i < read.Length; i++)
+        {
+            float targetFrame = ObjectTransformFrame;
+            float parentFrame = 0f;
+            int parent = read[i].Parent - 1;
+            if (parent >= 0 && parent < read.Length && read[parent].Frames != 0)
+                parentFrame = GetFloatMod(targetFrame, read[parent].Frames);
+            float nowFrame = read[i].Frames == 0 ? 0f : GetFloatMod(targetFrame, read[i].Frames);
+            _objectMatrixDump.Add(new ObjectMatrixDumpInfo
+            {
+                Index = i + 1,
+                Parent = read[i].Parent,
+                Frames = read[i].Frames,
+                FrameUsed = nowFrame,
+                ParentFrameUsed = parentFrame,
+                Matrix = MatrixToArray(world[i])
+            });
+            if (read[i].Frames > 0)
+                _animatedObjectIds.Add(i + 1);
+        }
+    }
+
+    private static float[] MatrixToArray(Matrix4x4 m) => new[]
+    {
+        m.M11, m.M12, m.M13, m.M14,
+        m.M21, m.M22, m.M23, m.M24,
+        m.M31, m.M32, m.M33, m.M34,
+        m.M41, m.M42, m.M43, m.M44
+    };
+
+    private static Vector3 ApplyObjectTransform(Vector3 v, Matrix4x4 m, bool isAnimated)
+    {
+        var t = GetTranslationByMode(m);
+        if (isAnimated && AnimatedObjectsMode == 1)
+            return t;
+        if (isAnimated && AnimatedObjectsMode == 2)
+            return Vector3.Transform(v, m) + t;
+
+        return ObjectTransformMode switch
+        {
+            1 => Vector3.Transform(v, Matrix4x4.Transpose(m)),
+            2 => Vector3.TransformNormal(v, m) + t,
+            3 => Vector3.TransformNormal(v, Matrix4x4.Transpose(m)) + t,
+            _ => Vector3.Transform(v, m)
+        };
+    }
+
+    private static Vector3 GetTranslationByMode(Matrix4x4 m)
+    {
+        var t = new Vector3(m.M41, m.M42, m.M43);
+        return ObjectTranslationMode switch
+        {
+            1 => new Vector3(t.X, t.Z, t.Y),
+            2 => new Vector3(t.X, -t.Y, t.Z),
+            3 => new Vector3(t.X, t.Y, -t.Z),
+            4 => new Vector3(t.X, -t.Z, t.Y),
+            5 => new Vector3(t.X, t.Z, -t.Y),
+            _ => t
+        };
+    }
+
+    private static bool ShouldApplyObjectTransform(bool isAnimated)
+    {
+        return ObjectTransformTarget switch
+        {
+            1 => isAnimated,
+            2 => !isAnimated,
+            3 => false,
+            _ => true
+        };
+    }
+
+    private Matrix4x4 GetBspObjectMatrixLikeLegacy(int objectId1Based)
+    {
+        if (objectId1Based <= 0) return Matrix4x4.Identity;
+        int oid = objectId1Based - 1;
+        if (oid < 0 || oid >= ObjectMatrices.Length) return Matrix4x4.Identity;
+        // Legacy bsp.cpp picks time by event/dynamic flags; for exporter we keep selected frame and precomputed world.
+        return ObjectMatrices[oid];
+    }
+
+    private static int ResolveFunctionId(BspReadMatGroup mg)
+    {
+        int baseId = (mg.Attr & 0x8000) != 0 ? 1 : (mg.Attr & 0x4000) != 0 ? 2 : 4;
+        return DecompressMode switch
+        {
+            1 => baseId == 1 ? 2 : baseId,
+            2 => baseId == 2 ? 1 : baseId,
+            _ => baseId
+        };
+    }
+
+    private Matrix4x4 GetAniMatrix(ReadAniObject[] read, int i, float nowFrame)
+    {
+        var obj = read[i];
+        var rot = obj.RotCnt > 0 ? SampleRot(read, i, nowFrame) : new Quaternion(obj.Quat.X, obj.Quat.Y, obj.Quat.Z, obj.Quat.W);
+        var pos = obj.PosCnt > 0 ? SamplePos(read, i, nowFrame) : new Vector3(obj.Pos.X, obj.Pos.Y, obj.Pos.Z);
+        var scaleMat = obj.ScaleCnt > 0 ? SampleScaleMatrix(read, i, nowFrame) : BuildScaleMatrix(new Vector3(obj.Scale.X, obj.Scale.Y, obj.Scale.Z), new Quaternion(obj.ScaleQuat.X, obj.ScaleQuat.Y, obj.ScaleQuat.Z, obj.ScaleQuat.W));
+        var r = Matrix4x4.CreateFromQuaternion(Quaternion.Normalize(rot));
+        var m = r * scaleMat;
+        m.Translation = pos;
+        return m;
+    }
+
+    private Matrix4x4 GetAniMatrixWithParentFrame(ReadAniObject[] read, int i, float nowFrame, float parentNowFrame)
+    {
+        var key = (i, FrameToKey(nowFrame), FrameToKey(parentNowFrame));
+        if (_aniMatrixCache.TryGetValue(key, out var cached))
+            return cached;
+
+        // Keep logic close to old GetObjectMatrix: parent chain sampled by parent frame.
+        var local = GetAniMatrix(read, i, nowFrame);
+        int p = read[i].Parent - 1;
+        if (p < 0 || p >= read.Length)
+        {
+            _aniMatrixCache[key] = local;
+            return local;
+        }
+        var parent = GetSubObjectMatrix(read, p, parentNowFrame);
+        var result = parent * local;
+        _aniMatrixCache[key] = result;
+        return result;
+    }
+
+    private Matrix4x4 GetSubObjectMatrix(ReadAniObject[] read, int i, float nowFrame)
+    {
+        var key = (i, FrameToKey(nowFrame), FrameToKey(nowFrame));
+        if (_aniMatrixCache.TryGetValue(key, out var cached))
+            return cached;
+
+        var local = GetAniMatrix(read, i, nowFrame);
+        int p = read[i].Parent - 1;
+        if (p < 0 || p >= read.Length)
+        {
+            _aniMatrixCache[key] = local;
+            return local;
+        }
+        var result = GetSubObjectMatrix(read, p, nowFrame) * local;
+        _aniMatrixCache[key] = result;
+        return result;
+    }
+
+    private Matrix4x4 SampleScaleMatrix(ReadAniObject[] read, int i, float nowFrame)
+    {
+        var obj = read[i];
+        var tr = ReadTracks<ScaleTrack>(obj.ScaleOffset, obj.ScaleCnt);
+        if (tr.Length == 0) return Matrix4x4.Identity;
+        if (tr.Length == 1) return BuildScaleMatrix(new Vector3(tr[0].Scale.X, tr[0].Scale.Y, tr[0].Scale.Z), new Quaternion(tr[0].ScaleAxis.X, tr[0].ScaleAxis.Y, tr[0].ScaleAxis.Z, tr[0].ScaleAxis.W));
+        int a = 0, b = 1; float t = GetFrameAlpha(tr, nowFrame, out a, out b);
+        var s = Vector3.Lerp(new Vector3(tr[a].Scale.X, tr[a].Scale.Y, tr[a].Scale.Z), new Vector3(tr[b].Scale.X, tr[b].Scale.Y, tr[b].Scale.Z), t);
+        var q = Quaternion.Slerp(new Quaternion(tr[a].ScaleAxis.X, tr[a].ScaleAxis.Y, tr[a].ScaleAxis.Z, tr[a].ScaleAxis.W), new Quaternion(tr[b].ScaleAxis.X, tr[b].ScaleAxis.Y, tr[b].ScaleAxis.Z, tr[b].ScaleAxis.W), t);
+        return BuildScaleMatrix(s, q);
+    }
+
+    private Vector3 SamplePos(ReadAniObject[] read, int i, float nowFrame)
+    {
+        var obj = read[i];
+        var tr = ReadTracks<PosTrack>(obj.PosOffset, obj.PosCnt);
+        if (tr.Length == 0) return Vector3.Zero;
+        if (tr.Length == 1) return new Vector3(tr[0].Pos.X, tr[0].Pos.Y, tr[0].Pos.Z);
+        int a = 0, b = 1; float t = GetFrameAlpha(tr, nowFrame, out a, out b);
+        return Vector3.Lerp(new Vector3(tr[a].Pos.X, tr[a].Pos.Y, tr[a].Pos.Z), new Vector3(tr[b].Pos.X, tr[b].Pos.Y, tr[b].Pos.Z), t);
+    }
+
+    private Quaternion SampleRot(ReadAniObject[] read, int i, float nowFrame)
+    {
+        var obj = read[i];
+        var tr = ReadTracks<RotTrack>(obj.RotOffset, obj.RotCnt);
+        if (tr.Length == 0) return Quaternion.Identity;
+        if (tr.Length == 1) return new Quaternion(tr[0].Quat.X, tr[0].Quat.Y, tr[0].Quat.Z, tr[0].Quat.W);
+        int a = 0, b = 1; float t = GetFrameAlpha(tr, nowFrame, out a, out b);
+        return Quaternion.Slerp(new Quaternion(tr[a].Quat.X, tr[a].Quat.Y, tr[a].Quat.Z, tr[a].Quat.W), new Quaternion(tr[b].Quat.X, tr[b].Quat.Y, tr[b].Quat.Z, tr[b].Quat.W), t);
+    }
+
+    private static Matrix4x4 BuildScaleMatrix(Vector3 scale, Quaternion scaleAxis)
+    {
+        var sq = Matrix4x4.CreateFromQuaternion(Quaternion.Normalize(scaleAxis));
+        Matrix4x4.Invert(sq, out var invSq);
+        return sq * Matrix4x4.CreateScale(scale) * invSq;
+    }
+
+    private T[] ReadTracks<T>(uint offset, int count) where T : struct
+    {
+        if (count <= 0 || TrackRaw.Length == 0) return Array.Empty<T>();
+        int sz = Marshal.SizeOf<T>();
+        long need = (long)offset + (long)count * sz;
+        if (need > TrackRaw.Length || offset >= TrackRaw.Length) return Array.Empty<T>();
+        var arr = new T[count];
+        var h = GCHandle.Alloc(TrackRaw, GCHandleType.Pinned);
+        try
+        {
+            nint basePtr = h.AddrOfPinnedObject() + (int)offset;
+            for (int i = 0; i < count; i++) arr[i] = Marshal.PtrToStructure<T>(basePtr + i * sz);
+        }
+        finally { h.Free(); }
+        return arr;
+    }
+
+    private static float GetFrameAlpha(PosTrack[] tracks, float nowFrame, out int root, out int next)
+    {
+        return GetFrameAlphaCore(
+            tracks.Length,
+            idx => tracks[idx].Frame,
+            nowFrame,
+            out root,
+            out next);
+    }
+
+    private static float GetFrameAlpha(RotTrack[] tracks, float nowFrame, out int root, out int next)
+    {
+        return GetFrameAlphaCore(
+            tracks.Length,
+            idx => tracks[idx].Frame,
+            nowFrame,
+            out root,
+            out next);
+    }
+
+    private static float GetFrameAlpha(ScaleTrack[] tracks, float nowFrame, out int root, out int next)
+    {
+        return GetFrameAlphaCore(
+            tracks.Length,
+            idx => tracks[idx].Frame,
+            nowFrame,
+            out root,
+            out next);
+    }
+
+    private static float GetFrameAlphaCore(int count, Func<int, float> frameAt, float nowFrame, out int root, out int next)
+    {
+        if (count <= 0)
+        {
+            root = 0;
+            next = 0;
+            return 0f;
+        }
+        if (count == 1)
+        {
+            root = 0;
+            next = 0;
+            return 0f;
+        }
+
+        // Before first key: interpolate from last -> first (looping animation)
+        float first = frameAt(0);
+        if (nowFrame <= first)
+        {
+            root = count - 1;
+            next = 0;
+            float a = frameAt(root);
+            float b = first;
+            if (b <= a) b += (a > 0f ? a : 1f);
+            float tFrame = nowFrame;
+            if (tFrame < a) tFrame += (a > 0f ? a : 1f);
+            float denom = b - a;
+            return denom <= 0f ? 0f : (tFrame - a) / denom;
+        }
+
+        for (int i = 0; i < count - 1; i++)
+        {
+            float a = frameAt(i);
+            float b = frameAt(i + 1);
+            if (nowFrame >= a && nowFrame <= b)
+            {
+                root = i;
+                next = i + 1;
+                float denom = b - a;
+                return denom <= 0f ? 0f : (nowFrame - a) / denom;
+            }
+        }
+
+        // After last key: interpolate last -> first (looping animation)
+        root = count - 1;
+        next = 0;
+        float la = frameAt(root);
+        float lb = first;
+        if (lb <= la) lb += (la > 0f ? la : 1f);
+        float lf = nowFrame;
+        if (lf < la) lf += (la > 0f ? la : 1f);
+        float d = lb - la;
+        return d <= 0f ? 0f : (lf - la) / d;
+    }
+
+    private static Matrix4x4 ConvertFrom3dsMaxMatrix(Matrix4x4 m)
+    {
+        // Old engine swaps Y/Z columns after building object matrix.
+        (m.M12, m.M13) = (m.M13, m.M12);
+        (m.M22, m.M23) = (m.M23, m.M22);
+        (m.M32, m.M33) = (m.M33, m.M32);
+        (m.M42, m.M43) = (m.M43, m.M42);
+        return m;
+    }
+
+    private static float GetFloatMod(float su, float mod)
+    {
+        if (mod == 0f) return 0f;
+        if (su < 0f) su = -su;
+        while (su >= 32768f) su -= 32768f;
+        long a = (long)(su * 32768f);
+        long b = (long)(mod * 32768f);
+        if (b == 0) return 0f;
+        return (a % b) / 32768f;
     }
 
     private static Matrix4x4 BuildWorld(int i, ReadAniObject[] read, Matrix4x4[] locals, Matrix4x4[] world)
@@ -374,6 +815,15 @@ public sealed class BspFile
         if (p < 0 || p >= read.Length) return locals[i];
         var pw = BuildWorld(p, read, locals, world);
         return pw * locals[i];
+    }
+
+    private static Matrix4x4 BuildWorldLegacy(int i, ReadAniObject[] read, Matrix4x4[] locals, Matrix4x4[] world)
+    {
+        if (world[i] != default) return world[i];
+        int p = read[i].Parent - 1;
+        if (p < 0 || p >= read.Length) return locals[i];
+        var pw = BuildWorldLegacy(p, read, locals, world);
+        return locals[i] * pw;
     }
 
     internal void OverrideUv(Vector2f[] newUv)
