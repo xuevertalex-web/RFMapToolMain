@@ -390,6 +390,7 @@ class Program
 
             try
             {
+                MapScene? donorScene = null;
                 // Sette requires legacy-like handling for Attr=8192 object groups.
                 RFMapToolSharp.Collision.BspFile.SkipTransformForAttr8192 =
                     !string.Equals(mapName, "Sette", StringComparison.OrdinalIgnoreCase);
@@ -483,7 +484,7 @@ class Program
                     string donorRootDir = Path.Combine(exportRoot, "Sette_Donor");
                     Directory.CreateDirectory(donorRootDir);
                     Console.WriteLine("[INFO] --sette-donor-path enabled: exporting isolated Sette donor output.");
-                    var donorScene = new MapScene
+                    donorScene = new MapScene
                     {
                         Name = mapName,
                         RootPath = dir,
@@ -501,6 +502,11 @@ class Program
                     scene.Bsp?.WriteObjectMatricesReport(Path.Combine(targetDir, "object_matrices.json"));
                     scene.Bsp?.WriteAnimatedObjectsReport(Path.Combine(targetDir, "animated_objects.json"));
                     scene.Bsp?.WriteMatGroupDebugReport(Path.Combine(targetDir, "matgroup_debug.json"));
+                    if (setteDonorPath && string.Equals(mapName, "Sette", StringComparison.OrdinalIgnoreCase))
+                    {
+                        donorScene?.Bsp?.WriteMg91BorderStitchLog(Path.Combine(exportRoot, "Sette_Donor", "mg91_border_stitch_log.json"));
+                        donorScene?.Bsp?.WriteMg91DonorInjectionReport(Path.Combine(exportRoot, "Sette_Donor", "mg91_donor_injection_report.json"));
+                    }
                 }
                 catch (OutOfMemoryException)
                 {

@@ -6,6 +6,7 @@ using System.Text;
 using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Collections.Concurrent;
 
 namespace RFMapToolSharp.Collision;
 
@@ -109,7 +110,13 @@ public sealed class BspFile
     private readonly Dictionary<(int Obj, int FrameKey, int ParentFrameKey), Matrix4x4> _aniMatrixCache = new();
     private readonly List<object> _matGroupDebug = new();
     private readonly List<object> _mgFaceTrace89_92 = new();
+    private readonly List<object> _mg91BorderStitchLog = new();
+    private readonly List<object> _mg91BorderStitchTriangles = new();
+    private readonly List<object> _mg91DonorInjectionReport = new();
     private static readonly HashSet<int> Mg91CriticalFaces = new() { 41478, 41479, 41480, 41482, 41483, 41484, 41490, 41492, 41493, 41496, 41497, 41501 };
+    private static readonly HashSet<int> Mg91DonorPosFaces = new() { 41479, 41480, 41482, 41483, 41484, 41497 };
+    private static readonly Lazy<ConcurrentDictionary<(int Face, int Corner), Vector3f>> Mg91DonorPositions =
+        new(() => LoadMg91DonorPositions(), true);
 
     private static int FrameToKey(float f) => (int)MathF.Round(f * 1000f);
 
@@ -292,13 +299,16 @@ public sealed class BspFile
         var refs = new List<BspVertexRef>();
         _matGroupDebug.Clear();
         _mgFaceTrace89_92.Clear();
+        _mg91BorderStitchLog.Clear();
+        _mg91BorderStitchTriangles.Clear();
+        _mg91DonorInjectionReport.Clear();
 
         for (int m = 0; m < MatGroups.Count; m++)
         {
             var mg = MatGroups[m];
             int functionId = ResolveFunctionId(mg);
-            bool donorMg = SetteDonorPathMode && m >= 89 && m <= 92;
-            bool donorRawMg = false;
+            bool donorMg = SetteDonorPathMode && m == 91;
+            bool donorRawMg = donorMg;
 
             for (int j = 0; j < mg.FaceNum; j++)
             {
@@ -343,6 +353,19 @@ public sealed class BspFile
 
                     // Дублируем вершину для каждого угла полигона
                     var pos = DecompressVertex(functionId, vid, mg);
+                    if (donorMg && functionId == 4 && Mg91DonorPosFaces.Contains(faceIndex))
+                    {
+                        // Targeted donor-position override only for mismatching mg91 faces.
+                        var injected = TryGetMg91DonorPos(faceIndex, k, out var donorPos);
+                        if (injected) pos = donorPos;
+                        _mg91DonorInjectionReport.Add(new
+                        {
+                            FaceIndex = faceIndex,
+                            Corner = k,
+                            Injected = injected,
+                            Pos = new[] { pos.X, pos.Y, pos.Z }
+                        });
+                    }
                     bool appliedTransform = false;
                     if (!DisableObjectTransform && mg.ObjectId > 0)
                     {
@@ -381,14 +404,17 @@ public sealed class BspFile
                     outColors.Add(color);
                     refs.Add(new BspVertexRef(m, vIdx));
                     realIndices.Add(newIndex);
-                    if (m >= 89 && m <= 92)
+                    if (m == 91)
                     {
+                        Vector3f fRaw = default;
+                        if (vid < FVertices.Count) fRaw = FVertices[(int)vid];
                         faceTraceCorners.Add(new
                         {
                             Corner = k,
                             VIdx = vIdx,
                             Vid = vid,
                             Pos = new[] { pos.X, pos.Y, pos.Z },
+                            FVertexRaw = new[] { fRaw.X, fRaw.Y, fRaw.Z },
                             Uv = new[] { uv.X, uv.Y },
                             AppliedTransform = appliedTransform
                         });
@@ -410,7 +436,7 @@ public sealed class BspFile
                 }
 
                 // Fan triangulation over validated corners only.
-                if (m >= 89 && m <= 92)
+                if (m == 91)
                 {
                     float minX = float.PositiveInfinity, minY = float.PositiveInfinity, minZ = float.PositiveInfinity;
                     float maxX = float.NegativeInfinity, maxY = float.NegativeInfinity, maxZ = float.NegativeInfinity;
@@ -471,6 +497,91 @@ public sealed class BspFile
         RealLightUv = outLgtUvs;
         RealColors = outColors;
         VertexRefs = refs;
+
+        BuildMg91BorderStitchCandidates(tris, outVerts, outUvs, outLgtUvs, outColors, refs);
+    }
+
+    private void BuildMg91BorderStitchCandidates(
+        List<BspTriangle> tris,
+        List<Vector3f> outVerts,
+        List<Vector2f> outUvs,
+        List<Vector2f> outLgtUvs,
+        List<uint> outColors,
+        List<BspVertexRef> refs)
+    {
+        if (!SetteDonorPathMode) return;
+
+        // Edge usage map for mg91 triangles (undirected edge by final vertex index).
+        var edgeUse = new Dictionary<(int, int), int>();
+        foreach (var x in tris.Where(t => t.MatGroup == 91))
+        {
+            AddEdge(edgeUse, x.A, x.B);
+            AddEdge(edgeUse, x.B, x.C);
+            AddEdge(edgeUse, x.C, x.A);
+        }
+
+        foreach (var kv in edgeUse.Where(k => k.Value == 1))
+        {
+            int a = kv.Key.Item1;
+            int b = kv.Key.Item2;
+            if (a < 0 || b < 0 || a >= outVerts.Count || b >= outVerts.Count) continue;
+            var pa = outVerts[a];
+            var pb = outVerts[b];
+            float dx = pa.X - pb.X, dy = pa.Y - pb.Y, dz = pa.Z - pb.Z;
+            float len = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+            _mg91BorderStitchLog.Add(new
+            {
+                Edge = new[] { a, b },
+                Length = len,
+                PosA = new[] { pa.X, pa.Y, pa.Z },
+                PosB = new[] { pb.X, pb.Y, pb.Z }
+            });
+        }
+
+        // Stitch triangles disabled. Keep diagnostic edges only.
+
+        static void AddEdge(Dictionary<(int, int), int> map, int x, int y)
+        {
+            int a = Math.Min(x, y);
+            int b = Math.Max(x, y);
+            var key = (a, b);
+            map[key] = map.TryGetValue(key, out var c) ? c + 1 : 1;
+        }
+    }
+
+    private static bool TryGetMg91DonorPos(int faceIndex, int corner, out Vector3f pos)
+    {
+        return Mg91DonorPositions.Value.TryGetValue((faceIndex, corner), out pos);
+    }
+
+    private static ConcurrentDictionary<(int Face, int Corner), Vector3f> LoadMg91DonorPositions()
+    {
+        var map = new ConcurrentDictionary<(int Face, int Corner), Vector3f>();
+        string donorPath = @"C:\Users\Enot.DESKTOP-C19QK7E\Desktop\RFMapTool\RFMapToolModern\Debug\mg_face_vertices_89_92.json";
+        if (!File.Exists(donorPath)) return map;
+        using var doc = JsonDocument.Parse(File.ReadAllText(donorPath));
+        if (!doc.RootElement.TryGetProperty("faces", out var faces) || faces.ValueKind != JsonValueKind.Array) return map;
+        foreach (var face in faces.EnumerateArray())
+        {
+            if (!face.TryGetProperty("mg", out var mg) || mg.GetInt32() != 91) continue;
+            int faceIndex = face.GetProperty("faceIndex").GetInt32();
+            if (!Mg91DonorPosFaces.Contains(faceIndex)) continue;
+            if (!face.TryGetProperty("corners", out var corners) || corners.ValueKind != JsonValueKind.Array) continue;
+            foreach (var c in corners.EnumerateArray())
+            {
+                int corner = c.GetProperty("corner").GetInt32();
+                var p = c.GetProperty("pos");
+                var v = new Vector3f { X = p[0].GetSingle(), Y = p[1].GetSingle(), Z = p[2].GetSingle() };
+                map[(faceIndex, corner)] = v;
+            }
+        }
+        return map;
+    }
+
+    public void WriteMg91DonorInjectionReport(string outputPath)
+    {
+        var json = JsonSerializer.Serialize(_mg91DonorInjectionReport, SafeJson);
+        File.WriteAllText(outputPath, json, Encoding.UTF8);
     }
 
     public void WriteBrokenFacesReport(string outputPath)
@@ -523,6 +634,13 @@ public sealed class BspFile
     public void WriteMgFaceTrace89_92Report(string outputPath)
     {
         var json = JsonSerializer.Serialize(_mgFaceTrace89_92, SafeJson);
+        File.WriteAllText(outputPath, json, Encoding.UTF8);
+    }
+
+    public void WriteMg91BorderStitchLog(string outputPath)
+    {
+        var payload = new { Edges = _mg91BorderStitchLog, AddedTriangles = _mg91BorderStitchTriangles };
+        var json = JsonSerializer.Serialize(payload, SafeJson);
         File.WriteAllText(outputPath, json, Encoding.UTF8);
     }
 
