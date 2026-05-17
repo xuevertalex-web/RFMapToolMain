@@ -33,8 +33,7 @@ internal static class RfNativeMeshReader
         catch (Exception ex) { reason = $"read error: {ex.Message}"; return false; }
         if (bytes.Length < 64) { reason = "file too small"; return false; }
 
-        // Heuristic scan for float triples that look like bounded vertex coordinates.
-        // Then build sequential triangles.
+        // 1) Heuristic vertex scan.
         var verts = new List<Vector3>(4096);
         for (int i = 0; i + 12 <= bytes.Length; i += 4)
         {
@@ -55,8 +54,23 @@ internal static class RfNativeMeshReader
         }
 
         data.Positions.AddRange(verts);
-        for (int i = 0; i + 2 < verts.Count; i += 3)
-            data.Triangles.Add((i, i + 1, i + 2));
+
+        // 2) Try detect index buffer nearby (better than sequential soup).
+        var trisFrom16 = TryFindIndexTriangles16(bytes, verts.Count);
+        var trisFrom32 = TryFindIndexTriangles32(bytes, verts.Count);
+        if (trisFrom32.Count > trisFrom16.Count && trisFrom32.Count > 0)
+        {
+            data.Triangles.AddRange(trisFrom32);
+        }
+        else if (trisFrom16.Count > 0)
+        {
+            data.Triangles.AddRange(trisFrom16);
+        }
+        else
+        {
+            for (int i = 0; i + 2 < verts.Count; i += 3)
+                data.Triangles.Add((i, i + 1, i + 2));
+        }
 
         if (data.Triangles.Count < 100)
         {
@@ -66,5 +80,48 @@ internal static class RfNativeMeshReader
 
         return true;
     }
-}
 
+    private static List<(int A, int B, int C)> TryFindIndexTriangles16(byte[] bytes, int vcount)
+    {
+        var best = new List<(int A, int B, int C)>();
+        if (vcount <= 0 || vcount > 65535) return best;
+        for (int start = 0; start + 6 <= bytes.Length; start += 2)
+        {
+            var cur = new List<(int A, int B, int C)>(256);
+            for (int i = start; i + 6 <= bytes.Length; i += 6)
+            {
+                int a = BitConverter.ToUInt16(bytes, i);
+                int b = BitConverter.ToUInt16(bytes, i + 2);
+                int c = BitConverter.ToUInt16(bytes, i + 4);
+                if (a >= vcount || b >= vcount || c >= vcount) break;
+                if (a == b || b == c || a == c) continue;
+                cur.Add((a, b, c));
+                if (cur.Count > 120000) break;
+            }
+            if (cur.Count > best.Count) best = cur;
+        }
+        return best;
+    }
+
+    private static List<(int A, int B, int C)> TryFindIndexTriangles32(byte[] bytes, int vcount)
+    {
+        var best = new List<(int A, int B, int C)>();
+        if (vcount <= 0) return best;
+        for (int start = 0; start + 12 <= bytes.Length; start += 4)
+        {
+            var cur = new List<(int A, int B, int C)>(256);
+            for (int i = start; i + 12 <= bytes.Length; i += 12)
+            {
+                int a = (int)BitConverter.ToUInt32(bytes, i);
+                int b = (int)BitConverter.ToUInt32(bytes, i + 4);
+                int c = (int)BitConverter.ToUInt32(bytes, i + 8);
+                if (a < 0 || b < 0 || c < 0 || a >= vcount || b >= vcount || c >= vcount) break;
+                if (a == b || b == c || a == c) continue;
+                cur.Add((a, b, c));
+                if (cur.Count > 120000) break;
+            }
+            if (cur.Count > best.Count) best = cur;
+        }
+        return best;
+    }
+}
