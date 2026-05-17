@@ -38,9 +38,10 @@ namespace RFMapToolSharp.Export
         }
 
         public static SptExportOptions SptOptions { get; } = new();
-        public static bool FilterStretchedFaces { get; set; } = true;
-        public static bool FilterUvAnomalyFaces { get; set; } = true;
-        public static bool FilterNormalAnomalyFaces { get; set; } = true;
+        // Keep geometry intact by default: diagnostics are logged, triangles are not removed.
+        public static bool FilterStretchedFaces { get; set; } = false;
+        public static bool FilterUvAnomalyFaces { get; set; } = false;
+        public static bool FilterNormalAnomalyFaces { get; set; } = false;
 
         public static void Export(MapScene scene, string exportDir, string name)
         {
@@ -136,6 +137,7 @@ namespace RFMapToolSharp.Export
             var uvAnomalyFaces = new List<object>();
             var normalAnomalyFaces = new List<object>();
             var bspNodeIndex = new List<object>();
+            var mgTrace = new List<object>();
 
             foreach (var matGroup in groups)
             {
@@ -161,6 +163,24 @@ namespace RFMapToolSharp.Export
 
                     foreach (var face in byMat)
                     {
+                        if (face.MatGroup >= 89 && face.MatGroup <= 92)
+                        {
+                            mgTrace.Add(new
+                            {
+                                MatGroup = face.MatGroup,
+                                MatId = face.MatId,
+                                A = face.A,
+                                B = face.B,
+                                C = face.C,
+                                PA = new[] { Get(pos, face.A, default).X, Get(pos, face.A, default).Y, Get(pos, face.A, default).Z },
+                                PB = new[] { Get(pos, face.B, default).X, Get(pos, face.B, default).Y, Get(pos, face.B, default).Z },
+                                PC = new[] { Get(pos, face.C, default).X, Get(pos, face.C, default).Y, Get(pos, face.C, default).Z },
+                                UVA = new[] { Get(uv0, face.A, default).X, Get(uv0, face.A, default).Y },
+                                UVB = new[] { Get(uv0, face.B, default).X, Get(uv0, face.B, default).Y },
+                                UVC = new[] { Get(uv0, face.C, default).X, Get(uv0, face.C, default).Y }
+                            });
+                        }
+
                         var p1 = ToVec3(Get(pos, face.A, default), MirrorWorldY);
                         var p2 = ToVec3(Get(pos, face.B, default), MirrorWorldY);
                         var p3 = ToVec3(Get(pos, face.C, default), MirrorWorldY);
@@ -270,6 +290,11 @@ namespace RFMapToolSharp.Export
             File.WriteAllText(Path.Combine(exportDir, "normal_anomaly_faces.json"), nJson);
             var idxJson = JsonSerializer.Serialize(bspNodeIndex, SafeJson);
             File.WriteAllText(Path.Combine(exportDir, "bsp_node_index.json"), idxJson);
+            var traceJson = JsonSerializer.Serialize(mgTrace, SafeJson);
+            File.WriteAllText(Path.Combine(exportDir, "mg_trace_89_92.json"), traceJson);
+            scene.Bsp.WriteMgFaceTrace89_92Report(Path.Combine(exportDir, "mg_face_trace_89_92_bspbuild.json"));
+            var mg91Only = mgTrace.Where(x => (int)x.GetType().GetProperty("MatGroup")!.GetValue(x)! == 91).ToList();
+            File.WriteAllText(Path.Combine(exportDir, "mg91_face_rebuild_log.json"), JsonSerializer.Serialize(mg91Only, SafeJson));
             Console.WriteLine("[GLTF] Saved!");
         }
 

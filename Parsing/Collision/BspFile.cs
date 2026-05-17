@@ -38,6 +38,7 @@ public sealed class BspFile
     public static int ObjectTransformTarget { get; set; } = 0; // 0=all,1=animated-only,2=static-only,3=none
     public static int DecompressMode { get; set; } = 0;
     public static bool SkipTransformForAttr8192 { get; set; } = true;
+    public static bool SetteDonorPathMode { get; set; } = false;
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct ReadAniObject
     {
@@ -107,6 +108,8 @@ public sealed class BspFile
     private readonly HashSet<int> _animatedObjectIds = new();
     private readonly Dictionary<(int Obj, int FrameKey, int ParentFrameKey), Matrix4x4> _aniMatrixCache = new();
     private readonly List<object> _matGroupDebug = new();
+    private readonly List<object> _mgFaceTrace89_92 = new();
+    private static readonly HashSet<int> Mg91CriticalFaces = new() { 41478, 41479, 41480, 41482, 41483, 41484, 41490, 41492, 41493, 41496, 41497, 41501 };
 
     private static int FrameToKey(float f) => (int)MathF.Round(f * 1000f);
 
@@ -288,21 +291,32 @@ public sealed class BspFile
         var tris = new List<BspTriangle>();
         var refs = new List<BspVertexRef>();
         _matGroupDebug.Clear();
+        _mgFaceTrace89_92.Clear();
 
         for (int m = 0; m < MatGroups.Count; m++)
         {
             var mg = MatGroups[m];
             int functionId = ResolveFunctionId(mg);
+            bool donorMg = SetteDonorPathMode && m >= 89 && m <= 92;
+            bool donorRawMg = false;
 
             for (int j = 0; j < mg.FaceNum; j++)
             {
                 int faceIdIndex = (int)(mg.FaceStartId + (uint)j);
-                if (faceIdIndex < 0 || faceIdIndex >= FaceId.Count)
+                int faceIndex;
+                if (donorMg)
                 {
-                    _skippedFaces.Add(new SkippedFaceInfo { MatGroup = m, FaceIndex = faceIdIndex, Reason = 2, Attr = mg.Attr, ObjectId = mg.ObjectId, FunctionId = functionId });
-                    continue;
+                    faceIndex = faceIdIndex;
                 }
-                int faceIndex = (int)FaceId[faceIdIndex];
+                else
+                {
+                    if (faceIdIndex < 0 || faceIdIndex >= FaceId.Count)
+                    {
+                        _skippedFaces.Add(new SkippedFaceInfo { MatGroup = m, FaceIndex = faceIdIndex, Reason = 2, Attr = mg.Attr, ObjectId = mg.ObjectId, FunctionId = functionId });
+                        continue;
+                    }
+                    faceIndex = (int)FaceId[faceIdIndex];
+                }
                 if (faceIndex < 0 || faceIndex >= Faces.Count)
                 {
                     _skippedFaces.Add(new SkippedFaceInfo { MatGroup = m, FaceIndex = faceIndex, Reason = 2, Attr = mg.Attr, ObjectId = mg.ObjectId, FunctionId = functionId });
@@ -316,6 +330,7 @@ public sealed class BspFile
                 }
 
                 var realIndices = new List<int>(face.VertexCount);
+                var faceTraceCorners = new List<object>(face.VertexCount);
                 for (int k = 0; k < face.VertexCount; k++)
                 {
                     int vIdx = (int)(face.VertexStartId + (uint)k);
@@ -331,7 +346,11 @@ public sealed class BspFile
                     bool appliedTransform = false;
                     if (!DisableObjectTransform && mg.ObjectId > 0)
                     {
-                        if (SkipTransformForAttr8192 && mg.Attr == 8192)
+                        if (donorRawMg)
+                        {
+                            // Donor viewer path keeps mg89..92 in raw space without object transform.
+                        }
+                        else if (SkipTransformForAttr8192 && mg.Attr == 8192)
                         {
                             // Global safety override: these groups frequently produce displaced geometry after object transform.
                         }
@@ -362,6 +381,18 @@ public sealed class BspFile
                     outColors.Add(color);
                     refs.Add(new BspVertexRef(m, vIdx));
                     realIndices.Add(newIndex);
+                    if (m >= 89 && m <= 92)
+                    {
+                        faceTraceCorners.Add(new
+                        {
+                            Corner = k,
+                            VIdx = vIdx,
+                            Vid = vid,
+                            Pos = new[] { pos.X, pos.Y, pos.Z },
+                            Uv = new[] { uv.X, uv.Y },
+                            AppliedTransform = appliedTransform
+                        });
+                    }
                     _matGroupDebug.Add(new
                     {
                         MatGroupId = m,
@@ -379,6 +410,47 @@ public sealed class BspFile
                 }
 
                 // Fan triangulation over validated corners only.
+                if (m >= 89 && m <= 92)
+                {
+                    float minX = float.PositiveInfinity, minY = float.PositiveInfinity, minZ = float.PositiveInfinity;
+                    float maxX = float.NegativeInfinity, maxY = float.NegativeInfinity, maxZ = float.NegativeInfinity;
+                    var pts = new List<Vector3f>(realIndices.Count);
+                    foreach (var ri in realIndices)
+                    {
+                        var p = outVerts[ri];
+                        pts.Add(p);
+                        if (p.X < minX) minX = p.X; if (p.Y < minY) minY = p.Y; if (p.Z < minZ) minZ = p.Z;
+                        if (p.X > maxX) maxX = p.X; if (p.Y > maxY) maxY = p.Y; if (p.Z > maxZ) maxZ = p.Z;
+                    }
+                    float minE = float.PositiveInfinity, maxE = 0f;
+                    for (int ei = 0; ei < pts.Count; ei++)
+                    {
+                        var a = pts[ei];
+                        var b = pts[(ei + 1) % pts.Count];
+                        float dx = a.X - b.X, dy = a.Y - b.Y, dz = a.Z - b.Z;
+                        float e = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+                        if (e < minE) minE = e;
+                        if (e > maxE) maxE = e;
+                    }
+                    _mgFaceTrace89_92.Add(new
+                    {
+                        MatGroup = m,
+                        FaceIndex = faceIndex,
+                        IsCriticalMg91Face = m == 91 && Mg91CriticalFaces.Contains(faceIndex),
+                        DonorPathMode = SetteDonorPathMode,
+                        DonorRawMg = donorRawMg,
+                        FunctionId = functionId,
+                        Attr = mg.Attr,
+                        ObjectId = mg.ObjectId,
+                        VertexStartId = face.VertexStartId,
+                        VertexCount = face.VertexCount,
+                        CornerCount = realIndices.Count,
+                        BBoxMin = new[] { minX, minY, minZ },
+                        BBoxMax = new[] { maxX, maxY, maxZ },
+                        EdgeRatio = minE > 1e-6f ? maxE / minE : 999999f,
+                        Corners = faceTraceCorners
+                    });
+                }
                 for (int k = 1; k < realIndices.Count - 1; k++)
                 {
                     tris.Add(new BspTriangle
@@ -445,6 +517,12 @@ public sealed class BspFile
     public void WriteMatGroupDebugReport(string outputPath)
     {
         var json = JsonSerializer.Serialize(_matGroupDebug, SafeJson);
+        File.WriteAllText(outputPath, json, Encoding.UTF8);
+    }
+
+    public void WriteMgFaceTrace89_92Report(string outputPath)
+    {
+        var json = JsonSerializer.Serialize(_mgFaceTrace89_92, SafeJson);
         File.WriteAllText(outputPath, json, Encoding.UTF8);
     }
 

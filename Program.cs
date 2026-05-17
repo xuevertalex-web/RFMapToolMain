@@ -33,6 +33,9 @@ class Program
         string? editorTemplateArg = null;
         bool editorDryRun = args.Any(a => string.Equals(a, "--editor-dry-run", StringComparison.OrdinalIgnoreCase));
         bool entityReport = args.Any(a => string.Equals(a, "--entity-report", StringComparison.OrdinalIgnoreCase));
+        bool setteCleanIsolated = args.Any(a => string.Equals(a, "--sette-clean-isolated", StringComparison.OrdinalIgnoreCase));
+        bool setteRaw = args.Any(a => string.Equals(a, "--sette-raw", StringComparison.OrdinalIgnoreCase));
+        bool setteDonorPath = args.Any(a => string.Equals(a, "--sette-donor-path", StringComparison.OrdinalIgnoreCase));
         string sptMode = "markers";
         bool sptPivotFix = true;
         string sptRotOrder = "XYZ";
@@ -193,6 +196,63 @@ class Program
             RpkInspector.WriteEntityIndexReport(entityDir, idxPath);
             Console.WriteLine($"[ENTITY] Report saved: {outPath}");
             Console.WriteLine($"[ENTITY] Index saved: {idxPath}");
+            return;
+        }
+
+        if (setteCleanIsolated)
+        {
+            string? mr = FindMapRoot();
+            if (mr == null)
+            {
+                Console.WriteLine("ERROR: Map folder not found.");
+                return;
+            }
+
+            var exeDirIso = AppContext.BaseDirectory;
+            var curIso = new DirectoryInfo(exeDirIso);
+            string rootDirIso = Environment.CurrentDirectory;
+            while (curIso != null)
+            {
+                bool hasMarkers = curIso.GetFiles("*.csproj").Any() || curIso.GetFiles("*.sln").Any();
+                if (hasMarkers) { rootDirIso = curIso.FullName; break; }
+                curIso = curIso.Parent;
+            }
+            var exportRootIso = Path.Combine(rootDirIso, "RF_Release");
+            Directory.CreateDirectory(exportRootIso);
+
+            if (!RFMapToolSharp.Export.SetteCleanExporter.Run(mr, exportRootIso))
+            {
+                Console.WriteLine("ERROR: failed to export Sette in isolated mode.");
+                return;
+            }
+            Console.WriteLine("[OK] Sette clean isolated export completed.");
+            return;
+        }
+        if (setteRaw)
+        {
+            string? mr = FindMapRoot();
+            if (mr == null)
+            {
+                Console.WriteLine("ERROR: Map folder not found.");
+                return;
+            }
+            var exeDirIso = AppContext.BaseDirectory;
+            var curIso = new DirectoryInfo(exeDirIso);
+            string rootDirIso = Environment.CurrentDirectory;
+            while (curIso != null)
+            {
+                bool hasMarkers = curIso.GetFiles("*.csproj").Any() || curIso.GetFiles("*.sln").Any();
+                if (hasMarkers) { rootDirIso = curIso.FullName; break; }
+                curIso = curIso.Parent;
+            }
+            var exportRootIso = Path.Combine(rootDirIso, "RF_Release");
+            Directory.CreateDirectory(exportRootIso);
+            if (!RFMapToolSharp.Export.SetteRawExporter.Run(mr, exportRootIso))
+            {
+                Console.WriteLine("ERROR: failed to export Sette in raw mode.");
+                return;
+            }
+            Console.WriteLine("[OK] Sette raw export completed.");
             return;
         }
 
@@ -418,6 +478,23 @@ class Program
 
 
                 GltfExporter.Export(scene, targetDir, mapName);
+                if (setteDonorPath && string.Equals(mapName, "Sette", StringComparison.OrdinalIgnoreCase))
+                {
+                    string donorRootDir = Path.Combine(exportRoot, "Sette_Donor");
+                    Directory.CreateDirectory(donorRootDir);
+                    Console.WriteLine("[INFO] --sette-donor-path enabled: exporting isolated Sette donor output.");
+                    var donorScene = new MapScene
+                    {
+                        Name = mapName,
+                        RootPath = dir,
+                        MaterialFile = scene.MaterialFile,
+                        Textures = scene.Textures
+                    };
+                    RFMapToolSharp.Collision.BspFile.SetteDonorPathMode = true;
+                    donorScene.Bsp = RFMapToolSharp.Collision.BspFile.Load(bspPath);
+                    GltfExporter.Export(donorScene, donorRootDir, "Sette_Donor");
+                    RFMapToolSharp.Collision.BspFile.SetteDonorPathMode = false;
+                }
                 try
                 {
                     scene.Bsp?.WriteBrokenFacesReport(Path.Combine(targetDir, "broken_faces.json"));
