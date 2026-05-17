@@ -147,36 +147,34 @@ namespace RFMapToolSharp.Export
                 node.Mesh = model.CreateMesh(meshBuilder);
             }
 
-            // --- SPT (ОБЪЕКТЫ) ---
-            string sptPath = Path.Combine(exportDir, "Spt");
-            if (!Directory.Exists(sptPath)) 
-                sptPath = Path.Combine(Directory.GetParent(exportDir)?.FullName ?? "", "Spt");
-            if (!Directory.Exists(sptPath)) 
-                sptPath = Path.Combine(Environment.CurrentDirectory, "Spt");
-
-            if (Directory.Exists(sptPath))
-            {
-                var debugMesh = CreateDebugCube(model);
-                ProcessSptFolder(sptPath, gltfScene, MirrorWorldY, debugMesh);
-            }
-            else
-            {
-                Console.WriteLine($"[WARNING] Папка Spt не найдена: {sptPath}");
-            }
+            // --- SPT (OBJECT MARKERS) ---
+            var debugMesh = CreateDebugCube(model);
+            ProcessSpt(scene.RootPath, gltfScene, MirrorWorldY, debugMesh);
 
             model.SaveGLB(Path.Combine(exportDir, $"{name}.glb"));
             Console.WriteLine("[GLTF] Saved!");
         }
 
-        private static void ProcessSptFolder(string sptPath, Scene gltfScene, bool mirrorY, Mesh debugMesh)
+        private static void ProcessSpt(string mapRootPath, Scene gltfScene, bool mirrorY, Mesh debugMesh)
         {
-            var files = Directory.GetFiles(sptPath, "*.spt");
-            Console.WriteLine($"[SPT] Найдены файлы: {files.Length}");
+            var sptDir = Path.Combine(mapRootPath, "Spt");
+            var files = new List<string>();
+
+            if (Directory.Exists(sptDir))
+                files.AddRange(Directory.GetFiles(sptDir, "*.spt", SearchOption.TopDirectoryOnly));
+
+            // Some maps keep *.spt directly in the map root (for example, *EXT.spt scripts)
+            files.AddRange(Directory.GetFiles(mapRootPath, "*.spt", SearchOption.TopDirectoryOnly));
+
+            files = files
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            Console.WriteLine($"[SPT] Candidate files: {files.Count}");
             int count = 0;
 
             foreach (var file in files)
             {
-                // Парсим бинарник (убедись, что SptMapParser есть в папке Parsing)
                 var objects = SptMapParser.Parse(file);
 
                 foreach (var obj in objects)
@@ -196,7 +194,7 @@ namespace RFMapToolSharp.Export
                     count++;
                 }
             }
-            Console.WriteLine($"[SPT] Создано {count} маркеров (кубиков).");
+            Console.WriteLine($"[SPT] Created markers: {count}");
         }
 
         private static Mesh CreateDebugCube(ModelRoot model)

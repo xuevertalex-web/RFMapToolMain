@@ -34,14 +34,17 @@ class Program
         }
         Console.WriteLine($"Найдена папка map: {mapRoot}\n");
 
-        // Ищем корень проекта RFMapToolSharp (чтобы не лезть в bin\Debug)
+        // Ищем корень проекта по наличию .csproj/.sln, чтобы корректно писать RF_Release вне bin\Debug
         var exeDir = AppContext.BaseDirectory;
         var current = new DirectoryInfo(exeDir);
-        string rootDir = exeDir;
+        string rootDir = Environment.CurrentDirectory;
 
         while (current != null)
         {
-            if (string.Equals(current.Name, "RFMapToolSharp", StringComparison.OrdinalIgnoreCase))
+            bool hasProjectMarkers =
+                current.GetFiles("*.csproj").Any() ||
+                current.GetFiles("*.sln").Any();
+            if (hasProjectMarkers)
             {
                 rootDir = current.FullName;
                 break;
@@ -227,19 +230,70 @@ class Program
 
         Console.WriteLine($"\nОбработка завершена. Успешно экспортировано карт: {success} из {mapDirs.Length}.");
         Console.WriteLine($"Экспортированные карты находятся в папке: {exportRoot}");
-        Console.WriteLine("Нажми кнопку и уёбывай...");
+        Console.WriteLine("Нажмите любую клавишу для выхода...");
         Console.ReadKey();
     }
 
     static string? FindMapRoot()
     {
-        string? dir = AppContext.BaseDirectory;
-        for (int i = 0; i < 4 && dir != null; i++)
+        static string? TryMapDir(string? baseDir)
         {
-            if (Directory.Exists(Path.Combine(dir, "map"))) return Path.Combine(dir, "map");
-            if (Directory.Exists(Path.Combine(dir, "Map"))) return Path.Combine(dir, "Map");
+            if (string.IsNullOrWhiteSpace(baseDir)) return null;
+
+            var mapLower = Path.Combine(baseDir, "map");
+            if (Directory.Exists(mapLower)) return mapLower;
+
+            var mapUpper = Path.Combine(baseDir, "Map");
+            if (Directory.Exists(mapUpper)) return mapUpper;
+
+            return null;
+        }
+
+        // 1) Explicit path from config file (rf_path.txt)
+        // File can contain either game root (with Map inside) or direct Map path.
+        var cfgPath = Path.Combine(Environment.CurrentDirectory, ConfigFile);
+        if (File.Exists(cfgPath))
+        {
+            var raw = File.ReadAllText(cfgPath).Trim().Trim('"');
+            if (!string.IsNullOrWhiteSpace(raw))
+            {
+                if (Directory.Exists(raw))
+                {
+                    if (string.Equals(Path.GetFileName(raw), "map", StringComparison.OrdinalIgnoreCase))
+                        return raw;
+
+                    var fromCfg = TryMapDir(raw);
+                    if (fromCfg != null) return fromCfg;
+                }
+            }
+        }
+
+        // 2) Current working directory and exe base directory
+        var fromCwd = TryMapDir(Environment.CurrentDirectory);
+        if (fromCwd != null) return fromCwd;
+
+        var fromExe = TryMapDir(AppContext.BaseDirectory);
+        if (fromExe != null) return fromExe;
+
+        // 3) Walk up from current directory
+        string? dir = Environment.CurrentDirectory;
+        for (int i = 0; i < 10 && dir != null; i++)
+        {
+            var found = TryMapDir(dir);
+            if (found != null) return found;
             dir = Directory.GetParent(dir)?.FullName;
         }
+
+        // 4) Walk up from exe directory
+        dir = AppContext.BaseDirectory;
+        for (int i = 0; i < 10 && dir != null; i++)
+        {
+            var found = TryMapDir(dir);
+            if (found != null) return found;
+            dir = Directory.GetParent(dir)?.FullName;
+        }
+
+        // 5) Legacy fallback path
         if (Directory.Exists(@"C:\Games\RF_Online\Map")) return @"C:\Games\RF_Online\Map";
         return null;
     }
