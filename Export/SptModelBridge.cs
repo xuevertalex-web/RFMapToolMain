@@ -24,6 +24,15 @@ internal static class SptModelBridge
         mesh = null;
         reason = "";
         var ext = Path.GetExtension(modelPath).ToLowerInvariant();
+        if (ext == ".msh" || ext == ".mod")
+        {
+            if (RfNativeMeshReader.TryRead(modelPath, out var rf, out var rr))
+            {
+                return TryCreateFromRaw(model, rf.Positions, rf.Triangles, out mesh, out reason);
+            }
+            reason = $"rf reader failed: {rr}";
+            return false;
+        }
         if (ext == ".obj")
         {
             return TryCreateObjMesh(model, modelPath, out mesh, out reason);
@@ -92,6 +101,37 @@ internal static class SptModelBridge
 
         foreach (var t in tris)
         {
+            var p1 = pos[t.A];
+            var p2 = pos[t.B];
+            var p3 = pos[t.C];
+            var n = Vector3.Normalize(Vector3.Cross(p2 - p1, p3 - p1));
+            var v1 = new VertexBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>(new VertexPositionNormal(p1, n), new VertexTexture1(Vector2.Zero), new VertexEmpty());
+            var v2 = new VertexBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>(new VertexPositionNormal(p2, n), new VertexTexture1(Vector2.Zero), new VertexEmpty());
+            var v3 = new VertexBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>(new VertexPositionNormal(p3, n), new VertexTexture1(Vector2.Zero), new VertexEmpty());
+            prim.AddTriangle(v1, v2, v3);
+        }
+
+        mesh = model.CreateMesh(mb);
+        return true;
+    }
+
+    private static bool TryCreateFromRaw(ModelRoot model, List<Vector3> pos, List<(int A, int B, int C)> tris, out Mesh? mesh, out string reason)
+    {
+        mesh = null;
+        reason = "";
+        if (pos.Count == 0 || tris.Count == 0)
+        {
+            reason = "empty raw mesh";
+            return false;
+        }
+
+        var mb = new MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>("SPT_RF");
+        var mat = new MaterialBuilder("SPT_RF_MAT").WithDoubleSide(true).WithMetallicRoughnessShader();
+        var prim = mb.UsePrimitive(mat);
+
+        foreach (var t in tris)
+        {
+            if (t.A < 0 || t.B < 0 || t.C < 0 || t.A >= pos.Count || t.B >= pos.Count || t.C >= pos.Count) continue;
             var p1 = pos[t.A];
             var p2 = pos[t.B];
             var p3 = pos[t.C];
