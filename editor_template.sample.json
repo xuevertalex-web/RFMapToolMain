@@ -1,0 +1,19 @@
+{
+  "Name": "Sette_Prototype",
+  "Seed": 20260517,
+  "ObjectCount": 120,
+  "MinX": -3500.0,
+  "MaxX": 3500.0,
+  "MinZ": -3500.0,
+  "MaxZ": 3500.0,
+  "MinY": 900.0,
+  "MaxY": 2400.0,
+  "ModelPool": [
+    "dummy01",
+    "dummy02",
+    "dummy03",
+    "dummy04",
+    "dummy05"
+  ]
+}
+

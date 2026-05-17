@@ -10,10 +10,13 @@ using RFMapToolSharp.Export;
 using RFMapToolSharp.Models;     // MapScene, MapTexture, MapMaterial*
 using RFMapToolSharp.Collision;  // BspFile (СЃС‚СЂСѓРєС‚СѓСЂР° РґР»СЏ СЃС†РµРЅС‹)
 using RFMapToolSharp.Materials;
+using RFMapToolSharp.Editor;
+using RFMapToolSharp.Parsing.Entity;
 
 class Program
 {
     private const string ConfigFile = "rf_path.txt";
+    private static bool IsInteractive => !Console.IsInputRedirected;
 
     static void Main(string[] args)
     {
@@ -27,6 +30,9 @@ class Program
         int decompressMode = 0;
         bool forceObjectTransform = args.Any(a => string.Equals(a, "--force-object-transform", StringComparison.OrdinalIgnoreCase));
         string? mapFilterArg = null;
+        string? editorTemplateArg = null;
+        bool editorDryRun = args.Any(a => string.Equals(a, "--editor-dry-run", StringComparison.OrdinalIgnoreCase));
+        bool entityReport = args.Any(a => string.Equals(a, "--entity-report", StringComparison.OrdinalIgnoreCase));
         string sptMode = "markers";
         bool sptPivotFix = true;
         string sptRotOrder = "XYZ";
@@ -95,6 +101,14 @@ class Program
                 break;
             }
         }
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--editor-template", StringComparison.OrdinalIgnoreCase))
+            {
+                editorTemplateArg = args[i + 1];
+                break;
+            }
+        }
         sptPivotFix = !args.Any(a => string.Equals(a, "--no-spt-pivot-fix", StringComparison.OrdinalIgnoreCase));
         for (int i = 0; i < args.Length - 1; i++)
         {
@@ -146,11 +160,47 @@ class Program
         Console.WriteLine($"[INFO] SPT scale multiplier: {sptScaleMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}\n");
         Console.ResetColor();
 
+        if (editorDryRun)
+        {
+            if (string.IsNullOrWhiteSpace(editorTemplateArg) || !File.Exists(editorTemplateArg))
+            {
+                Console.WriteLine("ERROR: --editor-dry-run requires --editor-template <path-to-json>");
+                return;
+            }
+
+            var t = EditorGenerator.LoadTemplate(editorTemplateArg);
+            var objs = EditorGenerator.Generate(t);
+            var outPath = Path.Combine(Environment.CurrentDirectory, "editor_plan.json");
+            EditorGenerator.SavePlan(outPath, t, objs);
+            Console.WriteLine($"[EDITOR] Dry-run complete. Objects: {objs.Count}");
+            Console.WriteLine($"[EDITOR] Plan saved: {outPath}");
+            return;
+        }
+
+        if (entityReport)
+        {
+            string entityDir = Path.Combine(Environment.CurrentDirectory, "map", "Entity");
+            if (!Directory.Exists(entityDir)) entityDir = Path.Combine(Environment.CurrentDirectory, "Map", "Entity");
+            if (!Directory.Exists(entityDir))
+            {
+                Console.WriteLine("ERROR: Entity folder not found.");
+                return;
+            }
+            string outPath = Path.Combine(Environment.CurrentDirectory, "RF_Release", "Entity", "entity_rpk_report.json");
+            string idxPath = Path.Combine(Environment.CurrentDirectory, "RF_Release", "Entity", "entity_rpk_index.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
+            RpkInspector.WriteEntityReport(entityDir, outPath);
+            RpkInspector.WriteEntityIndexReport(entityDir, idxPath);
+            Console.WriteLine($"[ENTITY] Report saved: {outPath}");
+            Console.WriteLine($"[ENTITY] Index saved: {idxPath}");
+            return;
+        }
+
         string? mapRoot = FindMapRoot();
         if (mapRoot == null)
         {
             Console.WriteLine("ERROR: Map folder not found.");
-            Console.ReadKey();
+            if (IsInteractive) Console.ReadKey();
             return;
         }
         Console.WriteLine($"Map folder found: {mapRoot}\n");
@@ -181,13 +231,20 @@ class Program
 
         var mapDirs = Directory.GetDirectories(mapRoot);
         Console.WriteLine($"Maps found: {mapDirs.Length}.\n");
+        var skippedNonBsp = new List<string>();
+        var bspCapableMapDirs = mapDirs.Where(d =>
+        {
+            var hasBsp = FindBspFile(d) != null;
+            if (!hasBsp) skippedNonBsp.Add(Path.GetFileName(d));
+            return hasBsp;
+        }).ToArray();
 
         // === Р Р•Р–РРњ Р’Р«Р‘РћР Рђ РљРђР Рў ===
-        string[] mapsToProcess = mapDirs;
+        string[] mapsToProcess = bspCapableMapDirs;
 
         if (!string.IsNullOrWhiteSpace(mapFilterArg))
         {
-            mapsToProcess = mapDirs
+            mapsToProcess = bspCapableMapDirs
                 .Where(d => Path.GetFileName(d).IndexOf(mapFilterArg, StringComparison.OrdinalIgnoreCase) >= 0)
                 .ToArray();
             if (mapsToProcess.Length == 0)
@@ -213,19 +270,19 @@ class Program
             if (mode == 2)
             {
                 Console.WriteLine("\nMap list:");
-                for (int i = 0; i < mapDirs.Length; i++)
-                    Console.WriteLine($"{i + 1,2}. {Path.GetFileName(mapDirs[i])}");
+                for (int i = 0; i < bspCapableMapDirs.Length; i++)
+                    Console.WriteLine($"{i + 1,2}. {Path.GetFileName(bspCapableMapDirs[i])}");
 
                 Console.Write("\nEnter map number: ");
                 var sel = Console.ReadLine();
-                if (!int.TryParse(sel, out int idx) || idx < 1 || idx > mapDirs.Length)
+                if (!int.TryParse(sel, out int idx) || idx < 1 || idx > bspCapableMapDirs.Length)
                 {
                     Console.WriteLine("Invalid number, exiting.");
-                    Console.ReadKey();
+                    if (IsInteractive) Console.ReadKey();
                     return;
                 }
 
-                mapsToProcess = new[] { mapDirs[idx - 1] };
+                mapsToProcess = new[] { bspCapableMapDirs[idx - 1] };
                 Console.WriteLine($"\nSelected map: {Path.GetFileName(mapsToProcess[0])}\n");
             }
             else if (mode == 3)
@@ -236,11 +293,11 @@ class Program
                 if (string.IsNullOrEmpty(filter))
                 {
                     Console.WriteLine("Empty filter, exiting.");
-                    Console.ReadKey();
+                    if (IsInteractive) Console.ReadKey();
                     return;
                 }
 
-                mapsToProcess = mapDirs
+                mapsToProcess = bspCapableMapDirs
                     .Where(d => Path.GetFileName(d)
                         .IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
                     .ToArray();
@@ -248,7 +305,7 @@ class Program
                 if (mapsToProcess.Length == 0)
                 {
                     Console.WriteLine("No maps found by filter.");
-                    Console.ReadKey();
+                    if (IsInteractive) Console.ReadKey();
                     return;
                 }
 
@@ -273,6 +330,10 @@ class Program
 
             try
             {
+                // Sette requires legacy-like handling for Attr=8192 object groups.
+                RFMapToolSharp.Collision.BspFile.SkipTransformForAttr8192 =
+                    !string.Equals(mapName, "Sette", StringComparison.OrdinalIgnoreCase);
+
                 var scene = new MapScene
                 {
                     Name = mapName,
@@ -357,10 +418,17 @@ class Program
 
 
                 GltfExporter.Export(scene, targetDir, mapName);
-                scene.Bsp?.WriteBrokenFacesReport(Path.Combine(targetDir, "broken_faces.json"));
-                scene.Bsp?.WriteObjectMatricesReport(Path.Combine(targetDir, "object_matrices.json"));
-                scene.Bsp?.WriteAnimatedObjectsReport(Path.Combine(targetDir, "animated_objects.json"));
-                scene.Bsp?.WriteMatGroupDebugReport(Path.Combine(targetDir, "matgroup_debug.json"));
+                try
+                {
+                    scene.Bsp?.WriteBrokenFacesReport(Path.Combine(targetDir, "broken_faces.json"));
+                    scene.Bsp?.WriteObjectMatricesReport(Path.Combine(targetDir, "object_matrices.json"));
+                    scene.Bsp?.WriteAnimatedObjectsReport(Path.Combine(targetDir, "animated_objects.json"));
+                    scene.Bsp?.WriteMatGroupDebugReport(Path.Combine(targetDir, "matgroup_debug.json"));
+                }
+                catch (OutOfMemoryException)
+                {
+                    Console.WriteLine($"[WARN] {mapName}: not enough memory to write all debug reports.");
+                }
 
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.WriteLine($"[OK] {mapName} completed.");
@@ -375,10 +443,18 @@ class Program
             }
         }
 
-        Console.WriteLine($"\nProcessing complete. Exported maps: {success} of {mapDirs.Length}.");
+        if (skippedNonBsp.Count > 0)
+        {
+            foreach (var n in skippedNonBsp)
+                Console.WriteLine($"[SKIP] {n}: RPK resource pack / no BSP map files.");
+        }
+        Console.WriteLine($"\nProcessing complete. Exported maps: {success} of {bspCapableMapDirs.Length} BSP map(s).");
         Console.WriteLine($"Exported maps path: {exportRoot}");
-        Console.WriteLine("Press any key to exit...");
-        Console.ReadKey();
+        if (IsInteractive)
+        {
+            Console.WriteLine("Press any key to exit...");
+            Console.ReadKey();
+        }
     }
 
     static string? FindMapRoot()

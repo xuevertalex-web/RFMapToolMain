@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Numerics;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace RFMapToolSharp.Collision;
 
@@ -13,6 +14,11 @@ namespace RFMapToolSharp.Collision;
 /// </summary>
 public sealed class BspFile
 {
+    private static readonly JsonSerializerOptions SafeJson = new()
+    {
+        WriteIndented = true,
+        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
+    };
     private sealed class SkippedFaceInfo
     {
         public int MatGroup { get; init; }
@@ -31,6 +37,7 @@ public sealed class BspFile
     public static int AnimatedObjectsMode { get; set; } = 0;
     public static int ObjectTransformTarget { get; set; } = 0; // 0=all,1=animated-only,2=static-only,3=none
     public static int DecompressMode { get; set; } = 0;
+    public static bool SkipTransformForAttr8192 { get; set; } = true;
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct ReadAniObject
     {
@@ -324,6 +331,12 @@ public sealed class BspFile
                     bool appliedTransform = false;
                     if (!DisableObjectTransform && mg.ObjectId > 0)
                     {
+                        if (SkipTransformForAttr8192 && mg.Attr == 8192)
+                        {
+                            // Global safety override: these groups frequently produce displaced geometry after object transform.
+                        }
+                        else
+                        {
                         int oid = mg.ObjectId - 1;
                         if (oid >= 0 && oid < ObjectMatrices.Length)
                         {
@@ -335,6 +348,7 @@ public sealed class BspFile
                                 pos = new Vector3f { X = p.X, Y = p.Y, Z = p.Z };
                                 appliedTransform = true;
                             }
+                        }
                         }
                     }
                     var uv = (UV.Count > vIdx) ? UV[vIdx] : new Vector2f();
@@ -400,7 +414,7 @@ public sealed class BspFile
             },
             faces = _skippedFaces
         };
-        var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
+        var json = JsonSerializer.Serialize(payload, SafeJson);
         File.WriteAllText(outputPath, json, Encoding.UTF8);
     }
 
@@ -413,7 +427,7 @@ public sealed class BspFile
             disabled = DisableObjectTransform,
             objects = _objectMatrixDump
         };
-        var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
+        var json = JsonSerializer.Serialize(payload, SafeJson);
         File.WriteAllText(outputPath, json, Encoding.UTF8);
     }
 
@@ -424,13 +438,13 @@ public sealed class BspFile
             mode = AnimatedObjectsMode,
             objectIds = _animatedObjectIds.OrderBy(x => x).ToArray()
         };
-        var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
+        var json = JsonSerializer.Serialize(payload, SafeJson);
         File.WriteAllText(outputPath, json, Encoding.UTF8);
     }
 
     public void WriteMatGroupDebugReport(string outputPath)
     {
-        var json = JsonSerializer.Serialize(_matGroupDebug, new JsonSerializerOptions { WriteIndented = true });
+        var json = JsonSerializer.Serialize(_matGroupDebug, SafeJson);
         File.WriteAllText(outputPath, json, Encoding.UTF8);
     }
 

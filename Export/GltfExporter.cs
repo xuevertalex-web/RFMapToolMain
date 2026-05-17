@@ -10,6 +10,8 @@ using SharpGLTF.Schema2;
 using SharpGLTF.Geometry;
 using SharpGLTF.Geometry.VertexTypes;
 using SharpGLTF.Memory;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 // Убираем глобальный using SharpGLTF.Materials чтобы не было конфликтов
 // Будем указывать типы материалов явно
@@ -22,6 +24,11 @@ namespace RFMapToolSharp.Export
 
     public static class GltfExporter
     {
+        private static readonly JsonSerializerOptions SafeJson = new()
+        {
+            WriteIndented = true,
+            NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
+        };
         public sealed class SptExportOptions
         {
             public string Mode { get; set; } = "markers"; // off|markers|real-if-supported
@@ -31,6 +38,9 @@ namespace RFMapToolSharp.Export
         }
 
         public static SptExportOptions SptOptions { get; } = new();
+        public static bool FilterStretchedFaces { get; set; } = true;
+        public static bool FilterUvAnomalyFaces { get; set; } = true;
+        public static bool FilterNormalAnomalyFaces { get; set; } = true;
 
         public static void Export(MapScene scene, string exportDir, string name)
         {
@@ -122,9 +132,26 @@ namespace RFMapToolSharp.Export
             var uv0   = scene.Bsp.RealUv;
 
             var groups = faces.GroupBy(f => f.MatGroup).OrderBy(g => g.Key);
+            var stretchedFaces = new List<object>();
+            var uvAnomalyFaces = new List<object>();
+            var normalAnomalyFaces = new List<object>();
+            var bspNodeIndex = new List<object>();
 
             foreach (var matGroup in groups)
             {
+                var groupFaceNormals = new List<Vector3>();
+                foreach (var f in matGroup)
+                {
+                    var gp1 = ToVec3(Get(pos, f.A, default), MirrorWorldY);
+                    var gp2 = ToVec3(Get(pos, f.B, default), MirrorWorldY);
+                    var gp3 = ToVec3(Get(pos, f.C, default), MirrorWorldY);
+                    var gn = Vector3.Cross(gp2 - gp1, gp3 - gp1);
+                    if (gn.LengthSquared() > 1e-8f) groupFaceNormals.Add(Vector3.Normalize(gn));
+                }
+                var groupNormal = Vector3.Zero;
+                foreach (var n in groupFaceNormals) groupNormal += n;
+                if (groupNormal.LengthSquared() > 1e-8f) groupNormal = Vector3.Normalize(groupNormal);
+
                 var meshBuilder = new MeshBuilder<VPOS, VTEX, VEMPTY>($"MatGroup_{matGroup.Key:D4}");
 
                 foreach (var byMat in matGroup.GroupBy(f => f.MatId))
@@ -138,12 +165,61 @@ namespace RFMapToolSharp.Export
                         var p2 = ToVec3(Get(pos, face.B, default), MirrorWorldY);
                         var p3 = ToVec3(Get(pos, face.C, default), MirrorWorldY);
 
+                        if (IsStretchedTriangle(p1, p2, p3, out var maxEdge, out var minEdge, out var area))
+                        {
+                            stretchedFaces.Add(new
+                            {
+                                face.MatGroup,
+                                face.MatId,
+                                face.A,
+                                face.B,
+                                face.C,
+                                MaxEdge = maxEdge,
+                                MinEdge = minEdge,
+                                Area = area
+                            });
+                            if (FilterStretchedFaces) continue;
+                        }
+
                         var normal = Vector3.Normalize(Vector3.Cross(p2 - p1, p3 - p1));
+                        if (groupNormal.LengthSquared() > 1e-8f)
+                        {
+                            var dot = Vector3.Dot(normal, groupNormal);
+                            if (dot < -0.35f)
+                            {
+                                normalAnomalyFaces.Add(new
+                                {
+                                    face.MatGroup,
+                                    face.MatId,
+                                    face.A,
+                                    face.B,
+                                    face.C,
+                                    Dot = dot
+                                });
+                                if (FilterNormalAnomalyFaces) continue;
+                            }
+                        }
 
                         // ИСПРАВЛЕНИЕ: Теперь переменные FlipUV используются!
                         var u1 = ToVec2Smart(Get(uv0, face.A, default), FlipUV_U, FlipUV_V);
                         var u2 = ToVec2Smart(Get(uv0, face.B, default), FlipUV_U, FlipUV_V);
                         var u3 = ToVec2Smart(Get(uv0, face.C, default), FlipUV_U, FlipUV_V);
+
+                        if (IsUvAnomalyTriangle(p1, p2, p3, u1, u2, u3, out var worldMax, out var uvMax, out var uvRatio))
+                        {
+                            uvAnomalyFaces.Add(new
+                            {
+                                face.MatGroup,
+                                face.MatId,
+                                face.A,
+                                face.B,
+                                face.C,
+                                WorldMax = worldMax,
+                                UvMax = uvMax,
+                                UvRatio = float.IsFinite(uvRatio) ? uvRatio : 999999f
+                            });
+                            if (FilterUvAnomalyFaces) continue;
+                        }
 
                         var v1 = new VertexBuilder<VPOS, VTEX, VEMPTY>(new VPOS(p1.X, p1.Y, p1.Z, normal.X, normal.Y, normal.Z), new VTEX(u1, u1), new VEMPTY());
                         var v2 = new VertexBuilder<VPOS, VTEX, VEMPTY>(new VPOS(p2.X, p2.Y, p2.Z, normal.X, normal.Y, normal.Z), new VTEX(u2, u2), new VEMPTY());
@@ -153,8 +229,29 @@ namespace RFMapToolSharp.Export
                         else              prim.AddTriangle(v1, v2, v3);
                     }
                 }
-                var node = gltfScene.CreateNode($"BSP_{matGroup.Key}");
+                int mgId = matGroup.Key;
+                int mgMtlId = -1;
+                int mgObjectId = -1;
+                int mgAttr = -1;
+                if (scene.Bsp.MatGroups != null && mgId >= 0 && mgId < scene.Bsp.MatGroups.Count)
+                {
+                    var mg = scene.Bsp.MatGroups[mgId];
+                    mgMtlId = mg.MtlId;
+                    mgObjectId = mg.ObjectId;
+                    mgAttr = mg.Attr;
+                }
+                var nodeName = $"BSP_mg{mgId}_mtl{mgMtlId}_obj{mgObjectId}_attr{mgAttr}";
+                var node = gltfScene.CreateNode(nodeName);
                 node.Mesh = model.CreateMesh(meshBuilder);
+                bspNodeIndex.Add(new
+                {
+                    NodeName = nodeName,
+                    MatGroup = mgId,
+                    MtlId = mgMtlId,
+                    ObjectId = mgObjectId,
+                    Attr = mgAttr,
+                    TriangleCount = matGroup.Count()
+                });
             }
 
             // --- SPT (OBJECT MARKERS) ---
@@ -165,6 +262,14 @@ namespace RFMapToolSharp.Export
             }
 
             model.SaveGLB(Path.Combine(exportDir, $"{name}.glb"));
+            var stretchJson = JsonSerializer.Serialize(stretchedFaces, SafeJson);
+            File.WriteAllText(Path.Combine(exportDir, "stretched_faces.json"), stretchJson);
+            var uvJson = JsonSerializer.Serialize(uvAnomalyFaces, SafeJson);
+            File.WriteAllText(Path.Combine(exportDir, "uv_anomaly_faces.json"), uvJson);
+            var nJson = JsonSerializer.Serialize(normalAnomalyFaces, SafeJson);
+            File.WriteAllText(Path.Combine(exportDir, "normal_anomaly_faces.json"), nJson);
+            var idxJson = JsonSerializer.Serialize(bspNodeIndex, SafeJson);
+            File.WriteAllText(Path.Combine(exportDir, "bsp_node_index.json"), idxJson);
             Console.WriteLine("[GLTF] Saved!");
         }
 
@@ -193,7 +298,9 @@ namespace RFMapToolSharp.Export
 
                 foreach (var obj in objects)
                 {
+                    bool isExtScript = Path.GetFileName(file).EndsWith("ext.spt", StringComparison.OrdinalIgnoreCase);
                     var pos = new Vector3(obj.Position.X, mirrorY ? -obj.Position.Y : obj.Position.Y, obj.Position.Z);
+                    if (!IsFinite(pos)) pos = Vector3.Zero;
                     var node = gltfScene.CreateNode(obj.ModelName);
                     bool usedRealMesh = false;
                     node.Mesh = debugMesh;
@@ -220,21 +327,37 @@ namespace RFMapToolSharp.Export
                         }
                     }
 
-                    var objScale = obj.Scale == Vector3.Zero ? Vector3.One : obj.Scale;
+                    var objScale = obj.Scale;
+                    if (!IsFinite(objScale) || objScale.X <= 0 || objScale.Y <= 0 || objScale.Z <= 0 || objScale.X > 1000 || objScale.Y > 1000 || objScale.Z > 1000)
+                    {
+                        objScale = Vector3.One;
+                    }
                     objScale *= SptOptions.ScaleMultiplier;
 
                     var transform = Matrix4x4.CreateTranslation(pos);
-                    if (objScale != Vector3.One) transform = Matrix4x4.CreateScale(objScale) * transform;
-
-                    var radRot = obj.Rotation * (MathF.PI / 180f);
-                    transform = BuildRotation(radRot, SptOptions.RotationOrder) * transform;
+                    if (!isExtScript && objScale != Vector3.One)
+                    {
+                        transform = Matrix4x4.CreateScale(objScale) * transform;
+                    }
                     if (SptOptions.PivotFix)
                     {
                         // RF helper pivot compensation for marker mode.
                         transform = Matrix4x4.CreateTranslation(0, mirrorY ? 0.5f : -0.5f, 0) * transform;
                     }
 
-                    node.LocalTransform = transform;
+                    if (!IsFinite(transform))
+                    {
+                        transform = Matrix4x4.CreateTranslation(pos);
+                    }
+
+                    try
+                    {
+                        node.LocalTransform = transform;
+                    }
+                    catch
+                    {
+                        node.LocalTransform = Matrix4x4.CreateTranslation(pos);
+                    }
                     resolveLog.Add(new
                     {
                         SourceFile = file,
@@ -253,7 +376,7 @@ namespace RFMapToolSharp.Export
                 }
             }
             Console.WriteLine($"[SPT] Created markers: {count}");
-            var logJson = System.Text.Json.JsonSerializer.Serialize(resolveLog, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            var logJson = JsonSerializer.Serialize(resolveLog, SafeJson);
             File.WriteAllText(Path.Combine(exportDir, "spt_resolve_log.json"), logJson);
         }
 
@@ -296,6 +419,60 @@ namespace RFMapToolSharp.Export
                 "ZYX" => rz * ry * rx,
                 _ => rx * ry * rz
             };
+        }
+
+        private static bool IsFinite(Vector3 v)
+        {
+            return !(float.IsNaN(v.X) || float.IsInfinity(v.X) ||
+                     float.IsNaN(v.Y) || float.IsInfinity(v.Y) ||
+                     float.IsNaN(v.Z) || float.IsInfinity(v.Z));
+        }
+
+        private static bool IsFinite(Matrix4x4 m)
+        {
+            return IsFinite(m.M11) && IsFinite(m.M12) && IsFinite(m.M13) && IsFinite(m.M14) &&
+                   IsFinite(m.M21) && IsFinite(m.M22) && IsFinite(m.M23) && IsFinite(m.M24) &&
+                   IsFinite(m.M31) && IsFinite(m.M32) && IsFinite(m.M33) && IsFinite(m.M34) &&
+                   IsFinite(m.M41) && IsFinite(m.M42) && IsFinite(m.M43) && IsFinite(m.M44);
+        }
+
+        private static bool IsFinite(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
+
+        private static bool IsStretchedTriangle(Vector3 a, Vector3 b, Vector3 c, out float maxEdge, out float minEdge, out float area)
+        {
+            var ab = (b - a).Length();
+            var bc = (c - b).Length();
+            var ca = (a - c).Length();
+            maxEdge = MathF.Max(ab, MathF.Max(bc, ca));
+            minEdge = MathF.Min(ab, MathF.Min(bc, ca));
+            area = Vector3.Cross(b - a, c - a).Length() * 0.5f;
+
+            if (minEdge <= 0.0001f) return true;
+            var ratio = maxEdge / minEdge;
+            if (ratio > 120f) return true;
+            if (maxEdge > 5000f && area < 0.5f) return true;
+            return false;
+        }
+
+        private static bool IsUvAnomalyTriangle(Vector3 p1, Vector3 p2, Vector3 p3, Vector2 u1, Vector2 u2, Vector2 u3, out float worldMax, out float uvMax, out float uvRatio)
+        {
+            var w12 = (p2 - p1).Length();
+            var w23 = (p3 - p2).Length();
+            var w31 = (p1 - p3).Length();
+            worldMax = MathF.Max(w12, MathF.Max(w23, w31));
+            var worldMin = MathF.Min(w12, MathF.Min(w23, w31));
+
+            var t12 = (u2 - u1).Length();
+            var t23 = (u3 - u2).Length();
+            var t31 = (u1 - u3).Length();
+            uvMax = MathF.Max(t12, MathF.Max(t23, t31));
+            var uvMin = MathF.Min(t12, MathF.Min(t23, t31));
+
+            uvRatio = (uvMin > 1e-6f) ? uvMax / uvMin : float.PositiveInfinity;
+            if (worldMax < 0.001f) return false;
+            if (uvMax > 250f && worldMax < 300f) return true;
+            if (uvRatio > 400f && worldMin > 0.1f) return true;
+            return false;
         }
 
         private static Mesh CreateDebugCube(ModelRoot model)
