@@ -659,6 +659,291 @@ public sealed class BspFile
         File.WriteAllText(outputPath, json, Encoding.UTF8);
     }
 
+    public void WriteDonor89_92Diagnostics(string outputDir)
+    {
+        Directory.CreateDirectory(outputDir);
+
+        var mgRange = Enumerable.Range(89, 4).ToHashSet();
+        var traceAll = new List<object>();
+        var trace89_92 = new List<object>();
+        var faceVertices = new List<object>();
+        var indexStreams = new List<object>();
+        var triEmitted = new List<object>();
+        var planeMetrics = new List<object>();
+        var transformUsage = new List<object>();
+        var cornerSignature = new List<object>();
+        var triangleQuality = new List<object>();
+        var uvGradient = new List<object>();
+        var neighborEdges = new List<object>();
+        var neighborUniq = new HashSet<string>(StringComparer.Ordinal);
+
+        for (int mgId = 0; mgId < MatGroups.Count; mgId++)
+        {
+            var mg = MatGroups[mgId];
+            int functionId = ResolveFunctionId(mg);
+            uint fs = mg.FaceStartId;
+            uint fe = fs + mg.FaceNum;
+            int triCount = 0;
+
+            for (uint fId = fs; fId < fe && fId < Faces.Count; fId++)
+            {
+                var rf = Faces[(int)fId];
+                if (rf.VertexCount < 3) continue;
+                if ((uint)rf.VertexStartId + rf.VertexCount > VertexId.Count) continue;
+                triCount += rf.VertexCount - 2;
+            }
+
+            traceAll.Add(new
+            {
+                mg = mgId,
+                attr = mg.Attr,
+                objectId = mg.ObjectId,
+                mtlId = mg.MtlId,
+                faceStartId = fs,
+                faceNum = mg.FaceNum,
+                scale = mg.Scale,
+                pos = new[] { mg.Pos.X, mg.Pos.Y, mg.Pos.Z },
+                triangles = triCount
+            });
+
+            if (!mgRange.Contains(mgId)) continue;
+            transformUsage.Add(new { mg = mgId, transformApplied = false, mode = "viewer_raw" });
+            trace89_92.Add(new
+            {
+                mg = mgId,
+                attr = mg.Attr,
+                objectId = mg.ObjectId,
+                mtlId = mg.MtlId,
+                faceStartId = fs,
+                faceNum = mg.FaceNum,
+                scale = mg.Scale,
+                pos = new[] { mg.Pos.X, mg.Pos.Y, mg.Pos.Z },
+                triangles = triCount
+            });
+            indexStreams.Add(new { mg = mgId, faceStartId = fs, faceNum = mg.FaceNum, vertexIdCount = VertexId.Count });
+
+            uint minVid = uint.MaxValue;
+            uint maxVid = 0;
+
+            for (uint fId = fs; fId < fe && fId < Faces.Count; fId++)
+            {
+                var rf = Faces[(int)fId];
+                if (rf.VertexCount < 3) continue;
+                if ((uint)rf.VertexStartId + rf.VertexCount > VertexId.Count) continue;
+
+                var pts = new List<(float x, float y, float z, float u, float v, int vIdx, uint vid)>(rf.VertexCount);
+                for (int k = 0; k < rf.VertexCount; k++)
+                {
+                    int vIdx = (int)rf.VertexStartId + k;
+                    uint vid = VertexId[vIdx];
+                    minVid = Math.Min(minVid, vid);
+                    maxVid = Math.Max(maxVid, vid);
+                    var p = DecompressVertex(functionId, vid, mg);
+                    float u = vIdx < UV.Count ? UV[vIdx].X : 0f;
+                    float v = vIdx < UV.Count ? UV[vIdx].Y : 0f;
+                    pts.Add((p.X, p.Y, p.Z, u, v, vIdx, vid));
+                }
+
+                faceVertices.Add(new
+                {
+                    mg = mgId,
+                    faceIndex = fId,
+                    functionId,
+                    corners = pts.Select((p, idx) => new
+                    {
+                        corner = idx,
+                        vIdx = p.vIdx,
+                        vid = p.vid,
+                        pos = new[] { p.x, p.y, p.z },
+                        uv = new[] { p.u, p.v }
+                    }).ToArray()
+                });
+
+                float minX = pts.Min(p => p.x), minY = pts.Min(p => p.y), minZ = pts.Min(p => p.z);
+                float maxX = pts.Max(p => p.x), maxY = pts.Max(p => p.y), maxZ = pts.Max(p => p.z);
+                float minE = float.PositiveInfinity, maxE = 0f;
+                for (int i = 0; i < pts.Count; i++)
+                {
+                    var a = pts[i];
+                    var b = pts[(i + 1) % pts.Count];
+                    float dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+                    float e = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+                    minE = Math.Min(minE, e);
+                    maxE = Math.Max(maxE, e);
+                }
+
+                float signedArea = 0f;
+                for (int i = 0; i < pts.Count; i++)
+                {
+                    var a = pts[i];
+                    var b = pts[(i + 1) % pts.Count];
+                    signedArea += a.x * b.y - b.x * a.y;
+                }
+                cornerSignature.Add(new
+                {
+                    mg = mgId,
+                    faceIndex = fId,
+                    signedArea,
+                    isCW = signedArea < 0f,
+                    vidSequence = pts.Select(p => p.vid).ToArray()
+                });
+
+                float sumDuDs = 0f, sumDvDs = 0f;
+                int gradCnt = 0;
+                for (int i = 0; i < pts.Count; i++)
+                {
+                    var a = pts[i];
+                    var b = pts[(i + 1) % pts.Count];
+                    float dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+                    float ds = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+                    if (ds > 1e-6f)
+                    {
+                        sumDuDs += MathF.Abs(b.u - a.u) / ds;
+                        sumDvDs += MathF.Abs(b.v - a.v) / ds;
+                        gradCnt++;
+                    }
+
+                    uint mn = Math.Min(a.vid, b.vid);
+                    uint mx = Math.Max(a.vid, b.vid);
+                    string key = $"{mgId}|{mn}-{mx}";
+                    if (neighborUniq.Add(key))
+                        neighborEdges.Add(new { mg = mgId, faceIndex = fId, va = a.vid, vb = b.vid });
+                }
+                uvGradient.Add(new
+                {
+                    mg = mgId,
+                    faceIndex = fId,
+                    avgDuDs = gradCnt > 0 ? (sumDuDs / gradCnt) : 0f,
+                    avgDvDs = gradCnt > 0 ? (sumDvDs / gradCnt) : 0f
+                });
+
+                float planeMaxDist = 0f;
+                if (pts.Count >= 3)
+                {
+                    var p0 = pts[0];
+                    var p1 = pts[1];
+                    var p2 = pts[2];
+                    float ux = p1.x - p0.x, uy = p1.y - p0.y, uz = p1.z - p0.z;
+                    float vx = p2.x - p0.x, vy = p2.y - p0.y, vz = p2.z - p0.z;
+                    float nx = uy * vz - uz * vy;
+                    float ny = uz * vx - ux * vz;
+                    float nz = ux * vy - uy * vx;
+                    float nlen = MathF.Sqrt(nx * nx + ny * ny + nz * nz);
+                    if (nlen > 1e-8f)
+                    {
+                        nx /= nlen; ny /= nlen; nz /= nlen;
+                        for (int pi = 0; pi < pts.Count; pi++)
+                        {
+                            float dx = pts[pi].x - p0.x;
+                            float dy = pts[pi].y - p0.y;
+                            float dz = pts[pi].z - p0.z;
+                            planeMaxDist = Math.Max(planeMaxDist, MathF.Abs(dx * nx + dy * ny + dz * nz));
+                        }
+                    }
+                }
+                planeMetrics.Add(new
+                {
+                    mg = mgId,
+                    faceIndex = fId,
+                    functionId,
+                    cornerCount = pts.Count,
+                    bboxMin = new[] { minX, minY, minZ },
+                    bboxMax = new[] { maxX, maxY, maxZ },
+                    edgeRatio = minE > 1e-6f ? maxE / minE : 999999f,
+                    planeMaxDist
+                });
+
+                uint base0 = VertexId[(int)rf.VertexStartId];
+                for (int i = 1; i < rf.VertexCount - 1; i++)
+                {
+                    uint i1 = VertexId[(int)rf.VertexStartId + i];
+                    uint i2 = VertexId[(int)rf.VertexStartId + i + 1];
+                    triEmitted.Add(new { mg = mgId, faceIndex = fId, a = base0, b = i1, c = i2 });
+
+                    if (base0 < FVertices.Count && i1 < FVertices.Count && i2 < FVertices.Count)
+                    {
+                        var a = FVertices[(int)base0];
+                        var b = FVertices[(int)i1];
+                        var c = FVertices[(int)i2];
+                        float e1 = Dist(a, b), e2 = Dist(b, c), e3 = Dist(c, a);
+                        float triMin = Math.Min(e1, Math.Min(e2, e3));
+                        float triMax = Math.Max(e1, Math.Max(e2, e3));
+                        triangleQuality.Add(new
+                        {
+                            mg = mgId,
+                            faceIndex = fId,
+                            a = base0,
+                            b = i1,
+                            c = i2,
+                            edgeRatio = triMin > 1e-6f ? (triMax / triMin) : 999999f
+                        });
+                    }
+                }
+            }
+
+            if (minVid == uint.MaxValue) minVid = 0;
+            // append/update range payload in same structure as donor
+            // done at final write below
+            _ = (minVid, maxVid, mgId, functionId, fs, mg.FaceNum);
+        }
+
+        File.WriteAllText(Path.Combine(outputDir, "build_trace_all_matgroups.json"),
+            JsonSerializer.Serialize(new { matgroups = traceAll }, SafeJson), Encoding.UTF8);
+        File.WriteAllText(Path.Combine(outputDir, "build_trace_mg89_92.json"),
+            JsonSerializer.Serialize(new { matgroups = trace89_92 }, SafeJson), Encoding.UTF8);
+        File.WriteAllText(Path.Combine(outputDir, "mg_face_vertices_89_92.json"),
+            JsonSerializer.Serialize(new { faces = faceVertices }, SafeJson), Encoding.UTF8);
+        File.WriteAllText(Path.Combine(outputDir, "mg_face_index_stream_89_92.json"),
+            JsonSerializer.Serialize(new { streams = indexStreams }, SafeJson), Encoding.UTF8);
+        File.WriteAllText(Path.Combine(outputDir, "mg_triangles_emitted_89_92.json"),
+            JsonSerializer.Serialize(new { triangles = triEmitted }, SafeJson), Encoding.UTF8);
+        File.WriteAllText(Path.Combine(outputDir, "face_plane_metrics_89_92.json"),
+            JsonSerializer.Serialize(new { faces = planeMetrics }, SafeJson), Encoding.UTF8);
+        File.WriteAllText(Path.Combine(outputDir, "transform_usage_89_92.json"),
+            JsonSerializer.Serialize(new { matgroups = transformUsage }, SafeJson), Encoding.UTF8);
+        File.WriteAllText(Path.Combine(outputDir, "corner_order_signature_89_92.json"),
+            JsonSerializer.Serialize(new { faces = cornerSignature }, SafeJson), Encoding.UTF8);
+        File.WriteAllText(Path.Combine(outputDir, "triangle_quality_89_92.json"),
+            JsonSerializer.Serialize(new { triangles = triangleQuality }, SafeJson), Encoding.UTF8);
+        File.WriteAllText(Path.Combine(outputDir, "uv_gradient_89_92.json"),
+            JsonSerializer.Serialize(new { faces = uvGradient }, SafeJson), Encoding.UTF8);
+        File.WriteAllText(Path.Combine(outputDir, "face_neighbor_graph_89_92.json"),
+            JsonSerializer.Serialize(new { edges = neighborEdges }, SafeJson), Encoding.UTF8);
+
+        var ranges = new List<object>();
+        foreach (var mgId in Enumerable.Range(89, 4))
+        {
+            if (mgId < 0 || mgId >= MatGroups.Count) continue;
+            var mg = MatGroups[mgId];
+            uint fs = mg.FaceStartId;
+            uint fe = fs + mg.FaceNum;
+            int functionId = ResolveFunctionId(mg);
+            uint minVid = uint.MaxValue, maxVid = 0;
+            for (uint fId = fs; fId < fe && fId < Faces.Count; fId++)
+            {
+                var rf = Faces[(int)fId];
+                if (rf.VertexCount < 3) continue;
+                if ((uint)rf.VertexStartId + rf.VertexCount > VertexId.Count) continue;
+                for (int k = 0; k < rf.VertexCount; k++)
+                {
+                    uint vid = VertexId[(int)rf.VertexStartId + k];
+                    minVid = Math.Min(minVid, vid);
+                    maxVid = Math.Max(maxVid, vid);
+                }
+            }
+            if (minVid == uint.MaxValue) minVid = 0;
+            ranges.Add(new { mg = mgId, functionId, minVid, maxVid, faceStartId = fs, faceNum = mg.FaceNum });
+        }
+        File.WriteAllText(Path.Combine(outputDir, "vertex_pool_ranges.json"),
+            JsonSerializer.Serialize(new { counts = new { b = BVertices.Count, w = WVertices.Count, f = FVertices.Count }, matgroups = ranges }, SafeJson), Encoding.UTF8);
+
+        static float Dist(Vector3f a, Vector3f b)
+        {
+            float dx = a.X - b.X, dy = a.Y - b.Y, dz = a.Z - b.Z;
+            return MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+        }
+    }
+
     private void BuildObjectMatrices()
     {
         _aniMatrixCache.Clear();

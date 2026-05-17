@@ -494,6 +494,7 @@ class Program
                     RFMapToolSharp.Collision.BspFile.DonorFullPipelineMode = true;
                     donorScene.Bsp = RFMapToolSharp.Collision.BspFile.Load(bspPath);
                     GltfExporter.Export(donorScene, donorRootDir, "Sette_Donor");
+                    donorScene.Bsp?.WriteDonor89_92Diagnostics(donorRootDir);
                     RFMapToolSharp.Collision.BspFile.DonorFullPipelineMode = false;
                 }
                 try
