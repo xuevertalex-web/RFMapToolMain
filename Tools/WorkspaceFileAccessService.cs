@@ -30,11 +30,49 @@ public sealed record WorkspaceDirectoryListResult(
         new(false, reasonCode, Array.Empty<string>(), false, 0);
 }
 
+public sealed record WorkspaceFileSearchResult(
+    bool Success,
+    string ReasonCode,
+    IReadOnlyList<string> Matches,
+    bool Truncated,
+    int ResultCount,
+    int VisitedFiles,
+    int VisitedDirectories,
+    IReadOnlyList<string> BudgetsHit)
+{
+    public static WorkspaceFileSearchResult Allowed(
+        IReadOnlyList<string> matches,
+        bool truncated,
+        int visitedFiles,
+        int visitedDirectories,
+        IReadOnlyList<string> budgetsHit)
+    {
+        var reasonCode = truncated
+            ? "search_budget_exceeded"
+            : "allowed";
+        return new(
+            true,
+            reasonCode,
+            matches,
+            truncated,
+            matches.Count,
+            visitedFiles,
+            visitedDirectories,
+            budgetsHit);
+    }
+
+    public static WorkspaceFileSearchResult Denied(string reasonCode) =>
+        new(false, reasonCode, Array.Empty<string>(), false, 0, 0, 0, Array.Empty<string>());
+}
+
 public sealed class WorkspaceFileAccessService
 {
     public const int DefaultMaxTextBytes = 1024 * 1024;
     public const int DefaultMaxDirectoryEntries = 2000;
     public const int DefaultMaxRecursionDepth = 6;
+    public const int DefaultMaxVisitedFiles = 20000;
+    public const int DefaultMaxSearchResults = 500;
+    public const int DefaultMaxPatternLength = 256;
 
     private readonly string _approvedWorkspaceRoot;
     private readonly string _runtimeRoot;
@@ -224,6 +262,170 @@ public sealed class WorkspaceFileAccessService
         return WorkspaceDirectoryListResult.Allowed(entries, truncated);
     }
 
+    public WorkspaceFileSearchResult SearchFiles(
+        string? canonicalAuthorizedPath,
+        string? namePattern,
+        bool recursive = false,
+        int maxDepth = DefaultMaxRecursionDepth,
+        int maxVisitedFiles = DefaultMaxVisitedFiles,
+        int maxResults = DefaultMaxSearchResults,
+        string patternMode = "literal",
+        bool? caseSensitive = null,
+        int maxPatternLength = DefaultMaxPatternLength)
+    {
+        if (string.IsNullOrWhiteSpace(canonicalAuthorizedPath))
+            return WorkspaceFileSearchResult.Denied("search_path_unavailable");
+
+        string normalizedPath;
+        try
+        {
+            normalizedPath = NormalizeFullPath(Path.GetFullPath(canonicalAuthorizedPath));
+        }
+        catch
+        {
+            return WorkspaceFileSearchResult.Denied("path_normalization_failed");
+        }
+
+        if (IsRuntimeStatePath(normalizedPath))
+            return WorkspaceFileSearchResult.Denied("runtime_state_search_denied");
+
+        if (!Directory.Exists(normalizedPath))
+        {
+            if (File.Exists(normalizedPath))
+                return WorkspaceFileSearchResult.Denied("target_not_directory");
+            return WorkspaceFileSearchResult.Denied("target_directory_not_found");
+        }
+
+        var normalizedPattern = namePattern?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedPattern))
+            return WorkspaceFileSearchResult.Denied("search_pattern_invalid");
+
+        if (normalizedPattern.Length > Math.Max(1, maxPatternLength))
+            return WorkspaceFileSearchResult.Denied("search_pattern_invalid");
+
+        var normalizedMode = (patternMode ?? "literal").Trim().ToLowerInvariant();
+        if (normalizedMode is not ("literal" or "simple_glob"))
+            return WorkspaceFileSearchResult.Denied("search_pattern_invalid");
+
+        var useCaseSensitive = caseSensitive ?? !OperatingSystem.IsWindows();
+        var boundedMaxDepth = Math.Max(0, maxDepth);
+        var boundedMaxVisitedFiles = Math.Max(1, maxVisitedFiles);
+        var boundedMaxResults = Math.Max(1, maxResults);
+
+        var matches = new List<string>(Math.Min(64, boundedMaxResults));
+        var budgetsHit = new HashSet<string>(StringComparer.Ordinal);
+        var visitedFiles = 0;
+        var visitedDirectories = 0;
+        var truncated = false;
+
+        var workspacePathPolicy = new LocalCursorAgent.Security.WorkspacePathPolicy();
+        var policyRoots = new LocalCursorAgent.Security.WorkspacePathPolicyRoots
+        {
+            ApprovedWorkspaceRoot = _approvedWorkspaceRoot,
+            RuntimeRoot = _runtimeRoot,
+            ScratchRoot = Path.Combine(_approvedWorkspaceRoot, ".scratch"),
+            ArtifactOutputRoot = Path.Combine(_approvedWorkspaceRoot, ".artifacts")
+        };
+
+        try
+        {
+            var queue = new Queue<(string DirectoryPath, int Depth)>();
+            queue.Enqueue((normalizedPath, 0));
+
+            while (queue.Count > 0)
+            {
+                var (currentDirectory, depth) = queue.Dequeue();
+                visitedDirectories++;
+
+                IEnumerable<string> children = Directory.EnumerateFileSystemEntries(currentDirectory);
+                var orderedChildren = children
+                    .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(x => x, StringComparer.Ordinal);
+
+                foreach (var child in orderedChildren)
+                {
+                    var childName = Path.GetFileName(child);
+                    var childIsDirectory = Directory.Exists(child);
+                    var normalizedChild = NormalizeFullPath(Path.GetFullPath(child));
+
+                    if (childIsDirectory)
+                    {
+                        if (IsSkippedDirectoryName(childName))
+                            continue;
+
+                        if (recursive)
+                        {
+                            if (depth >= boundedMaxDepth)
+                            {
+                                truncated = true;
+                                budgetsHit.Add("max_depth");
+                                continue;
+                            }
+
+                            if (!IsReparsePointDirectory(child))
+                                queue.Enqueue((child, depth + 1));
+                        }
+
+                        continue;
+                    }
+
+                    if (visitedFiles >= boundedMaxVisitedFiles)
+                    {
+                        truncated = true;
+                        budgetsHit.Add("max_visited_files");
+                        break;
+                    }
+                    visitedFiles++;
+
+                    var candidateDecision = workspacePathPolicy.Evaluate(
+                        policyRoots,
+                        LocalCursorAgent.Security.WorkspaceRootKind.ApprovedWorkspace,
+                        LocalCursorAgent.Security.WorkspacePathOperationKind.List,
+                        normalizedChild);
+                    if (candidateDecision.Decision != LocalCursorAgent.Security.WorkspacePathDecisionKind.Allowed)
+                        continue;
+
+                    if (!NameMatchesPattern(childName, normalizedPattern, normalizedMode, useCaseSensitive))
+                        continue;
+
+                    var relative = ToWorkspaceRelativePath(normalizedChild);
+                    if (string.IsNullOrWhiteSpace(relative))
+                        continue;
+
+                    matches.Add(relative);
+                    if (matches.Count >= boundedMaxResults)
+                    {
+                        truncated = true;
+                        budgetsHit.Add("max_results");
+                        break;
+                    }
+                }
+
+                if (truncated && budgetsHit.Count > 0)
+                    break;
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return WorkspaceFileSearchResult.Denied("search_access_denied");
+        }
+        catch (IOException)
+        {
+            return WorkspaceFileSearchResult.Denied("search_io_unavailable");
+        }
+        catch
+        {
+            return WorkspaceFileSearchResult.Denied("search_io_unavailable");
+        }
+
+        return WorkspaceFileSearchResult.Allowed(
+            matches,
+            truncated,
+            visitedFiles,
+            visitedDirectories,
+            budgetsHit.OrderBy(x => x, StringComparer.Ordinal).ToArray());
+    }
+
     private bool IsRuntimeStatePath(string normalizedPath)
     {
         if (string.IsNullOrWhiteSpace(_approvedWorkspaceRoot))
@@ -298,6 +500,76 @@ public sealed class WorkspaceFileAccessService
 
     private static bool IsSkippedDirectoryName(string? name) =>
         !string.IsNullOrWhiteSpace(name) && DefaultSkippedDirectoryNames.Contains(name);
+
+    private string? ToWorkspaceRelativePath(string normalizedPath)
+    {
+        if (string.IsNullOrWhiteSpace(_approvedWorkspaceRoot))
+            return null;
+
+        if (!IsWithin(normalizedPath, _approvedWorkspaceRoot))
+            return null;
+
+        var relative = Path.GetRelativePath(_approvedWorkspaceRoot, normalizedPath);
+        if (string.IsNullOrWhiteSpace(relative) || relative == ".")
+            return null;
+
+        return relative
+            .Replace(Path.DirectorySeparatorChar, '/')
+            .Replace(Path.AltDirectorySeparatorChar, '/');
+    }
+
+    private static bool NameMatchesPattern(string fileName, string pattern, string mode, bool caseSensitive)
+    {
+        var comparison = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        return mode switch
+        {
+            "literal" => fileName.Contains(pattern, comparison),
+            "simple_glob" => WildcardMatch(fileName, pattern, caseSensitive),
+            _ => false
+        };
+    }
+
+    private static bool WildcardMatch(string candidate, string pattern, bool caseSensitive)
+    {
+        var text = caseSensitive ? candidate : candidate.ToUpperInvariant();
+        var mask = caseSensitive ? pattern : pattern.ToUpperInvariant();
+
+        var textIndex = 0;
+        var maskIndex = 0;
+        var starIndex = -1;
+        var matchIndex = 0;
+
+        while (textIndex < text.Length)
+        {
+            if (maskIndex < mask.Length && (mask[maskIndex] == '?' || mask[maskIndex] == text[textIndex]))
+            {
+                textIndex++;
+                maskIndex++;
+                continue;
+            }
+
+            if (maskIndex < mask.Length && mask[maskIndex] == '*')
+            {
+                starIndex = maskIndex++;
+                matchIndex = textIndex;
+                continue;
+            }
+
+            if (starIndex >= 0)
+            {
+                maskIndex = starIndex + 1;
+                textIndex = ++matchIndex;
+                continue;
+            }
+
+            return false;
+        }
+
+        while (maskIndex < mask.Length && mask[maskIndex] == '*')
+            maskIndex++;
+
+        return maskIndex == mask.Length;
+    }
 
     private static bool LooksBinary(byte[] bytes)
     {

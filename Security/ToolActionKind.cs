@@ -4,6 +4,7 @@ public enum ToolActionKind
 {
     ReadFile,
     ListDirectory,
+    SearchFiles,
     WriteFile,
     CreateFile,
     PatchFile,

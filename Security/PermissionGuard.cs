@@ -78,12 +78,15 @@ public sealed class PermissionGuard
             return WithCapability(PermissionDecision.Deny(PermissionReasonCode.PathNormalizationFailed, "Path normalization failed"));
         }
 
-        if (action.Kind is ToolActionKind.ReadFile or ToolActionKind.ListDirectory)
+        if (action.Kind is ToolActionKind.ReadFile or ToolActionKind.ListDirectory or ToolActionKind.SearchFiles)
         {
             var isListDirectory = action.Kind == ToolActionKind.ListDirectory;
+            var isSearchFiles = action.Kind == ToolActionKind.SearchFiles;
             if (string.IsNullOrWhiteSpace(normalizedTarget))
             {
-                var missingTargetReason = isListDirectory
+                var missingTargetReason = isSearchFiles
+                    ? "workspace_search_target_unavailable"
+                    : isListDirectory
                     ? "workspace_list_target_unavailable"
                     : "workspace_read_target_unavailable";
                 return WithCapability(PermissionDecision.Deny(PermissionReasonCode.PathNormalizationFailed, missingTargetReason));
@@ -91,7 +94,9 @@ public sealed class PermissionGuard
 
             if (IsRuntimeStatePathDenied(normalizedTarget, normalizedWorkspace, normalizedRuntimeRoot))
             {
-                var runtimeStateReason = isListDirectory
+                var runtimeStateReason = isSearchFiles
+                    ? "runtime_state_search_denied"
+                    : isListDirectory
                     ? "runtime_state_list_denied"
                     : "runtime_state_read_denied";
                 return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ToolDeniedByPolicy, runtimeStateReason, normalizedTarget, normalizedWorkspace));
@@ -108,13 +113,17 @@ public sealed class PermissionGuard
             var workspaceDecision = workspacePathPolicy.Evaluate(
                 workspaceRoots,
                 WorkspaceRootKind.ApprovedWorkspace,
-                isListDirectory ? WorkspacePathOperationKind.List : WorkspacePathOperationKind.Read,
+                (isListDirectory || isSearchFiles) ? WorkspacePathOperationKind.List : WorkspacePathOperationKind.Read,
                 normalizedTarget);
 
             if (workspaceDecision.Decision != WorkspacePathDecisionKind.Allowed)
             {
                 var mappedReason = MapWorkspacePathPolicyDeniedReason(workspaceDecision.ReasonCode);
-                var deniedPrefix = isListDirectory ? "workspace_list_denied" : "workspace_read_denied";
+                var deniedPrefix = isSearchFiles
+                    ? "workspace_search_denied"
+                    : isListDirectory
+                    ? "workspace_list_denied"
+                    : "workspace_read_denied";
                 return WithCapability(PermissionDecision.Deny(mappedReason, $"{deniedPrefix}:{workspaceDecision.ReasonCode}", normalizedTarget, normalizedWorkspace));
             }
 
@@ -197,21 +206,21 @@ public sealed class PermissionGuard
         if (normalizedDestination is not null && session.ProtectedPathPolicy.IsProtected(normalizedDestination) && !IsWithinExecutionWorkspace(normalizedDestination, session))
             return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ProtectedPathDenied, "Destination is protected", normalizedDestination, normalizedWorkspace));
 
-        if (action.Kind is not ToolActionKind.ReadFile and not ToolActionKind.ListDirectory &&
+        if (action.Kind is not ToolActionKind.ReadFile and not ToolActionKind.ListDirectory and not ToolActionKind.SearchFiles &&
             normalizedTarget is not null &&
             PathSafetyPolicy.ContainsReparsePoint(normalizedTarget))
         {
             return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ReparsePointDenied, "Target path contains a reparse point", normalizedTarget, normalizedWorkspace));
         }
 
-        if (action.Kind is not ToolActionKind.ReadFile and not ToolActionKind.ListDirectory &&
+        if (action.Kind is not ToolActionKind.ReadFile and not ToolActionKind.ListDirectory and not ToolActionKind.SearchFiles &&
             normalizedSource is not null &&
             PathSafetyPolicy.ContainsReparsePoint(normalizedSource))
         {
             return WithCapability(PermissionDecision.Deny(PermissionReasonCode.ReparsePointDenied, "Source path contains a reparse point", normalizedSource, normalizedWorkspace));
         }
 
-        if (action.Kind is not ToolActionKind.ReadFile and not ToolActionKind.ListDirectory &&
+        if (action.Kind is not ToolActionKind.ReadFile and not ToolActionKind.ListDirectory and not ToolActionKind.SearchFiles &&
             normalizedDestination is not null &&
             PathSafetyPolicy.ContainsReparsePoint(normalizedDestination))
         {
@@ -593,6 +602,7 @@ public sealed class PermissionGuard
         {
             ToolActionKind.ReadFile => "Reads file content from the specified target path.",
             ToolActionKind.ListDirectory => "Lists directory entries from the specified target path.",
+            ToolActionKind.SearchFiles => "Searches file names under the specified target path.",
             ToolActionKind.WriteFile => "Writes content to the specified target path.",
             ToolActionKind.CreateFile => "Creates a new file at the specified target path.",
             ToolActionKind.DeleteFile => "Deletes the specified file path.",

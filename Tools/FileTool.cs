@@ -11,7 +11,7 @@ namespace LocalCursorAgent.Tools
     public class FileTool : ITool
     {
         public string Name => "file";
-        public string Description => "Read/list/write/delete/rename/move files. Format: 'read:<path>', 'list:<path>', 'list:recursive:<path>', 'write:<path>:<content>', 'delete:<path>', 'rename:<source>:<destination>', 'move:<source>:<destination>'";
+        public string Description => "Read/list/search/write/delete/rename/move files. Format: 'read:<path>', 'list:<path>', 'list:recursive:<path>', 'search:<path>:<namePattern>[:recursive=true][:patternMode=literal|simple_glob][:caseSensitive=true|false][:maxDepth=N][:maxVisitedFiles=N][:maxResults=N]', 'write:<path>:<content>', 'delete:<path>', 'rename:<source>:<destination>', 'move:<source>:<destination>'";
 
         private readonly AgentSessionContext _session;
         private readonly PermissionGuard _permissionGuard;
@@ -47,6 +47,9 @@ namespace LocalCursorAgent.Tools
             if (input.StartsWith("list:", StringComparison.OrdinalIgnoreCase))
                 return await ListDirectory(input.Substring(5));
 
+            if (input.StartsWith("search:", StringComparison.OrdinalIgnoreCase))
+                return await SearchFiles(input.Substring(7));
+
             if (input.StartsWith("write:", StringComparison.OrdinalIgnoreCase))
                 return await WriteFileCommand(input.Substring(6));
 
@@ -59,7 +62,7 @@ namespace LocalCursorAgent.Tools
             if (input.StartsWith("move:", StringComparison.OrdinalIgnoreCase))
                 return await RenameOrMove(input.Substring(5), isMove: true);
 
-            return "Error: Unknown command. Use 'read', 'list', 'write', 'delete', 'rename', or 'move'";
+            return "Error: Unknown command. Use 'read', 'list', 'search', 'write', 'delete', 'rename', or 'move'";
         }
 
         private Task<string> ReadFile(string path)
@@ -135,6 +138,61 @@ namespace LocalCursorAgent.Tools
                 : string.Join(Environment.NewLine, listResult.Entries);
             if (listResult.Truncated)
                 content = $"{content}{Environment.NewLine}{Environment.NewLine}[list_truncated]";
+            return Task.FromResult(content);
+        }
+
+        private Task<string> SearchFiles(string payload)
+        {
+            if (!TryParseSearchRequest(payload, out var request, out var parseReasonCode))
+                return Task.FromResult($"DENIED [{parseReasonCode}]: {parseReasonCode}");
+
+            if (!string.IsNullOrWhiteSpace(request.ContentPattern))
+                return Task.FromResult("DENIED [search_content_not_supported]: search_content_not_supported");
+
+            var action = new ToolAction
+            {
+                Kind = ToolActionKind.SearchFiles,
+                TargetPath = ResolvePath(request.TargetPath)
+            };
+
+            var decision = _permissionGuard.Evaluate(_session, action);
+            if (!decision.Allowed)
+                return Task.FromResult(FormatDenied(decision));
+
+            var searchResult = _workspaceFileAccessService.SearchFiles(
+                decision.NormalizedTargetPath ?? action.TargetPath,
+                request.NamePattern,
+                request.Recursive,
+                request.MaxDepth,
+                request.MaxVisitedFiles,
+                request.MaxResults,
+                request.PatternMode,
+                request.CaseSensitive,
+                request.MaxPatternLength);
+
+            if (!searchResult.Success)
+                return Task.FromResult($"DENIED [{searchResult.ReasonCode}]: {searchResult.ReasonCode}");
+
+            _tracer?.LogActionEvent("FileAction", "FileTool", ExecutionTracer.ActionLogLevel.Info, "completed", metadata: new Dictionary<string, object?>
+            {
+                { "operation", "search" },
+                { "requested_path", request.TargetPath },
+                { "normalized_path", action.TargetPath! },
+                { "pattern_mode", request.PatternMode },
+                { "recursive", request.Recursive },
+                { "result_count", searchResult.ResultCount },
+                { "visited_files", searchResult.VisitedFiles },
+                { "visited_directories", searchResult.VisitedDirectories },
+                { "truncated", searchResult.Truncated },
+                { "search_reason_code", searchResult.ReasonCode },
+                { "budgets_hit", searchResult.BudgetsHit.ToArray() }
+            });
+
+            var content = searchResult.Matches.Count == 0
+                ? "(no matches)"
+                : string.Join(Environment.NewLine, searchResult.Matches);
+            if (searchResult.Truncated)
+                content = $"{content}{Environment.NewLine}{Environment.NewLine}[search_truncated]";
             return Task.FromResult(content);
         }
 
@@ -428,6 +486,132 @@ namespace LocalCursorAgent.Tools
 
             return payload.IndexOf(':');
         }
+
+        private static bool TryParseSearchRequest(string payload, out SearchFilesRequest request, out string reasonCode)
+        {
+            request = default!;
+            reasonCode = "search_pattern_invalid";
+
+            if (string.IsNullOrWhiteSpace(payload))
+                return false;
+
+            var firstSeparator = FindCommandSeparator(payload);
+            if (firstSeparator < 0)
+                return false;
+
+            var targetPath = payload[..firstSeparator].Trim();
+            var remainder = payload[(firstSeparator + 1)..].Trim();
+            if (string.IsNullOrWhiteSpace(targetPath) || string.IsNullOrWhiteSpace(remainder))
+                return false;
+
+            var segments = remainder.Split(':', StringSplitOptions.None);
+            if (segments.Length == 0)
+                return false;
+
+            var namePattern = segments[0].Trim();
+            if (string.IsNullOrWhiteSpace(namePattern))
+                return false;
+
+            var recursive = false;
+            var maxDepth = WorkspaceFileAccessService.DefaultMaxRecursionDepth;
+            var maxVisitedFiles = WorkspaceFileAccessService.DefaultMaxVisitedFiles;
+            var maxResults = WorkspaceFileAccessService.DefaultMaxSearchResults;
+            var patternMode = "literal";
+            bool? caseSensitive = null;
+            var contentPattern = string.Empty;
+
+            for (var i = 1; i < segments.Length; i++)
+            {
+                var option = segments[i].Trim();
+                if (string.IsNullOrWhiteSpace(option))
+                    continue;
+
+                var eq = option.IndexOf('=');
+                if (eq <= 0 || eq >= option.Length - 1)
+                    return false;
+
+                var key = option[..eq].Trim();
+                var value = option[(eq + 1)..].Trim();
+                if (string.IsNullOrWhiteSpace(key))
+                    return false;
+
+                if (key.Equals("recursive", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!bool.TryParse(value, out recursive))
+                        return false;
+                    continue;
+                }
+
+                if (key.Equals("maxDepth", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!int.TryParse(value, out maxDepth))
+                        return false;
+                    continue;
+                }
+
+                if (key.Equals("maxVisitedFiles", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!int.TryParse(value, out maxVisitedFiles))
+                        return false;
+                    continue;
+                }
+
+                if (key.Equals("maxResults", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!int.TryParse(value, out maxResults))
+                        return false;
+                    continue;
+                }
+
+                if (key.Equals("patternMode", StringComparison.OrdinalIgnoreCase))
+                {
+                    patternMode = value;
+                    continue;
+                }
+
+                if (key.Equals("caseSensitive", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!bool.TryParse(value, out var parsedCaseSensitive))
+                        return false;
+                    caseSensitive = parsedCaseSensitive;
+                    continue;
+                }
+
+                if (key.Equals("contentPattern", StringComparison.OrdinalIgnoreCase))
+                {
+                    contentPattern = value;
+                    continue;
+                }
+
+                return false;
+            }
+
+            request = new SearchFilesRequest(
+                targetPath,
+                namePattern,
+                recursive,
+                maxDepth,
+                maxVisitedFiles,
+                maxResults,
+                patternMode,
+                caseSensitive,
+                WorkspaceFileAccessService.DefaultMaxPatternLength,
+                contentPattern);
+            reasonCode = "allowed";
+            return true;
+        }
+
+        private sealed record SearchFilesRequest(
+            string TargetPath,
+            string NamePattern,
+            bool Recursive,
+            int MaxDepth,
+            int MaxVisitedFiles,
+            int MaxResults,
+            string PatternMode,
+            bool? CaseSensitive,
+            int MaxPatternLength,
+            string ContentPattern);
 
         private static string DecodeEscapedNewlines(string content)
         {

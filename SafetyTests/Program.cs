@@ -63,6 +63,7 @@ RunWorkspacePathPolicyFoundationRegression();
 await RunWorkspacePathPolicyReparseContainmentRegression();
 await RunWorkspaceReadFileIntegrationRegression();
 await RunWorkspaceListDirectoryIntegrationRegression();
+await RunWorkspaceSearchFilesIntegrationRegression();
 await RunRuntimeGpuDiagnosticsTruthfulReportingRegression();
 await RunDestructiveFileApprovalMarkerRegression();
 await RunGuardedToolExplicitApprovalHandoffRegression();
@@ -3669,6 +3670,315 @@ static async Task RunWorkspaceListDirectoryIntegrationRegression()
     {
         TryDeleteDirectoryLink(Path.Combine(workspaceRoot, "list-link-out"));
         TryDeleteDirectoryLink(Path.Combine(workspaceRoot, "list-link-in"));
+        if (Directory.Exists(tempRoot))
+            Directory.Delete(tempRoot, recursive: true);
+    }
+}
+
+static async Task RunWorkspaceSearchFilesIntegrationRegression()
+{
+    static async Task<bool> TryCreateWindowsJunctionAsync(string linkPath, string targetPath)
+    {
+        try
+        {
+            if (Directory.Exists(linkPath))
+                Directory.Delete(linkPath, recursive: true);
+
+            var mklink = new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            mklink.ArgumentList.Add("/c");
+            mklink.ArgumentList.Add("mklink");
+            mklink.ArgumentList.Add("/J");
+            mklink.ArgumentList.Add(linkPath);
+            mklink.ArgumentList.Add(targetPath);
+
+            using var p = Process.Start(mklink);
+            if (p is null)
+                return false;
+            await p.WaitForExitAsync();
+            return p.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
+    {
+        try
+        {
+            if (Directory.Exists(linkPath))
+                Directory.Delete(linkPath, recursive: true);
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static void TryDeleteDirectoryLink(string linkPath)
+    {
+        if (!Directory.Exists(linkPath))
+            return;
+
+        try
+        {
+            Directory.Delete(linkPath, recursive: false);
+            return;
+        }
+        catch
+        {
+        }
+
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        try
+        {
+            var deleteLink = new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            deleteLink.ArgumentList.Add("/c");
+            deleteLink.ArgumentList.Add("rmdir");
+            deleteLink.ArgumentList.Add(linkPath);
+            using var p = Process.Start(deleteLink);
+            p?.WaitForExit();
+        }
+        catch
+        {
+        }
+    }
+
+    static IReadOnlyList<string> ExtractSearchMatches(string output)
+    {
+        return output
+            .Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None)
+            .Select(x => x.Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Where(x => !x.Equals("(no matches)", StringComparison.Ordinal))
+            .Where(x => !x.Equals("[search_truncated]", StringComparison.Ordinal))
+            .ToArray();
+    }
+
+    var tempRoot = Path.Combine(Path.GetTempPath(), "LcaWorkspaceSearchIntegration_" + Guid.NewGuid().ToString("N"));
+    var workspaceRoot = Path.Combine(tempRoot, "workspace");
+    var runtimeRoot = Path.Combine(tempRoot, "runtime");
+    var outsideRoot = Path.Combine(tempRoot, "outside");
+    Directory.CreateDirectory(workspaceRoot);
+    Directory.CreateDirectory(runtimeRoot);
+    Directory.CreateDirectory(outsideRoot);
+
+    try
+    {
+        var normalDir = Path.Combine(workspaceRoot, "normal");
+        Directory.CreateDirectory(Path.Combine(normalDir, "nested"));
+        await File.WriteAllTextAsync(Path.Combine(normalDir, "inside.txt"), "inside-ok");
+        await File.WriteAllTextAsync(Path.Combine(normalDir, "InsideCase.log"), "case-ok");
+        await File.WriteAllTextAsync(Path.Combine(normalDir, "nested", "inner.txt"), "inner");
+
+        var treeDir = Path.Combine(workspaceRoot, "tree");
+        Directory.CreateDirectory(Path.Combine(treeDir, "sub1", "sub2"));
+        await File.WriteAllTextAsync(Path.Combine(treeDir, "alpha.txt"), "a");
+        await File.WriteAllTextAsync(Path.Combine(treeDir, "sub1", "beta.txt"), "b");
+        await File.WriteAllTextAsync(Path.Combine(treeDir, "sub1", "sub2", "deep.txt"), "c");
+        Directory.CreateDirectory(Path.Combine(treeDir, "node_modules"));
+        await File.WriteAllTextAsync(Path.Combine(treeDir, "node_modules", "skip-me.txt"), "skip");
+        Directory.CreateDirectory(Path.Combine(treeDir, ".git"));
+        await File.WriteAllTextAsync(Path.Combine(treeDir, ".git", "skip-me.txt"), "skip");
+
+        var bigDir = Path.Combine(workspaceRoot, "big");
+        Directory.CreateDirectory(bigDir);
+        for (var i = 0; i < 240; i++)
+            await File.WriteAllTextAsync(Path.Combine(bigDir, $"item-{i:D4}.txt"), "x");
+
+        var runtimeLedger = Path.Combine(runtimeRoot, "approval-ledger.jsonl");
+        await File.WriteAllTextAsync(runtimeLedger, "{\"runtime\":true}");
+        var workspaceRuntimeDir = Path.Combine(workspaceRoot, ".agent-runtime");
+        Directory.CreateDirectory(workspaceRuntimeDir);
+        await File.WriteAllTextAsync(Path.Combine(workspaceRuntimeDir, "agent.jsonl"), "{\"runtime\":true}");
+
+        var outsideFile = Path.Combine(outsideRoot, "outside-hit.txt");
+        await File.WriteAllTextAsync(outsideFile, "outside");
+
+        var insideTargetDir = Path.Combine(workspaceRoot, "inside-search-target");
+        Directory.CreateDirectory(insideTargetDir);
+        await File.WriteAllTextAsync(Path.Combine(insideTargetDir, "inside-link-match.txt"), "ok");
+
+        var session = new AgentSessionContext
+        {
+            SessionId = Guid.NewGuid().ToString("N"),
+            RuntimeRoot = runtimeRoot,
+            ActiveWorkspaceRoot = workspaceRoot,
+            AccessMode = AgentAccessMode.WorkspaceWrite,
+            ProtectedPathPolicy = new ProtectedPathPolicy(new[] { runtimeRoot })
+        };
+
+        var guard = new PermissionGuard();
+        var tracer = new ExecutionTracer(runtimeRoot);
+        var sandbox = new SandboxManager(workspaceRoot, runtimeRoot);
+        var patchGate = new PatchSafetyGate(session, guard, tracer);
+        var destructiveGate = new DestructiveOperationSafetyGate(session, guard, tracer);
+        var fileTool = new FileTool(session, guard, patchGate, destructiveGate, sandbox, tracer);
+
+        var literalSearch = await fileTool.Execute("search:normal:inside");
+        var literalMatches = ExtractSearchMatches(literalSearch);
+        AssertTrue(literalMatches.Any(x => string.Equals(x, "normal/inside.txt", StringComparison.Ordinal)), "Expected literal search to match file name.");
+
+        var globSearch = await fileTool.Execute("search:normal:*.txt:recursive=true:patternMode=simple_glob");
+        var globMatches = ExtractSearchMatches(globSearch);
+        AssertTrue(globMatches.Any(x => string.Equals(x, "normal/inside.txt", StringComparison.Ordinal)), "Expected glob search to match txt file.");
+        AssertTrue(globMatches.Any(x => string.Equals(x, "normal/nested/inner.txt", StringComparison.Ordinal)), "Expected recursive glob search to match nested txt file.");
+
+        var outsideSearch = await fileTool.Execute($"search:{outsideRoot}:outside");
+        AssertTrue(outsideSearch.StartsWith($"DENIED [{PermissionReasonCodes.AccessDeniedOutsideWorkspace}]", StringComparison.Ordinal), "Expected outside search to be denied.");
+        AssertTrue(!outsideSearch.Contains(outsideRoot, StringComparison.OrdinalIgnoreCase), "Denied outside search must not leak raw path.");
+
+        var runtimeSearch = await fileTool.Execute($"search:{runtimeRoot}:ledger");
+        AssertTrue(runtimeSearch.StartsWith($"DENIED [{PermissionReasonCodes.ToolDeniedByPolicy}]", StringComparison.Ordinal), "Expected runtime-root search to be denied.");
+        AssertTrue(runtimeSearch.Contains("runtime_state_search_denied", StringComparison.Ordinal), "Expected deterministic runtime search deny label.");
+        AssertTrue(!runtimeSearch.Contains(runtimeRoot, StringComparison.OrdinalIgnoreCase), "Runtime search denial must not leak runtime root path.");
+
+        var runtimeWorkspaceSearch = await fileTool.Execute("search:.agent-runtime:agent");
+        AssertTrue(runtimeWorkspaceSearch.StartsWith($"DENIED [{PermissionReasonCodes.ToolDeniedByPolicy}]", StringComparison.Ordinal), "Expected workspace runtime search to be denied.");
+        AssertTrue(runtimeWorkspaceSearch.Contains("runtime_state_search_denied", StringComparison.Ordinal), "Expected deterministic .agent-runtime search deny label.");
+
+        var unsupportedContentSearch = await fileTool.Execute("search:normal:inside:contentPattern=inside");
+        AssertTrue(unsupportedContentSearch.StartsWith("DENIED [search_content_not_supported]", StringComparison.Ordinal), "Expected unsupported content search to be denied deterministically.");
+
+        var tooLongPattern = new string('x', WorkspaceFileAccessService.DefaultMaxPatternLength + 1);
+        var invalidPatternSearch = await fileTool.Execute($"search:normal:{tooLongPattern}");
+        AssertTrue(invalidPatternSearch.StartsWith("DENIED [search_pattern_invalid]", StringComparison.Ordinal), "Expected too-long pattern to be denied.");
+
+        var invalidModeSearch = await fileTool.Execute("search:normal:inside:patternMode=regex");
+        AssertTrue(invalidModeSearch.StartsWith("DENIED [search_pattern_invalid]", StringComparison.Ordinal), "Expected unsupported regex mode to be denied.");
+
+        var skipHeavySearch = await fileTool.Execute("search:tree:skip-me:recursive=true");
+        AssertTrue(string.Equals(skipHeavySearch, "(no matches)", StringComparison.Ordinal), "Expected skipped heavy directories to be excluded from search results.");
+
+        var service = new WorkspaceFileAccessService(workspaceRoot, runtimeRoot);
+        var resultsBounded = service.SearchFiles(
+            bigDir,
+            "item",
+            recursive: true,
+            maxDepth: 6,
+            maxVisitedFiles: 5000,
+            maxResults: 5,
+            patternMode: "literal");
+        AssertTrue(resultsBounded.Success, "Expected bounded max-results search to succeed.");
+        AssertTrue(resultsBounded.Truncated, "Expected max-results budget to truncate.");
+        AssertTrue(resultsBounded.ResultCount == 5, "Expected deterministic max-results count.");
+        AssertTrue(resultsBounded.BudgetsHit.Contains("max_results", StringComparer.Ordinal), "Expected max_results budget hit.");
+
+        var visitedBounded = service.SearchFiles(
+            bigDir,
+            "item",
+            recursive: true,
+            maxDepth: 6,
+            maxVisitedFiles: 10,
+            maxResults: 200,
+            patternMode: "literal");
+        AssertTrue(visitedBounded.Success, "Expected visited-files bounded search to succeed.");
+        AssertTrue(visitedBounded.Truncated, "Expected visited-files budget truncation.");
+        AssertTrue(visitedBounded.BudgetsHit.Contains("max_visited_files", StringComparer.Ordinal), "Expected max_visited_files budget hit.");
+
+        var depthBounded = service.SearchFiles(
+            treeDir,
+            "deep",
+            recursive: true,
+            maxDepth: 0,
+            maxVisitedFiles: 1000,
+            maxResults: 100,
+            patternMode: "literal");
+        AssertTrue(depthBounded.Success, "Expected depth bounded search to succeed.");
+        AssertTrue(depthBounded.Truncated, "Expected depth budget truncation.");
+        AssertTrue(depthBounded.BudgetsHit.Contains("max_depth", StringComparer.Ordinal), "Expected max_depth budget hit.");
+
+        var recursiveSearch = await fileTool.Execute("search:tree:*.txt:recursive=true:patternMode=simple_glob:maxResults=100");
+        var recursiveMatches = ExtractSearchMatches(recursiveSearch);
+        AssertTrue(recursiveMatches.All(x => !Path.IsPathFullyQualified(x)), "Expected search matches to be relative paths.");
+        AssertTrue(recursiveMatches.All(x => !x.Contains(workspaceRoot, StringComparison.OrdinalIgnoreCase)), "Expected no absolute workspace path leak in search matches.");
+
+        var defaultCaseSearch = await fileTool.Execute("search:normal:insidecase");
+        var defaultCaseMatches = ExtractSearchMatches(defaultCaseSearch);
+        if (OperatingSystem.IsWindows())
+            AssertTrue(defaultCaseMatches.Any(x => string.Equals(x, "normal/InsideCase.log", StringComparison.Ordinal)), "Expected default case-insensitive search on Windows.");
+        else
+            AssertTrue(defaultCaseMatches.Count == 0, "Expected default case-sensitive search on non-Windows.");
+
+        var explicitCaseSearch = await fileTool.Execute("search:normal:insidecase:caseSensitive=true");
+        var explicitCaseMatches = ExtractSearchMatches(explicitCaseSearch);
+        AssertTrue(explicitCaseMatches.Count == 0, "Expected explicit case-sensitive search to reject case-mismatched pattern.");
+
+        var linkOutside = Path.Combine(workspaceRoot, "search-link-out");
+        var linkInside = Path.Combine(workspaceRoot, "search-link-in");
+        bool outsideLinkCreated;
+        bool insideLinkCreated;
+        if (OperatingSystem.IsWindows())
+        {
+            outsideLinkCreated = await TryCreateWindowsJunctionAsync(linkOutside, outsideRoot);
+            insideLinkCreated = await TryCreateWindowsJunctionAsync(linkInside, insideTargetDir);
+        }
+        else
+        {
+            outsideLinkCreated = TryCreateDirectorySymlink(linkOutside, outsideRoot);
+            insideLinkCreated = TryCreateDirectorySymlink(linkInside, insideTargetDir);
+        }
+
+        if (outsideLinkCreated)
+        {
+            var escapeDenied = await fileTool.Execute("search:search-link-out:outside-hit");
+            AssertTrue(escapeDenied.StartsWith($"DENIED [{PermissionReasonCodes.AccessDeniedOutsideWorkspace}]", StringComparison.Ordinal), "Expected search via escaping reparse target to be denied.");
+        }
+        else
+        {
+            Console.WriteLine("PASS WorkspaceSearchFilesIntegrationRegression (note: outside reparse link unavailable, escape assertions skipped)");
+        }
+
+        if (insideLinkCreated)
+        {
+            var insideViaLink = await fileTool.Execute("search:search-link-in:inside-link-match");
+            var insideViaLinkMatches = ExtractSearchMatches(insideViaLink);
+            AssertTrue(insideViaLinkMatches.Any(x => string.Equals(x, "search-link-in/inside-link-match.txt", StringComparison.Ordinal)), "Expected inside-root reparse search to remain allowed.");
+        }
+        else
+        {
+            Console.WriteLine("PASS WorkspaceSearchFilesIntegrationRegression (note: inside reparse link unavailable, inside-link assertions skipped)");
+        }
+
+        var readInside = await fileTool.Execute("read:normal/inside.txt");
+        AssertTrue(string.Equals(readInside, "inside-ok", StringComparison.Ordinal), "Expected ReadFile behavior unchanged.");
+
+        var listInside = await fileTool.Execute("list:normal");
+        AssertTrue(listInside.Contains("inside.txt", StringComparison.Ordinal), "Expected ListDirectory behavior unchanged.");
+
+        var mutationDecision = guard.Evaluate(session, new ToolAction
+        {
+            Kind = ToolActionKind.WriteFile,
+            TargetPath = Path.Combine(workspaceRoot, "mutation-check-search.txt"),
+            Payload = "ok"
+        });
+        AssertTrue(mutationDecision.Allowed, "Expected mutation behavior to remain unchanged.");
+
+        Console.WriteLine("PASS WorkspaceSearchFilesIntegrationRegression");
+    }
+    finally
+    {
+        TryDeleteDirectoryLink(Path.Combine(workspaceRoot, "search-link-out"));
+        TryDeleteDirectoryLink(Path.Combine(workspaceRoot, "search-link-in"));
         if (Directory.Exists(tempRoot))
             Directory.Delete(tempRoot, recursive: true);
     }
