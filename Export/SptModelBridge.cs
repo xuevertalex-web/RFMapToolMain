@@ -6,6 +6,7 @@ using System.Numerics;
 using SharpGLTF.Geometry;
 using SharpGLTF.Geometry.VertexTypes;
 using SharpGLTF.Schema2;
+using SharpGLTF.Materials;
 
 namespace RFMapToolSharp.Export;
 
@@ -105,4 +106,3 @@ internal static class SptModelBridge
         return true;
     }
 }
-
