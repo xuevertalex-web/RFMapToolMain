@@ -24,7 +24,7 @@ namespace RFMapToolSharp.Export
     {
         public sealed class SptExportOptions
         {
-            public string Mode { get; set; } = "markers"; // off|markers
+            public string Mode { get; set; } = "markers"; // off|markers|real-if-supported
             public bool PivotFix { get; set; } = true;
             public string RotationOrder { get; set; } = "XYZ"; // XYZ|XZY|YXZ|YZX|ZXY|ZYX
             public float ScaleMultiplier { get; set; } = 1.0f;
@@ -195,8 +195,18 @@ namespace RFMapToolSharp.Export
                 {
                     var pos = new Vector3(obj.Position.X, mirrorY ? -obj.Position.Y : obj.Position.Y, obj.Position.Z);
                     var node = gltfScene.CreateNode(obj.ModelName);
-                    
+                    bool usedRealMesh = false;
                     node.Mesh = debugMesh;
+                    if (string.Equals(SptOptions.Mode, "real-if-supported", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var resolved = ResolveModelPath(mapRootPath, obj.ModelName);
+                        if (resolved != null)
+                        {
+                            // Current project has no RF MOD/MSH parser yet.
+                            // We only mark resolved path and keep marker mesh for now.
+                            usedRealMesh = true;
+                        }
+                    }
 
                     var objScale = obj.Scale == Vector3.Zero ? Vector3.One : obj.Scale;
                     objScale *= SptOptions.ScaleMultiplier;
@@ -217,6 +227,8 @@ namespace RFMapToolSharp.Export
                     {
                         SourceFile = file,
                         obj.ModelName,
+                        UsedRealMesh = usedRealMesh,
+                        ResolvedModelPath = ResolveModelPath(mapRootPath, obj.ModelName),
                         obj.Position,
                         obj.Rotation,
                         Scale = objScale,
@@ -231,6 +243,31 @@ namespace RFMapToolSharp.Export
             Console.WriteLine($"[SPT] Created markers: {count}");
             var logJson = System.Text.Json.JsonSerializer.Serialize(resolveLog, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(Path.Combine(exportDir, "spt_resolve_log.json"), logJson);
+        }
+
+        private static string? ResolveModelPath(string mapRootPath, string modelName)
+        {
+            if (string.IsNullOrWhiteSpace(modelName)) return null;
+            var name = modelName.Trim().Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
+            var exts = new[] { ".msh", ".mod", ".obj", ".fbx", ".glb", ".gltf" };
+            var roots = new[]
+            {
+                mapRootPath,
+                Path.Combine(mapRootPath, "Spt"),
+                Directory.GetParent(mapRootPath)?.FullName ?? mapRootPath
+            }.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+            foreach (var root in roots)
+            {
+                foreach (var ext in exts)
+                {
+                    var p1 = Path.Combine(root, name + ext);
+                    if (File.Exists(p1)) return p1;
+                    var p2 = Path.Combine(root, Path.GetFileName(name) + ext);
+                    if (File.Exists(p2)) return p2;
+                }
+            }
+            return null;
         }
 
         private static Matrix4x4 BuildRotation(Vector3 r, string order)
