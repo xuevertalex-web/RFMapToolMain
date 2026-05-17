@@ -491,10 +491,10 @@ class Program
                         MaterialFile = scene.MaterialFile,
                         Textures = scene.Textures
                     };
-                    RFMapToolSharp.Collision.BspFile.SetteDonorPathMode = true;
+                    RFMapToolSharp.Collision.BspFile.DonorFullPipelineMode = true;
                     donorScene.Bsp = RFMapToolSharp.Collision.BspFile.Load(bspPath);
                     GltfExporter.Export(donorScene, donorRootDir, "Sette_Donor");
-                    RFMapToolSharp.Collision.BspFile.SetteDonorPathMode = false;
+                    RFMapToolSharp.Collision.BspFile.DonorFullPipelineMode = false;
                 }
                 try
                 {
@@ -502,12 +502,7 @@ class Program
                     scene.Bsp?.WriteObjectMatricesReport(Path.Combine(targetDir, "object_matrices.json"));
                     scene.Bsp?.WriteAnimatedObjectsReport(Path.Combine(targetDir, "animated_objects.json"));
                     scene.Bsp?.WriteMatGroupDebugReport(Path.Combine(targetDir, "matgroup_debug.json"));
-                    if (setteDonorPath && string.Equals(mapName, "Sette", StringComparison.OrdinalIgnoreCase))
-                    {
-                        donorScene?.Bsp?.WriteMg91BorderStitchLog(Path.Combine(exportRoot, "Sette_Donor", "mg91_border_stitch_log.json"));
-                        donorScene?.Bsp?.WriteMg91DonorInjectionReport(Path.Combine(exportRoot, "Sette_Donor", "mg91_donor_injection_report.json"));
-                        donorScene?.Bsp?.WriteMg91RemovedOutlierTri(Path.Combine(exportRoot, "Sette_Donor", "mg91_removed_outlier_tri.json"));
-                    }
+                    // donor-specific mg91 debug traces disabled in full donor pipeline mode
                 }
                 catch (OutOfMemoryException)
                 {
