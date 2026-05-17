@@ -506,6 +506,7 @@ class Program
                     {
                         donorScene?.Bsp?.WriteMg91BorderStitchLog(Path.Combine(exportRoot, "Sette_Donor", "mg91_border_stitch_log.json"));
                         donorScene?.Bsp?.WriteMg91DonorInjectionReport(Path.Combine(exportRoot, "Sette_Donor", "mg91_donor_injection_report.json"));
+                        donorScene?.Bsp?.WriteMg91RemovedOutlierTri(Path.Combine(exportRoot, "Sette_Donor", "mg91_removed_outlier_tri.json"));
                     }
                 }
                 catch (OutOfMemoryException)

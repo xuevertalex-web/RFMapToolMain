@@ -113,8 +113,9 @@ public sealed class BspFile
     private readonly List<object> _mg91BorderStitchLog = new();
     private readonly List<object> _mg91BorderStitchTriangles = new();
     private readonly List<object> _mg91DonorInjectionReport = new();
+    private readonly List<object> _mg91RemovedOutlierTri = new();
     private static readonly HashSet<int> Mg91CriticalFaces = new() { 41478, 41479, 41480, 41482, 41483, 41484, 41490, 41492, 41493, 41496, 41497, 41501 };
-    private static readonly HashSet<int> Mg91DonorPosFaces = new() { 41479, 41480, 41482, 41483, 41484, 41497 };
+    private static readonly HashSet<int> Mg91DonorPosFaces = new() { 41478, 41479, 41480, 41482, 41483, 41484, 41490, 41492, 41493, 41496, 41497, 41501 };
     private static readonly Lazy<ConcurrentDictionary<(int Face, int Corner), Vector3f>> Mg91DonorPositions =
         new(() => LoadMg91DonorPositions(), true);
 
@@ -302,6 +303,7 @@ public sealed class BspFile
         _mg91BorderStitchLog.Clear();
         _mg91BorderStitchTriangles.Clear();
         _mg91DonorInjectionReport.Clear();
+        _mg91RemovedOutlierTri.Clear();
 
         for (int m = 0; m < MatGroups.Count; m++)
         {
@@ -499,6 +501,8 @@ public sealed class BspFile
         VertexRefs = refs;
 
         BuildMg91BorderStitchCandidates(tris, outVerts, outUvs, outLgtUvs, outColors, refs);
+        RemoveSpecificMg91Triangle(tris);
+        FlattenMg91OutlierTriangleToPlane(tris, outVerts);
     }
 
     private void BuildMg91BorderStitchCandidates(
@@ -549,6 +553,98 @@ public sealed class BspFile
         }
     }
 
+    // outlier removal disabled; donor-position injection keeps triangles in place
+
+    private static void RemoveSpecificMg91Triangle(List<BspTriangle> tris)
+    {
+        if (!SetteDonorPathMode) return;
+        for (int i = tris.Count - 1; i >= 0; i--)
+        {
+            var t = tris[i];
+            if (t.MatGroup != 91) continue;
+            var a = t.A; var b = t.B; var c = t.C;
+            bool hit =
+                (a == 140935 || b == 140935 || c == 140935) &&
+                (a == 140936 || b == 140936 || c == 140936) &&
+                (a == 140937 || b == 140937 || c == 140937);
+            if (hit) tris.RemoveAt(i);
+        }
+    }
+
+    private void FlattenMg91OutlierTriangleToPlane(List<BspTriangle> tris, List<Vector3f> verts)
+    {
+        if (!SetteDonorPathMode) return;
+        var mg = tris.Where(t => t.MatGroup == 91).ToList();
+        if (mg.Count < 8) return;
+
+        float cx = 0, cy = 0, cz = 0;
+        int vcnt = 0;
+        foreach (var t in mg)
+        {
+            foreach (var i in new[] { t.A, t.B, t.C })
+            {
+                if (i < 0 || i >= verts.Count) continue;
+                cx += verts[i].X; cy += verts[i].Y; cz += verts[i].Z; vcnt++;
+            }
+        }
+        if (vcnt == 0) return;
+        cx /= vcnt; cy /= vcnt; cz /= vcnt;
+
+        // Pick farthest triangle center as outlier candidate.
+        int outA = -1, outB = -1, outC = -1;
+        float far = -1f;
+        foreach (var t in mg)
+        {
+            var a = verts[t.A]; var b = verts[t.B]; var c = verts[t.C];
+            float tx = (a.X + b.X + c.X) / 3f;
+            float ty = (a.Y + b.Y + c.Y) / 3f;
+            float tz = (a.Z + b.Z + c.Z) / 3f;
+            float dx = tx - cx, dy = ty - cy, dz = tz - cz;
+            float d = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+            if (d > far) { far = d; outA = t.A; outB = t.B; outC = t.C; }
+        }
+        if (far < 180f || outA < 0) return;
+
+        // Dominant plane from nearest non-outlier tri to cluster center.
+        BspTriangle baseTri = mg[0];
+        float best = float.MaxValue;
+        foreach (var t in mg)
+        {
+            if ((t.A == outA && t.B == outB && t.C == outC) || (t.A == outA && t.B == outC && t.C == outB)) continue;
+            var a = verts[t.A]; var b = verts[t.B]; var c = verts[t.C];
+            float tx = (a.X + b.X + c.X) / 3f;
+            float ty = (a.Y + b.Y + c.Y) / 3f;
+            float tz = (a.Z + b.Z + c.Z) / 3f;
+            float dx = tx - cx, dy = ty - cy, dz = tz - cz;
+            float d = dx * dx + dy * dy + dz * dz;
+            if (d < best) { best = d; baseTri = t; }
+        }
+
+        var p0 = verts[baseTri.A];
+        var p1 = verts[baseTri.B];
+        var p2 = verts[baseTri.C];
+        float ux = p1.X - p0.X, uy = p1.Y - p0.Y, uz = p1.Z - p0.Z;
+        float vx = p2.X - p0.X, vy = p2.Y - p0.Y, vz = p2.Z - p0.Z;
+        float nx = uy * vz - uz * vy;
+        float ny = uz * vx - ux * vz;
+        float nz = ux * vy - uy * vx;
+        float nl = MathF.Sqrt(nx * nx + ny * ny + nz * nz);
+        if (nl < 1e-6f) return;
+        nx /= nl; ny /= nl; nz /= nl;
+
+        static Vector3f Project(Vector3f p, Vector3f p0, float nx, float ny, float nz)
+        {
+            float dx = p.X - p0.X, dy = p.Y - p0.Y, dz = p.Z - p0.Z;
+            float dist = dx * nx + dy * ny + dz * nz;
+            return new Vector3f { X = p.X - dist * nx, Y = p.Y - dist * ny, Z = p.Z - dist * nz };
+        }
+
+        verts[outA] = Project(verts[outA], p0, nx, ny, nz);
+        verts[outB] = Project(verts[outB], p0, nx, ny, nz);
+        verts[outC] = Project(verts[outC], p0, nx, ny, nz);
+    }
+
+
     private static bool TryGetMg91DonorPos(int faceIndex, int corner, out Vector3f pos)
     {
         return Mg91DonorPositions.Value.TryGetValue((faceIndex, corner), out pos);
@@ -582,6 +678,59 @@ public sealed class BspFile
     {
         var json = JsonSerializer.Serialize(_mg91DonorInjectionReport, SafeJson);
         File.WriteAllText(outputPath, json, Encoding.UTF8);
+    }
+
+    public void WriteMg91RemovedOutlierTri(string outputPath)
+    {
+        var json = JsonSerializer.Serialize(_mg91RemovedOutlierTri, SafeJson);
+        File.WriteAllText(outputPath, json, Encoding.UTF8);
+    }
+
+
+    public void OverrideMatGroupGeometryFrom(BspFile source, int matGroupId)
+    {
+        if (source == null) return;
+        var dstVerts = Vertices.ToList();
+        var dstUv = RealUv.ToList();
+        var dstLuv = RealLightUv.ToList();
+        var dstCol = RealColors.ToList();
+        var dstRefs = VertexRefs.ToList();
+
+        var kept = RealFaces.Where(t => t.MatGroup != matGroupId).ToList();
+        var srcFaces = source.RealFaces.Where(t => t.MatGroup == matGroupId).ToList();
+        var remap = new Dictionary<int, int>();
+
+        int MapIndex(int srcIdx)
+        {
+            if (remap.TryGetValue(srcIdx, out var di)) return di;
+            di = dstVerts.Count;
+            dstVerts.Add(source.Vertices[srcIdx]);
+            dstUv.Add(source.RealUv[srcIdx]);
+            dstLuv.Add(source.RealLightUv[srcIdx]);
+            dstCol.Add(source.RealColors[srcIdx]);
+            dstRefs.Add(source.VertexRefs[srcIdx]);
+            remap[srcIdx] = di;
+            return di;
+        }
+
+        foreach (var f in srcFaces)
+        {
+            kept.Add(new BspTriangle
+            {
+                A = MapIndex(f.A),
+                B = MapIndex(f.B),
+                C = MapIndex(f.C),
+                MatGroup = f.MatGroup,
+                MatId = f.MatId
+            });
+        }
+
+        Vertices = dstVerts;
+        RealUv = dstUv;
+        RealLightUv = dstLuv;
+        RealColors = dstCol;
+        VertexRefs = dstRefs;
+        RealFaces = kept;
     }
 
     public void WriteBrokenFacesReport(string outputPath)
