@@ -6863,6 +6863,16 @@ static void RunCapabilityTierClassifierRegression()
     AssertTrue(ReadInt(read, "CapabilityTier") == 0, "Expected ReadFile capability tier=0.");
     AssertTrue(ReadString(read, "Gate") == "allowed", "Expected ReadFile gate=allowed.");
 
+    var list = Classify(new ToolAction { Kind = ToolActionKind.ListDirectory });
+    AssertTrue(ReadString(list, "CapabilityClass") == "analysis", "Expected ListDirectory capability class=analysis.");
+    AssertTrue(ReadInt(list, "CapabilityTier") == 0, "Expected ListDirectory capability tier=0.");
+    AssertTrue(ReadString(list, "Gate") == "allowed", "Expected ListDirectory gate=allowed.");
+
+    var search = Classify(new ToolAction { Kind = ToolActionKind.SearchFiles });
+    AssertTrue(ReadString(search, "CapabilityClass") == "analysis", "Expected SearchFiles capability class=analysis.");
+    AssertTrue(ReadInt(search, "CapabilityTier") == 0, "Expected SearchFiles capability tier=0.");
+    AssertTrue(ReadString(search, "Gate") == "allowed", "Expected SearchFiles gate=allowed.");
+
     var write = Classify(new ToolAction { Kind = ToolActionKind.WriteFile });
     AssertTrue(ReadString(write, "CapabilityClass") == "mutation", "Expected WriteFile capability class=mutation.");
     AssertTrue(ReadInt(write, "CapabilityTier") == 1, "Expected WriteFile capability tier=1.");
@@ -7084,6 +7094,23 @@ static async Task RunPermissionGuardCanonicalCommandPolicyRegression()
     });
     AssertTrue(readAllowed.Allowed, "Expected read/analysis path to remain unaffected by command-policy integration.");
     AssertTrue(readAllowed.CapabilityClass == "analysis" && readAllowed.CapabilityTier == 0 && readAllowed.CapabilityGate == "allowed", "Expected read action capability metadata analysis/tier0/allowed.");
+
+    var listAllowed = guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.ListDirectory,
+        TargetPath = workspaceRoot
+    });
+    AssertTrue(listAllowed.Allowed, "Expected list/analysis path to remain unaffected by command-policy integration.");
+    AssertTrue(listAllowed.CapabilityClass == "analysis" && listAllowed.CapabilityTier == 0 && listAllowed.CapabilityGate == "allowed", "Expected list action capability metadata analysis/tier0/allowed.");
+
+    var searchAllowed = guard.Evaluate(session, new ToolAction
+    {
+        Kind = ToolActionKind.SearchFiles,
+        TargetPath = workspaceRoot,
+        Payload = "read"
+    });
+    AssertTrue(searchAllowed.Allowed, "Expected search/analysis path to remain unaffected by command-policy integration.");
+    AssertTrue(searchAllowed.CapabilityClass == "analysis" && searchAllowed.CapabilityTier == 0 && searchAllowed.CapabilityGate == "allowed", "Expected search action capability metadata analysis/tier0/allowed.");
 
     Console.WriteLine("PASS RunPermissionGuardCanonicalCommandPolicyRegression");
 }

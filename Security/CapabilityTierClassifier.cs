@@ -6,13 +6,13 @@ internal static class CapabilityTierClassifier
     {
         return action.Kind switch
         {
-            ToolActionKind.ReadFile => Create(
+            ToolActionKind.ReadFile or ToolActionKind.ListDirectory or ToolActionKind.SearchFiles => Create(
                 action.Kind,
                 CapabilityClass.Analysis,
                 CapabilityTier.Analysis,
                 CapabilityGate.Allowed,
                 PermissionReasonCodes.Allowed,
-                "Read-only analysis action."),
+                "Read-only workspace inspection action."),
 
             ToolActionKind.WriteFile or ToolActionKind.CreateFile or ToolActionKind.PatchFile or ToolActionKind.Build or ToolActionKind.Test => Create(
                 action.Kind,
@@ -139,4 +139,3 @@ internal static class CapabilityTierClassifier
         };
     }
 }
-
