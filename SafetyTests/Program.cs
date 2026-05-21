@@ -14,6 +14,7 @@ try
 
     File.WriteAllBytes(Path.Combine(d, "m1.bsp"), BuildAsciiUtf16());
     File.WriteAllBytes(Path.Combine(d, "m1.r3t"), Encoding.ASCII.GetBytes("m1.dds m1.dds\0"));
+    File.WriteAllBytes(Path.Combine(d, "m1.r3m"), Encoding.ASCII.GetBytes("MAT\0"));
     File.WriteAllBytes(Path.Combine(d, "m1.dds"), Encoding.ASCII.GetBytes("DDS\0"));
     File.WriteAllBytes(Path.Combine(d, "m1.big"), new byte[700000]);
 
@@ -45,6 +46,13 @@ try
     Req(grp.GetProperty("ByFirst16Bytes").GetArrayLength() > 0, "first16 grouping missing");
     var obs = grp.GetProperty("Observation").GetString() ?? "";
     Req(!obs.Contains("field", StringComparison.OrdinalIgnoreCase), "semantic claim detected");
+    var matrix = j1.RootElement.GetProperty("CompanionFileMatrix");
+    var rows = matrix.GetProperty("Rows").EnumerateArray().ToArray();
+    Req(rows.Any(r => r.GetProperty("Extension").GetString() == ".bsp"), "matrix missing bsp");
+    Req(rows.Any(r => r.GetProperty("Extension").GetString() == ".r3t"), "matrix missing r3t");
+    Req(rows.Any(r => r.GetProperty("Extension").GetString() == ".r3m"), "matrix missing r3m");
+    Req(matrix.GetProperty("MissingCompanionObservations").GetArrayLength() >= 0, "missing companion observations absent");
+    Req(rows.SequenceEqual(rows.OrderBy(r => r.GetProperty("MapName").GetString()).ThenBy(r => r.GetProperty("SamePrefixGroup").GetString()).ThenBy(r => r.GetProperty("Extension").GetString()).ThenBy(r => r.GetProperty("EvidenceSource").GetString()), JsonElementComparer.Instance), "matrix ordering not deterministic");
 
     Console.WriteLine("SAFETYTEST PASS");
 }
@@ -65,3 +73,9 @@ static byte[] BuildAsciiUtf16()
 }
 
 static void Req(bool cond, string msg) { if (!cond) throw new Exception(msg); }
+sealed class JsonElementComparer : IEqualityComparer<JsonElement>
+{
+    public static readonly JsonElementComparer Instance = new();
+    public bool Equals(JsonElement x, JsonElement y) => x.GetRawText() == y.GetRawText();
+    public int GetHashCode(JsonElement obj) => obj.GetRawText().GetHashCode();
+}

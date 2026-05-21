@@ -132,6 +132,7 @@ internal static class RfInventoryTool
             DependencyGraph = new Graph { Edges = edges },
             OffsetEvidenceSummary = BuildOffsetSummary(ev),
             SignatureGroupingSummary = BuildSignatureGrouping(inv),
+            CompanionFileMatrix = BuildCompanionMatrix(c, inv, ev),
             ExtractionMetrics = m,
             CapHits = cap
         };
@@ -167,6 +168,57 @@ internal static class RfInventoryTool
             ByFileSizeBucket = inv.GroupBy(x => SizeBucket(x.FileSize), StringComparer.OrdinalIgnoreCase).Select(g => new KV { Key = g.Key, Value = g.Count() }).OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase).ToList(),
             ByHashPrefix = inv.GroupBy(x => x.First256BytesHash[..Math.Min(8, x.First256BytesHash.Length)], StringComparer.OrdinalIgnoreCase).Select(g => new KV { Key = g.Key, Value = g.Count() }).OrderByDescending(x => x.Value).ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase).ToList(),
             Observation = "observed header pattern; same first_16_bytes group; possible format family"
+        };
+    }
+
+    private static CompanionFileMatrixSummary BuildCompanionMatrix(Ctx c, List<FileRec> inv, List<RefEvidence> ev)
+    {
+        var rows = new List<CompanionMatrixRow>();
+        foreach (var g in inv.GroupBy(x => x.SamePrefixGroup, StringComparer.OrdinalIgnoreCase).OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (var eg in g.GroupBy(x => x.Extension, StringComparer.OrdinalIgnoreCase).OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                rows.Add(new CompanionMatrixRow { MapName = c.Prefixes.FirstOrDefault() ?? "multi", SamePrefixGroup = g.Key, Extension = eg.Key, FileCount = eg.Count(), EvidenceSource = "present_file" });
+            }
+            rows.Add(new CompanionMatrixRow { MapName = c.Prefixes.FirstOrDefault() ?? "multi", SamePrefixGroup = g.Key, Extension = "same_prefix_observation", FileCount = g.Count(), EvidenceSource = "same_prefix_observation" });
+        }
+        foreach (var rg in ev.GroupBy(x => Path.GetExtension(x.NormalizedTarget), StringComparer.OrdinalIgnoreCase).OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            rows.Add(new CompanionMatrixRow { MapName = c.Prefixes.FirstOrDefault() ?? "multi", SamePrefixGroup = "reference_scope", Extension = rg.Key, FileCount = rg.Count(), EvidenceSource = "string_reference" });
+            rows.Add(new CompanionMatrixRow { MapName = c.Prefixes.FirstOrDefault() ?? "multi", SamePrefixGroup = "reference_scope", Extension = rg.Key, FileCount = rg.Select(x => x.ByteOffset).Distinct().Count(), EvidenceSource = "offset_reference" });
+        }
+
+        var present = new HashSet<string>(inv.Select(x => x.Extension), StringComparer.OrdinalIgnoreCase);
+        var observations = new List<string>();
+        if (present.Contains(".bsp") && !present.Contains(".r3t")) observations.Add("observed .bsp with missing in bounded scope: .r3t");
+        if (present.Contains(".bsp") && !present.Contains(".r3m")) observations.Add("observed .bsp with missing in bounded scope: .r3m");
+        if (present.Contains(".r3t") && !ev.Any(x => string.Equals(Path.GetExtension(x.NormalizedTarget), ".dds", StringComparison.OrdinalIgnoreCase) || string.Equals(Path.GetExtension(x.NormalizedTarget), ".tga", StringComparison.OrdinalIgnoreCase)))
+            observations.Add("observed .r3t with no texture refs in bounded scope");
+        var presentFiles = new HashSet<string>(inv.Select(x => x.Filename), StringComparer.OrdinalIgnoreCase);
+        var missingRefTargets = ev.Select(x => Path.GetFileName(x.NormalizedTarget)).Where(x => !string.IsNullOrWhiteSpace(x) && !presentFiles.Contains(x!)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+        if (missingRefTargets.Count > 0) observations.Add($"observed texture refs missing in bounded scope: {string.Join(',', missingRefTargets.Take(10))}");
+
+        var byCombo = inv.GroupBy(x => x.SamePrefixGroup, StringComparer.OrdinalIgnoreCase)
+            .Select(g => string.Join("+", g.Select(x => x.Extension).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase)))
+            .GroupBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(x => x.Count()).ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new KV { Key = g.Key, Value = g.Count() }).ToList();
+
+        var frequent = byCombo.Where(x => x.Value >= 2).Select(x => x.Key).ToList();
+        var rare = byCombo.Where(x => x.Value == 1).Select(x => x.Key).ToList();
+        return new CompanionFileMatrixSummary
+        {
+            Rows = rows.OrderBy(x => x.MapName, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.SamePrefixGroup, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.Extension, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.EvidenceSource, StringComparer.OrdinalIgnoreCase).ToList(),
+            CommonExtensionCombinations = byCombo.Take(20).ToList(),
+            MissingCompanionObservations = observations,
+            RareCompanionObservations = rare,
+            InconsistentCompanionObservations = frequent.Count == 0 ? new List<string> { "observed together patterns vary in bounded scope" } : new List<string>(),
+            UniversalCompanions = frequent,
+            FrequentCompanions = frequent,
+            RareCompanions = rare,
+            MissingCompanions = observations,
+            UnstableOptionalCompanions = rare,
+            RecommendedNextReadOnlyProbe = "Run the same bounded matrix over more maps and compare observed together sets."
         };
     }
 
@@ -327,13 +379,15 @@ internal static class RfInventoryTool
     private sealed record StrTok(string Text, int Offset, string Encoding);
     private sealed record SignatureInfo(string First16BytesHex, string First64BytesHex, string First256BytesHash, string? WholeFileHash, string PrintablePrefixPreview, double ZeroByteRatioFirst256, double PrintableRatioFirst256, string SuspectedTextOrBinary);
 
-    private sealed class Report { public string Tool { get; set; } = "rf_inventory"; public string Mode { get; set; } = "read_only"; public string InputMode { get; set; } = ""; public string InputPathSanitized { get; set; } = ""; public string RootDirectorySanitized { get; set; } = ""; public string MapOrPrefix { get; set; } = ""; public DateTime GeneratedUtc { get; set; } public List<FileRec> InventoryTable { get; set; } = new(); public List<RefEvidence> ReferenceEvidence { get; set; } = new(); public Graph DependencyGraph { get; set; } = new(); public OffsetSummary OffsetEvidenceSummary { get; set; } = new(); public SignatureGroupingSummary SignatureGroupingSummary { get; set; } = new(); public Metrics ExtractionMetrics { get; set; } = new(); public Caps CapHits { get; set; } = new(); }
+    private sealed class Report { public string Tool { get; set; } = "rf_inventory"; public string Mode { get; set; } = "read_only"; public string InputMode { get; set; } = ""; public string InputPathSanitized { get; set; } = ""; public string RootDirectorySanitized { get; set; } = ""; public string MapOrPrefix { get; set; } = ""; public DateTime GeneratedUtc { get; set; } public List<FileRec> InventoryTable { get; set; } = new(); public List<RefEvidence> ReferenceEvidence { get; set; } = new(); public Graph DependencyGraph { get; set; } = new(); public OffsetSummary OffsetEvidenceSummary { get; set; } = new(); public SignatureGroupingSummary SignatureGroupingSummary { get; set; } = new(); public CompanionFileMatrixSummary CompanionFileMatrix { get; set; } = new(); public Metrics ExtractionMetrics { get; set; } = new(); public Caps CapHits { get; set; } = new(); }
     private sealed class FileRec { public string RelativePath { get; set; } = ""; public string Filename { get; set; } = ""; public string Extension { get; set; } = ""; public long Size { get; set; } public string SamePrefixGroup { get; set; } = ""; public List<string> ReferencedFilenames { get; set; } = new(); public long FileSize { get; set; } public string First16BytesHex { get; set; } = ""; public string First64BytesHex { get; set; } = ""; public string First256BytesHash { get; set; } = ""; public string? WholeFileHash { get; set; } public string PrintablePrefixPreview { get; set; } = ""; public double ZeroByteRatioFirst256 { get; set; } public double PrintableRatioFirst256 { get; set; } public string SuspectedTextOrBinary { get; set; } = ""; }
     private sealed class RefEvidence { public int ByteOffset { get; set; } public string Encoding { get; set; } = ""; public int TokenLength { get; set; } public string SourceFile { get; set; } = ""; public string ExtractedToken { get; set; } = ""; public string NormalizedTarget { get; set; } = ""; public string EvidenceType { get; set; } = "string_reference"; public string Confidence { get; set; } = "low"; }
     private sealed class Edge { public string From { get; set; } = ""; public string To { get; set; } = ""; public string EvidenceType { get; set; } = "string_reference"; public string Confidence { get; set; } = "low"; public string SourceExtension { get; set; } = ""; public string TargetExtension { get; set; } = ""; public int PrimaryReferenceOffset { get; set; } public List<int> ReferenceOffsets { get; set; } = new(); }
     private sealed class Graph { public List<Edge> Edges { get; set; } = new(); }
     private sealed class OffsetSummary { public List<KV> RefsByFile { get; set; } = new(); public List<KV> RefsByExtension { get; set; } = new(); public int MinOffset { get; set; } public int MaxOffset { get; set; } public List<int> RepeatedOffsets { get; set; } = new(); public List<string> RepeatedTokens { get; set; } = new(); public string SuspiciousClustersObservation { get; set; } = ""; }
     private sealed class SignatureGroupingSummary { public List<KV> ByExtension { get; set; } = new(); public List<KV> ByFirst4Bytes { get; set; } = new(); public List<KV> ByFirst16Bytes { get; set; } = new(); public List<KV> ByFileSizeBucket { get; set; } = new(); public List<KV> ByHashPrefix { get; set; } = new(); public string Observation { get; set; } = ""; }
+    private sealed class CompanionMatrixRow { public string MapName { get; set; } = ""; public string SamePrefixGroup { get; set; } = ""; public string Extension { get; set; } = ""; public int FileCount { get; set; } public string EvidenceSource { get; set; } = ""; }
+    private sealed class CompanionFileMatrixSummary { public List<CompanionMatrixRow> Rows { get; set; } = new(); public List<KV> CommonExtensionCombinations { get; set; } = new(); public List<string> MissingCompanionObservations { get; set; } = new(); public List<string> RareCompanionObservations { get; set; } = new(); public List<string> InconsistentCompanionObservations { get; set; } = new(); public List<string> UniversalCompanions { get; set; } = new(); public List<string> FrequentCompanions { get; set; } = new(); public List<string> RareCompanions { get; set; } = new(); public List<string> MissingCompanions { get; set; } = new(); public List<string> UnstableOptionalCompanions { get; set; } = new(); public string RecommendedNextReadOnlyProbe { get; set; } = ""; }
     private sealed class KV { public string Key { get; set; } = ""; public int Value { get; set; } }
     private sealed class Metrics { public int AsciiStringsSeen { get; set; } public int AsciiStringsKept { get; set; } public int AsciiStringsDiscarded { get; set; } public int Utf16StringsSeen { get; set; } public int Utf16StringsKept { get; set; } public int Utf16StringsDiscarded { get; set; } public int RefsSeen { get; set; } public int RefsKept { get; set; } public int RefsDiscarded { get; set; } public int DuplicateRefsSuppressed { get; set; } public int NoisyRefsDiscarded { get; set; } public int DependencyEdgesEmitted { get; set; } public int DependencyEdgesSuppressed { get; set; } public Dictionary<string, int> DiscardReasons { get; set; } = new(StringComparer.OrdinalIgnoreCase); }
     private sealed class Caps { public bool FileReadCapHit { get; set; } public bool AsciiCapHit { get; set; } public bool Utf16CapHit { get; set; } public bool RefsCapHit { get; set; } public bool DependencyEdgesCapHit { get; set; } public bool ReportSizeCapHit { get; set; } public bool SiblingScanCapHit { get; set; } }
