@@ -1,208 +1,26 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Text.Json;
-using System.Text.RegularExpressions;
-
+using System;using System.Collections.Generic;using System.IO;using System.Linq;using System.Text;using System.Text.Json;using System.Text.RegularExpressions;
 namespace RFMapToolSharp.Tools;
-
-internal static class RfInventoryTool
-{
-    private static readonly HashSet<string> RecognizedExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".bsp", ".r3t", ".r3m", ".rsm", ".dds", ".tga", ".dat", ".ani", ".eff", ".snd", ".wav", ".ogg"
-    };
-    private static readonly HashSet<string> RefExts = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".bsp", ".r3t", ".r3m", ".rsm", ".dds", ".tga", ".dat", ".ani", ".eff", ".snd", ".wav", ".ogg"
-    };
-
-    private const int MaxReadBytesPerFile = 512 * 1024;
-    private const int MaxStringsPerFile = 64;
-    private const int MaxRefsPerFile = 64;
-    private const int MaxFiles = 256;
-    private const int MaxEdges = 512;
-    private const int MaxReportBytes = 2 * 1024 * 1024;
-
-    public static void RunSelfTest() { }
-
-    public static string Run(string inputPath, string? explicitOutputRoot)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(inputPath)) throw new InvalidOperationException("rf_inventory requires input path");
-            var fullInput = Path.GetFullPath(inputPath);
-            if (!File.Exists(fullInput) && !Directory.Exists(fullInput)) throw new InvalidOperationException("rf_inventory input path not found");
-            var context = BuildContext(fullInput);
-            var outRoot = ResolveOutputRoot(explicitOutputRoot);
-            Directory.CreateDirectory(outRoot);
-
-            var report = BuildReport(context, fullInput);
-            var json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
-            if (Encoding.UTF8.GetByteCount(json) > MaxReportBytes)
-            {
-                report.CapHits.ReportSizeCapHit = true;
-                report.InventoryTable = report.InventoryTable.Take(64).ToList();
-                report.DependencyGraph.Edges = report.DependencyGraph.Edges.Take(128).ToList();
-                report.ExtractedStringsAndReferences = report.ExtractedStringsAndReferences.Take(64).ToList();
-                json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
-            }
-            var outPath = Path.Combine(outRoot, $"rf_inventory_{report.MapOrPrefix}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.json");
-            File.WriteAllText(outPath, json, Encoding.UTF8);
-            return outPath;
-        }
-        catch (Exception ex) { throw new InvalidOperationException(SanitizeError(ex.Message)); }
-    }
-
-    private static InventoryContext BuildContext(string input)
-    {
-        if (File.Exists(input))
-        {
-            if (!string.Equals(Path.GetExtension(input), ".bsp", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("rf_inventory file input must be .bsp");
-            var dir = Path.GetDirectoryName(input)!;
-            RejectUnsafeDirectory(dir);
-            return new InventoryContext(dir, new List<string> { Path.GetFileNameWithoutExtension(input)! }, true);
-        }
-        RejectUnsafeDirectory(input);
-        var bsp = Directory.GetFiles(input, "*.bsp", SearchOption.TopDirectoryOnly);
-        if (bsp.Length == 0) throw new InvalidOperationException("rf_inventory directory input requires at least one .bsp in top level");
-        return new InventoryContext(input, bsp.Select(Path.GetFileNameWithoutExtension).Cast<string>().OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(), false);
-    }
-
-    private static InventoryReport BuildReport(InventoryContext context, string rawInput)
-    {
-        var caps = new CapHits();
-        var metrics = new ExtractionMetrics();
-        var allFiles = Directory.GetFiles(context.RootDir, "*", SearchOption.TopDirectoryOnly).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
-        var filtered = new List<string>();
-        foreach (var p in allFiles)
-        {
-            if (filtered.Count >= MaxFiles) { caps.SiblingScanCapHit = true; break; }
-            if (IsCandidate(p, context.Prefixes)) filtered.Add(p);
-            else metrics.DiscardReasons.Inc("out_of_scope_file");
-        }
-
-        var entries = new List<InventoryFileRecord>();
-        var pathByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var p in filtered)
-        {
-            var fi = new FileInfo(p);
-            bool fileCapHit;
-            var bytes = ReadCappedBytes(p, MaxReadBytesPerFile, out fileCapHit);
-            if (fileCapHit) caps.FileReadCapHit = true;
-
-            var ascii = ExtractStrings(bytes, false, metrics, caps);
-            var utf16 = ExtractStrings(bytes, true, metrics, caps);
-            var refs = ExtractRefs(ascii.Concat(utf16), metrics, caps);
-            var rel = Path.GetRelativePath(context.RootDir, p).Replace('\\', '/');
-            entries.Add(new InventoryFileRecord { RelativePath = rel, Filename = fi.Name, Extension = fi.Extension, Size = fi.Length, SamePrefixGroup = MatchPrefix(fi.Name, context.Prefixes) ?? "unknown", AsciiStrings = ascii, Utf16LeStrings = utf16, ReferencedFilenames = refs, UncertaintyNotes = "Evidence-only inference; same-prefix relation is low-confidence." });
-            pathByName[fi.Name] = rel;
-        }
-
-        var edges = BuildEdges(entries, pathByName, metrics, caps);
-        metrics.DependencyEdgesEmitted = edges.Count;
-
-        return new InventoryReport
-        {
-            Tool = "rf_inventory",
-            Mode = "read_only",
-            InputMode = context.FromBspFile ? "single_bsp_file" : "single_directory",
-            InputPathSanitized = SanitizePath(rawInput),
-            RootDirectorySanitized = SanitizePath(context.RootDir),
-            MapOrPrefix = context.Prefixes.Count == 1 ? context.Prefixes[0] : "multi",
-            GeneratedUtc = DateTime.UtcNow,
-            InventoryTable = entries.OrderBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase).ToList(),
-            ExtractedStringsAndReferences = entries.OrderBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase).Select(e => new StringReference { File = e.RelativePath, AsciiStrings = e.AsciiStrings, Utf16LeStrings = e.Utf16LeStrings, ReferencedFilenames = e.ReferencedFilenames }).ToList(),
-            DependencyGraph = new DependencyGraphReport { Edges = edges },
-            ExtractionMetrics = metrics,
-            CapHits = caps,
-            SamePrefixGroups = entries.GroupBy(e => e.SamePrefixGroup, StringComparer.OrdinalIgnoreCase).OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase).Select(g => new PrefixGroupSummary { Prefix = g.Key, Count = g.Count(), Files = g.Select(x => x.Filename).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList() }).ToList()
-        };
-    }
-
-    private static List<DependencyEdge> BuildEdges(List<InventoryFileRecord> entries, Dictionary<string, string> byName, ExtractionMetrics m, CapHits caps)
-    {
-        var outEdges = new List<DependencyEdge>();
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var extByPath = entries.ToDictionary(x => x.RelativePath, x => x.Extension, StringComparer.OrdinalIgnoreCase);
-        foreach (var e in entries.OrderBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase))
-        foreach (var rf in e.ReferencedFilenames.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
-        {
-            var k = Path.GetFileName(rf.Replace('/', Path.DirectorySeparatorChar));
-            if (string.IsNullOrWhiteSpace(k) || !byName.TryGetValue(k, out var to)) continue;
-            var sig = $"{e.RelativePath}|{to}|{rf}";
-            if (!set.Add(sig)) { m.DependencyEdgesSuppressed++; continue; }
-            outEdges.Add(new DependencyEdge { From = e.RelativePath, To = to, Evidence = rf, EvidenceType = "string_reference", SourceExtension = extByPath[e.RelativePath].ToLowerInvariant(), TargetExtension = extByPath[to].ToLowerInvariant(), Confidence = "low" });
-            if (outEdges.Count >= MaxEdges) { caps.DependencyEdgesCapHit = true; return outEdges; }
-        }
-        return outEdges;
-    }
-
-    private static List<string> ExtractStrings(byte[] data, bool utf16, ExtractionMetrics m, CapHits caps)
-    {
-        var outList = new List<string>(); var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase); var sb = new StringBuilder();
-        void AddReason(string r)=>m.DiscardReasons.Inc(r);
-        void Flush()
-        {
-            if (sb.Length == 0) return;
-            var s = sb.ToString().Trim(); sb.Clear();
-            if (s.Length < 4) { AddReason("too_short"); if (utf16) m.Utf16StringsDiscarded++; else m.AsciiStringsDiscarded++; return; }
-            if (s.Count(ch => !char.IsLetterOrDigit(ch) && ch!='.'&&ch!='/'&&ch!='\\'&&ch!='_'&&ch!='-') > s.Length/2) { AddReason("excessive_punctuation"); if (utf16) m.Utf16StringsDiscarded++; else m.AsciiStringsDiscarded++; return; }
-            if (IsNoise(s)) { AddReason("too_noisy"); if (utf16) m.Utf16StringsDiscarded++; else m.AsciiStringsDiscarded++; return; }
-            if (!seen.Add(s)) { AddReason("duplicate"); if (utf16) m.Utf16StringsDiscarded++; else m.AsciiStringsDiscarded++; return; }
-            outList.Add(s); if (utf16) m.Utf16StringsKept++; else m.AsciiStringsKept++;
-        }
-        if (utf16)
-        {
-            for (int i=0;i+1<data.Length;i+=2){ m.Utf16StringsSeen++; var lo=data[i]; var hi=data[i+1]; if (hi==0 && lo>=32 && lo<=126) sb.Append((char)lo); else Flush(); if (outList.Count>=MaxStringsPerFile){ caps.Utf16CapHit=true; AddReason("cap_reached"); break; } }
-        }
-        else
-        {
-            for (int i=0;i<data.Length;i++){ m.AsciiStringsSeen++; var b=data[i]; if (b>=32 && b<=126) sb.Append((char)b); else Flush(); if (outList.Count>=MaxStringsPerFile){ caps.AsciiCapHit=true; AddReason("cap_reached"); break; } }
-        }
-        Flush();
-        return outList.OrderBy(x=>x,StringComparer.OrdinalIgnoreCase).ToList();
-    }
-
-    private static List<string> ExtractRefs(IEnumerable<string> strings, ExtractionMetrics m, CapHits caps)
-    {
-        var rx = new Regex(@"([A-Za-z0-9_\-./\\]+\.[A-Za-z0-9]{1,8})", RegexOptions.Compiled);
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var s in strings.OrderBy(x=>x,StringComparer.OrdinalIgnoreCase))
-        foreach (Match mm in rx.Matches(s))
-        {
-            m.RefsSeen++;
-            var token = mm.Groups[1].Value.Trim().Replace('\\','/');
-            var ext = Path.GetExtension(token);
-            if (!RefExts.Contains(ext)) { m.RefsDiscarded++; m.NoisyRefsDiscarded++; m.DiscardReasons.Inc("unsupported_extension"); continue; }
-            if (!set.Add(token)) { m.DuplicateRefsSuppressed++; m.RefsDiscarded++; m.DiscardReasons.Inc("duplicate"); continue; }
-            m.RefsKept++;
-            if (set.Count >= MaxRefsPerFile) { caps.RefsCapHit = true; m.DiscardReasons.Inc("cap_reached"); return set.OrderBy(x=>x,StringComparer.OrdinalIgnoreCase).ToList(); }
-        }
-        return set.OrderBy(x=>x,StringComparer.OrdinalIgnoreCase).ToList();
-    }
-
-    private static bool IsCandidate(string path, IReadOnlyCollection<string> prefixes){ var stem=Path.GetFileNameWithoutExtension(path); return prefixes.Any(p=>stem.StartsWith(p,StringComparison.OrdinalIgnoreCase)); }
-    private static string? MatchPrefix(string fn, IReadOnlyCollection<string> p){ var s=Path.GetFileNameWithoutExtension(fn); return p.OrderBy(x=>x.Length).FirstOrDefault(x=>s.StartsWith(x,StringComparison.OrdinalIgnoreCase)); }
-    private static bool IsNoise(string s){ if (s.Length>180) return true; var al=s.Count(char.IsLetterOrDigit); return al<2; }
-    private static byte[] ReadCappedBytes(string p,int max,out bool hit){ using var fs=File.OpenRead(p); hit=fs.Length>max; var len=(int)Math.Min(fs.Length,max); var b=new byte[len]; var r=fs.Read(b,0,len); return r==len?b:b.Take(r).ToArray(); }
-    private static void RejectUnsafeDirectory(string path){ var di=new DirectoryInfo(Path.GetFullPath(path)); if (di.Attributes.HasFlag(FileAttributes.ReparsePoint)) throw new InvalidOperationException("reparse/traversal path is not allowed"); }
-    private static string ResolveOutputRoot(string? x){ if(!string.IsNullOrWhiteSpace(x)) return Path.GetFullPath(x); var a=Environment.GetEnvironmentVariable("ArtifactOutputRoot"); return !string.IsNullOrWhiteSpace(a)?Path.Combine(Path.GetFullPath(a),"reports","rf_inventory"):Path.Combine(Environment.CurrentDirectory,"_runs","reports","rf_inventory"); }
-    private static string SanitizePath(string p){ try{ var cwd=Path.GetFullPath(Environment.CurrentDirectory); if(p.StartsWith(cwd,StringComparison.OrdinalIgnoreCase)) return Path.GetRelativePath(cwd,p).Replace('\\','/'); }catch{} return Path.GetFileName(p); }
-    private static string SanitizeError(string m){ var cwd=Path.GetFullPath(Environment.CurrentDirectory).Replace('\\','/'); var s=(m??"error").Replace('\\','/').Replace(cwd,"<workspace>",StringComparison.OrdinalIgnoreCase); return s.Length>240?s[..240]:s; }
-
-    private sealed record InventoryContext(string RootDir, List<string> Prefixes, bool FromBspFile);
-    private sealed class InventoryReport { public string Tool {get;set;}="rf_inventory"; public string Mode{get;set;}="read_only"; public string InputMode{get;set;}=""; public string InputPathSanitized{get;set;}=""; public string RootDirectorySanitized{get;set;}=""; public string MapOrPrefix{get;set;}=""; public DateTime GeneratedUtc{get;set;} public List<InventoryFileRecord> InventoryTable{get;set;}=new(); public List<PrefixGroupSummary> SamePrefixGroups{get;set;}=new(); public List<StringReference> ExtractedStringsAndReferences{get;set;}=new(); public DependencyGraphReport DependencyGraph{get;set;}=new(); public ExtractionMetrics ExtractionMetrics{get;set;}=new(); public CapHits CapHits{get;set;}=new(); }
-    private sealed class InventoryFileRecord { public string RelativePath{get;set;}=""; public string Filename{get;set;}=""; public string Extension{get;set;}=""; public long Size{get;set;} public string SamePrefixGroup{get;set;}=""; public List<string> AsciiStrings{get;set;}=new(); public List<string> Utf16LeStrings{get;set;}=new(); public List<string> ReferencedFilenames{get;set;}=new(); public string UncertaintyNotes{get;set;}=""; }
-    private sealed class DependencyEdge { public string From{get;set;}=""; public string To{get;set;}=""; public string Evidence{get;set;}=""; public string EvidenceType{get;set;}="string_reference"; public string SourceExtension{get;set;}=""; public string TargetExtension{get;set;}=""; public string Confidence{get;set;}="low"; }
-    private sealed class PrefixGroupSummary { public string Prefix{get;set;}=""; public int Count{get;set;} public List<string> Files{get;set;}=new(); }
-    private sealed class StringReference { public string File{get;set;}=""; public List<string> AsciiStrings{get;set;}=new(); public List<string> Utf16LeStrings{get;set;}=new(); public List<string> ReferencedFilenames{get;set;}=new(); }
-    private sealed class DependencyGraphReport { public List<DependencyEdge> Edges{get;set;}=new(); }
-    private sealed class ExtractionMetrics { public int AsciiStringsSeen{get;set;} public int AsciiStringsKept{get;set;} public int AsciiStringsDiscarded{get;set;} public int Utf16StringsSeen{get;set;} public int Utf16StringsKept{get;set;} public int Utf16StringsDiscarded{get;set;} public int RefsSeen{get;set;} public int RefsKept{get;set;} public int RefsDiscarded{get;set;} public int DuplicateRefsSuppressed{get;set;} public int NoisyRefsDiscarded{get;set;} public int DependencyEdgesEmitted{get;set;} public int DependencyEdgesSuppressed{get;set;} public Dictionary<string,int> DiscardReasons{get;set;}=new(StringComparer.OrdinalIgnoreCase); }
-    private sealed class CapHits { public bool FileReadCapHit{get;set;} public bool AsciiCapHit{get;set;} public bool Utf16CapHit{get;set;} public bool RefsCapHit{get;set;} public bool DependencyEdgesCapHit{get;set;} public bool ReportSizeCapHit{get;set;} public bool SiblingScanCapHit{get;set;} }
+internal static class RfInventoryTool{
+static readonly HashSet<string> RefExts=new(StringComparer.OrdinalIgnoreCase){".bsp",".r3t",".r3m",".rsm",".dds",".tga",".dat",".ani",".eff",".snd",".wav",".ogg"};
+const int MaxRead=512*1024,MaxStrings=64,MaxRefs=64,MaxFiles=256,MaxEdges=512,MaxReport=2*1024*1024;
+public static void RunSelfTest(){}
+public static string Run(string input,string? outRoot){if(string.IsNullOrWhiteSpace(input))throw new InvalidOperationException("rf_inventory requires input path");var full=Path.GetFullPath(input);if(!File.Exists(full)&&!Directory.Exists(full))throw new InvalidOperationException("rf_inventory input path not found");var ctx=BuildContext(full);var outDir=ResolveOutputRoot(outRoot);Directory.CreateDirectory(outDir);var r=BuildReport(ctx,full);var json=JsonSerializer.Serialize(r,new JsonSerializerOptions{WriteIndented=true});if(Encoding.UTF8.GetByteCount(json)>MaxReport){r.CapHits.ReportSizeCapHit=true;r.ReferenceEvidence=r.ReferenceEvidence.Take(256).ToList();r.DependencyGraph.Edges=r.DependencyGraph.Edges.Take(128).ToList();json=JsonSerializer.Serialize(r,new JsonSerializerOptions{WriteIndented=true});}var p=Path.Combine(outDir,$"rf_inventory_{r.MapOrPrefix}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.json");File.WriteAllText(p,json,Encoding.UTF8);return p;}
+static Ctx BuildContext(string input){if(File.Exists(input)){if(!".bsp".Equals(Path.GetExtension(input),StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("rf_inventory file input must be .bsp");var d=Path.GetDirectoryName(input)!;return new Ctx(d,new(){Path.GetFileNameWithoutExtension(input)!},true);}var bsp=Directory.GetFiles(input,"*.bsp",SearchOption.TopDirectoryOnly);if(bsp.Length==0)throw new InvalidOperationException("rf_inventory directory input requires at least one .bsp in top level");return new Ctx(input,bsp.Select(Path.GetFileNameWithoutExtension).Cast<string>().OrderBy(x=>x,StringComparer.OrdinalIgnoreCase).ToList(),false);}
+static Report BuildReport(Ctx c,string raw){var m=new Metrics();var cap=new Caps();var files=Directory.GetFiles(c.Root,"*",SearchOption.TopDirectoryOnly).OrderBy(x=>x,StringComparer.OrdinalIgnoreCase).Where(x=>c.Prefixes.Any(p=>Path.GetFileNameWithoutExtension(x).StartsWith(p,StringComparison.OrdinalIgnoreCase))).Take(MaxFiles).ToList();if(files.Count==MaxFiles)cap.SiblingScanCapHit=true;var inv=new List<FileRec>();var ev=new List<RefEvidence>();var byName=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);foreach(var f in files){bool hit;var b=Read(f,MaxRead,out hit);if(hit)cap.FileReadCapHit=true;var rel=Path.GetRelativePath(c.Root,f).Replace('\\','/');var a=ExtractStrings(b,false,m,cap);var u=ExtractStrings(b,true,m,cap);var refs=ExtractRefs(a.Concat(u).ToList(),rel,m,cap);ev.AddRange(refs);inv.Add(new FileRec{RelativePath=rel,Filename=Path.GetFileName(f),Extension=Path.GetExtension(f),Size=new FileInfo(f).Length,SamePrefixGroup=Prefix(Path.GetFileName(f),c.Prefixes),ReferencedFilenames=refs.Select(x=>x.NormalizedTarget).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x=>x,StringComparer.OrdinalIgnoreCase).ToList()});byName[Path.GetFileName(f)]=rel;}ev=ev.OrderBy(x=>x.SourceFile,StringComparer.OrdinalIgnoreCase).ThenBy(x=>x.ByteOffset).ThenBy(x=>x.ExtractedToken,StringComparer.OrdinalIgnoreCase).ToList();var edges=BuildEdges(inv,ev,byName,m,cap);m.DependencyEdgesEmitted=edges.Count;return new Report{Tool="rf_inventory",Mode="read_only",InputMode=c.FromBsp?"single_bsp_file":"single_directory",InputPathSanitized=San(raw),RootDirectorySanitized=San(c.Root),MapOrPrefix=c.Prefixes.Count==1?c.Prefixes[0]:"multi",GeneratedUtc=DateTime.UtcNow,InventoryTable=inv.OrderBy(x=>x.RelativePath,StringComparer.OrdinalIgnoreCase).ToList(),ReferenceEvidence=ev,DependencyGraph=new Graph{Edges=edges},OffsetEvidenceSummary=BuildOffsetSummary(ev),ExtractionMetrics=m,CapHits=cap};}
+static List<Edge> BuildEdges(List<FileRec> inv,List<RefEvidence> ev,Dictionary<string,string> byName,Metrics m,Caps c){var ext=inv.ToDictionary(x=>x.RelativePath,x=>x.Extension,StringComparer.OrdinalIgnoreCase);var grp=ev.GroupBy(x=>$"{x.SourceFile}|{Path.GetFileName(x.NormalizedTarget)}",StringComparer.OrdinalIgnoreCase);var outE=new List<Edge>();foreach(var g in grp.OrderBy(x=>x.Key,StringComparer.OrdinalIgnoreCase)){var p=g.Key.Split('|');if(!byName.TryGetValue(p[1],out var to))continue;var offs=g.Select(x=>x.ByteOffset).Distinct().OrderBy(x=>x).ToList();outE.Add(new Edge{From=p[0],To=to,EvidenceType="string_reference",Confidence="low",SourceExtension=ext.GetValueOrDefault(p[0],"").ToLowerInvariant(),TargetExtension=ext.GetValueOrDefault(to,"").ToLowerInvariant(),PrimaryReferenceOffset=offs.FirstOrDefault(),ReferenceOffsets=offs});if(outE.Count>=MaxEdges){c.DependencyEdgesCapHit=true;break;}}return outE;}
+static List<RefEvidence> ExtractRefs(List<StrTok> toks,string src,Metrics m,Caps c){var rx=new Regex(@"([A-Za-z0-9_\-./\\]+\.[A-Za-z0-9]{1,8})",RegexOptions.Compiled);var set=new HashSet<string>(StringComparer.OrdinalIgnoreCase);var outL=new List<RefEvidence>();foreach(var t in toks.OrderBy(x=>x.Offset).ThenBy(x=>x.Text,StringComparer.OrdinalIgnoreCase)){foreach(Match mm in rx.Matches(t.Text)){m.RefsSeen++;var tok=mm.Groups[1].Value.Trim().Replace('\\','/');var ext=Path.GetExtension(tok);if(!RefExts.Contains(ext)){m.RefsDiscarded++;m.NoisyRefsDiscarded++;m.DiscardReasons.Inc("unsupported_extension");continue;}var key=$"{src}|{t.Offset}|{tok}|{t.Encoding}";if(!set.Add(key)){m.DuplicateRefsSuppressed++;m.RefsDiscarded++;m.DiscardReasons.Inc("duplicate");continue;}outL.Add(new RefEvidence{ByteOffset=t.Offset+mm.Groups[1].Index*(t.Encoding=="utf16le"?2:1),Encoding=t.Encoding,TokenLength=tok.Length,SourceFile=src,ExtractedToken=tok,NormalizedTarget=tok,EvidenceType="string_reference",Confidence="low"});m.RefsKept++;if(outL.Count>=MaxRefs){c.RefsCapHit=true;m.DiscardReasons.Inc("cap_reached");return outL;}}}return outL;}
+static List<StrTok> ExtractStrings(byte[] d,bool utf16,Metrics m,Caps c){var outL=new List<StrTok>();var seen=new HashSet<string>(StringComparer.OrdinalIgnoreCase);var sb=new StringBuilder();int start=-1;void flush(int end){if(sb.Length==0)return;var s=sb.ToString().Trim();var off=start;sb.Clear();start=-1;if(s.Length<4){m.DiscardReasons.Inc("too_short");if(utf16)m.Utf16StringsDiscarded++;else m.AsciiStringsDiscarded++;return;}if(s.Count(ch=>!char.IsLetterOrDigit(ch)&&ch!='.'&&ch!='/'&&ch!='\\'&&ch!='_'&&ch!='-')>s.Length/2){m.DiscardReasons.Inc("excessive_punctuation");if(utf16)m.Utf16StringsDiscarded++;else m.AsciiStringsDiscarded++;return;}if(!seen.Add(s)){m.DiscardReasons.Inc("duplicate");if(utf16)m.Utf16StringsDiscarded++;else m.AsciiStringsDiscarded++;return;}outL.Add(new StrTok(s,off,utf16?"utf16le":"ascii"));if(utf16)m.Utf16StringsKept++;else m.AsciiStringsKept++;}
+if(utf16){for(int i=0;i+1<d.Length;i+=2){m.Utf16StringsSeen++;var lo=d[i];var hi=d[i+1];if(hi==0&&lo>=32&&lo<=126){if(sb.Length==0)start=i;sb.Append((char)lo);}else flush(i);if(outL.Count>=MaxStrings){c.Utf16CapHit=true;m.DiscardReasons.Inc("cap_reached");break;}}flush(d.Length);}else{for(int i=0;i<d.Length;i++){m.AsciiStringsSeen++;var b=d[i];if(b>=32&&b<=126){if(sb.Length==0)start=i;sb.Append((char)b);}else flush(i);if(outL.Count>=MaxStrings){c.AsciiCapHit=true;m.DiscardReasons.Inc("cap_reached");break;}}flush(d.Length);}return outL.OrderBy(x=>x.Offset).ThenBy(x=>x.Text,StringComparer.OrdinalIgnoreCase).ToList();}
+static OffsetSummary BuildOffsetSummary(List<RefEvidence> e){var byFile=e.GroupBy(x=>x.SourceFile,StringComparer.OrdinalIgnoreCase).Select(g=>new KV{Key=g.Key,Value=g.Count()}).OrderBy(x=>x.Key,StringComparer.OrdinalIgnoreCase).ToList();var byExt=e.GroupBy(x=>Path.GetExtension(x.NormalizedTarget),StringComparer.OrdinalIgnoreCase).Select(g=>new KV{Key=g.Key,Value=g.Count()}).OrderBy(x=>x.Key,StringComparer.OrdinalIgnoreCase).ToList();var offs=e.Select(x=>x.ByteOffset).ToList();return new OffsetSummary{RefsByFile=byFile,RefsByExtension=byExt,MinOffset=offs.Count==0?0:offs.Min(),MaxOffset=offs.Count==0?0:offs.Max(),RepeatedOffsets=e.GroupBy(x=>x.ByteOffset).Where(g=>g.Count()>1).Select(g=>g.Key).OrderBy(x=>x).ToList(),RepeatedTokens=e.GroupBy(x=>x.NormalizedTarget,StringComparer.OrdinalIgnoreCase).Where(g=>g.Count()>1).Select(g=>g.Key).OrderBy(x=>x,StringComparer.OrdinalIgnoreCase).ToList(),SuspiciousClustersObservation="Observation only: repeated offsets/tokens can indicate packed string tables."};}
+static string Prefix(string fn,List<string> p){var s=Path.GetFileNameWithoutExtension(fn);return p.OrderBy(x=>x.Length).FirstOrDefault(x=>s.StartsWith(x,StringComparison.OrdinalIgnoreCase))??"unknown";}static byte[] Read(string p,int m,out bool h){using var f=File.OpenRead(p);h=f.Length>m;var l=(int)Math.Min(f.Length,m);var b=new byte[l];var r=f.Read(b,0,l);return r==l?b:b.Take(r).ToArray();}static string ResolveOutputRoot(string? x){if(!string.IsNullOrWhiteSpace(x))return Path.GetFullPath(x);var a=Environment.GetEnvironmentVariable("ArtifactOutputRoot");return !string.IsNullOrWhiteSpace(a)?Path.Combine(Path.GetFullPath(a),"reports","rf_inventory"):Path.Combine(Environment.CurrentDirectory,"_runs","reports","rf_inventory");}static string San(string p){try{var c=Path.GetFullPath(Environment.CurrentDirectory);if(p.StartsWith(c,StringComparison.OrdinalIgnoreCase))return Path.GetRelativePath(c,p).Replace('\\','/');}catch{}return Path.GetFileName(p);} 
+record Ctx(string Root,List<string> Prefixes,bool FromBsp);record StrTok(string Text,int Offset,string Encoding);
+class Report{public string Tool{get;set;}="rf_inventory";public string Mode{get;set;}="read_only";public string InputMode{get;set;}="";public string InputPathSanitized{get;set;}="";public string RootDirectorySanitized{get;set;}="";public string MapOrPrefix{get;set;}="";public DateTime GeneratedUtc{get;set;}public List<FileRec> InventoryTable{get;set;}=new();public List<RefEvidence> ReferenceEvidence{get;set;}=new();public Graph DependencyGraph{get;set;}=new();public OffsetSummary OffsetEvidenceSummary{get;set;}=new();public Metrics ExtractionMetrics{get;set;}=new();public Caps CapHits{get;set;}=new();}
+class FileRec{public string RelativePath{get;set;}="";public string Filename{get;set;}="";public string Extension{get;set;}="";public long Size{get;set;}public string SamePrefixGroup{get;set;}="";public List<string> ReferencedFilenames{get;set;}=new();}
+class RefEvidence{public int ByteOffset{get;set;}public string Encoding{get;set;}="";public int TokenLength{get;set;}public string SourceFile{get;set;}="";public string ExtractedToken{get;set;}="";public string NormalizedTarget{get;set;}="";public string EvidenceType{get;set;}="string_reference";public string Confidence{get;set;}="low";}
+class Edge{public string From{get;set;}="";public string To{get;set;}="";public string EvidenceType{get;set;}="string_reference";public string Confidence{get;set;}="low";public string SourceExtension{get;set;}="";public string TargetExtension{get;set;}="";public int PrimaryReferenceOffset{get;set;}public List<int> ReferenceOffsets{get;set;}=new();}
+class Graph{public List<Edge> Edges{get;set;}=new();}
+class OffsetSummary{public List<KV> RefsByFile{get;set;}=new();public List<KV> RefsByExtension{get;set;}=new();public int MinOffset{get;set;}public int MaxOffset{get;set;}public List<int> RepeatedOffsets{get;set;}=new();public List<string> RepeatedTokens{get;set;}=new();public string SuspiciousClustersObservation{get;set;}="";}
+class KV{public string Key{get;set;}="";public int Value{get;set;}}
+class Metrics{public int AsciiStringsSeen{get;set;}public int AsciiStringsKept{get;set;}public int AsciiStringsDiscarded{get;set;}public int Utf16StringsSeen{get;set;}public int Utf16StringsKept{get;set;}public int Utf16StringsDiscarded{get;set;}public int RefsSeen{get;set;}public int RefsKept{get;set;}public int RefsDiscarded{get;set;}public int DuplicateRefsSuppressed{get;set;}public int NoisyRefsDiscarded{get;set;}public int DependencyEdgesEmitted{get;set;}public int DependencyEdgesSuppressed{get;set;}public Dictionary<string,int> DiscardReasons{get;set;}=new(StringComparer.OrdinalIgnoreCase);}class Caps{public bool FileReadCapHit{get;set;}public bool AsciiCapHit{get;set;}public bool Utf16CapHit{get;set;}public bool RefsCapHit{get;set;}public bool DependencyEdgesCapHit{get;set;}public bool ReportSizeCapHit{get;set;}public bool SiblingScanCapHit{get;set;}}
 }
-
-internal static class DictExt{ public static void Inc(this Dictionary<string,int> d,string k){ d[k]=d.TryGetValue(k,out var v)?v+1:1; }}
-
+internal static class D{public static void Inc(this Dictionary<string,int> d,string k){d[k]=d.TryGetValue(k,out var v)?v+1:v=1;}}

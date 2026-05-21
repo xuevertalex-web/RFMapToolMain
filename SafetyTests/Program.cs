@@ -1,42 +1,20 @@
-using System;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Text.Json;
-using RFMapToolSharp.Tools;
+using System;using System.IO;using System.Linq;using System.Text;using System.Text.Json;using RFMapToolSharp.Tools;
+var root=Path.Combine(Path.GetTempPath(),"rf_inv_off_"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);try{
+var d=Path.Combine(root,"m1");Directory.CreateDirectory(d);
+// ascii at offset 0, utf16 after padding
+File.WriteAllBytes(Path.Combine(d,"m1.bsp"),BuildAsciiUtf16());
+File.WriteAllBytes(Path.Combine(d,"m1.r3t"),Encoding.ASCII.GetBytes("m1.dds m1.dds\0"));
+File.WriteAllBytes(Path.Combine(d,"m1.dds"),Encoding.ASCII.GetBytes("DDS\0"));
+var outDir=Path.Combine(root,"r");var p=RfInventoryTool.Run(d,outDir);var j=JsonDocument.Parse(File.ReadAllText(p));
+var ev=j.RootElement.GetProperty("ReferenceEvidence").EnumerateArray().ToArray();Req(ev.Any(x=>x.GetProperty("Encoding").GetString()=="ascii"),"ascii evidence missing");Req(ev.Any(x=>x.GetProperty("Encoding").GetString()=="utf16le"),"utf16 evidence missing");
+Req(ev.SequenceEqual(ev.OrderBy(x=>x.GetProperty("SourceFile").GetString()).ThenBy(x=>x.GetProperty("ByteOffset").GetInt32()).ThenBy(x=>x.GetProperty("ExtractedToken").GetString()),JsonElementComparer.Instance),"non deterministic ordering");
+var edges=j.RootElement.GetProperty("DependencyGraph").GetProperty("Edges").EnumerateArray().ToArray();Req(edges.Any(e=>e.GetProperty("ReferenceOffsets").GetArrayLength()>1),"duplicate edge offsets not aggregated");
+Req(!ev.Any(x=>x.GetProperty("ExtractedToken").GetString()=="bad.zzz"),"discarded ref emitted offset");
+Req(j.RootElement.GetProperty("OffsetEvidenceSummary").TryGetProperty("MinOffset",out _),"offset summary missing");
+Console.WriteLine("SAFETYTEST PASS");
+}finally{try{Directory.Delete(root,true);}catch{}}
+static byte[] BuildAsciiUtf16(){using var ms=new MemoryStream();var a=Encoding.ASCII.GetBytes("m1.r3t m1.dds bad.zzz\0");ms.Write(a); if((ms.Length % 2)!=0) ms.WriteByte(0); for(int i=0;i<10;i++)ms.WriteByte(0); if((ms.Length % 2)!=0) ms.WriteByte(0);foreach(var c in "m1.dds"){ms.WriteByte((byte)c);ms.WriteByte(0);}ms.WriteByte(0);ms.WriteByte(0);foreach(var c in "m1.dds"){ms.WriteByte((byte)c);ms.WriteByte(0);}ms.WriteByte(0);ms.WriteByte(0);return ms.ToArray();}
+static void Req(bool c,string m){if(!c)throw new Exception(m);}sealed class JsonElementComparer:IEqualityComparer<JsonElement>{public static readonly JsonElementComparer Instance=new();public bool Equals(JsonElement x,JsonElement y)=>x.GetRawText()==y.GetRawText();public int GetHashCode(JsonElement o)=>o.GetRawText().GetHashCode();}
 
-var root = Path.Combine(Path.GetTempPath(), "rf_inventory_fixture_" + Guid.NewGuid().ToString("N"));
-Directory.CreateDirectory(root);
-try
-{
-    var d1 = Path.Combine(root, "m1"); Directory.CreateDirectory(d1);
-    File.WriteAllBytes(Path.Combine(d1, "m1.bsp"), Build("m1.r3t m1.r3t bad.zzz .... ////"));
-    File.WriteAllBytes(Path.Combine(d1, "m1.r3t"), Build("m1.dds m1.r3m"));
-    File.WriteAllBytes(Path.Combine(d1, "m1.dds"), Build("DDS"));
 
-    var outDir = Path.Combine(root, "reports");
-    var p1 = RfInventoryTool.Run(d1, outDir);
-    var p2 = RfInventoryTool.Run(d1, outDir);
-    var j1 = JsonDocument.Parse(File.ReadAllText(p1));
-    var j2 = JsonDocument.Parse(File.ReadAllText(p2));
 
-    var m = j1.RootElement.GetProperty("ExtractionMetrics");
-    Req(m.GetProperty("RefsDiscarded").GetInt32() > 0, "discarded refs not counted");
-    Req(m.GetProperty("DuplicateRefsSuppressed").GetInt32() > 0, "duplicate refs not counted");
-    Req(j1.RootElement.GetProperty("CapHits").TryGetProperty("RefsCapHit", out _), "cap metadata missing");
-
-    var e1 = j1.RootElement.GetProperty("DependencyGraph").GetProperty("Edges").EnumerateArray().Select(x=>x.GetRawText()).ToArray();
-    var e2 = j2.RootElement.GetProperty("DependencyGraph").GetProperty("Edges").EnumerateArray().Select(x=>x.GetRawText()).ToArray();
-    Req(e1.SequenceEqual(e2), "non deterministic output");
-
-    var summary = new { per_map = new[]{ new { map="m1", extraction_totals=m.GetRawText(), cap_hits=j1.RootElement.GetProperty("CapHits").GetRawText() } } };
-    var sumPath = Path.Combine(outDir, "cross_map_metrics_summary.json");
-    File.WriteAllText(sumPath, JsonSerializer.Serialize(summary));
-    Req(File.Exists(sumPath), "cross map aggregation missing");
-
-    Console.WriteLine("SAFETYTEST PASS");
-}
-finally { try { Directory.Delete(root, true); } catch { } }
-
-static byte[] Build(string s){ using var ms=new MemoryStream(); for(int i=0;i<200;i++){ var a=Encoding.ASCII.GetBytes(s); ms.Write(a); ms.WriteByte(0);} return ms.ToArray(); }
-static void Req(bool c,string m){ if(!c) throw new Exception(m); }
