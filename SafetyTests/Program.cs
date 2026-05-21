@@ -13,7 +13,7 @@ try
     Directory.CreateDirectory(d);
 
     File.WriteAllBytes(Path.Combine(d, "m1.bsp"), BuildAsciiUtf16());
-    File.WriteAllBytes(Path.Combine(d, "m1.r3t"), Encoding.ASCII.GetBytes("m1.dds texture/foo.dds effect/bar.eff 12345 ../outside/tx.tga bad.zzz\0"));
+    File.WriteAllBytes(Path.Combine(d, "m1.r3t"), Encoding.ASCII.GetBytes("m1.dds ./m1/tex/a.dds texture/foo.dds effect/bar.eff 12345 ../outside/tx.tga bad.zzz\0"));
     File.WriteAllBytes(Path.Combine(d, "m1.r3m"), Encoding.ASCII.GetBytes("MAT\0"));
     File.WriteAllBytes(Path.Combine(d, "m1.dds"), Encoding.ASCII.GetBytes("DDS\0"));
     File.WriteAllBytes(Path.Combine(d, "m1.big"), new byte[700000]);
@@ -87,6 +87,8 @@ try
     Req(sug.All(x => x.GetProperty("RequiresExplicitApprovedRootProbe").GetBoolean()), "suggestions must require explicit probe");
     Req(sug.SequenceEqual(sug.OrderBy(x => x.GetProperty("SuggestedRootFragment").GetString()), JsonElementComparer.Instance), "suggestion ordering not deterministic");
     Req((sug.First(x => (x.GetProperty("SuggestedRootFragment").GetString() ?? "") == "texture").GetProperty("Confidence").GetString() ?? "") != "low", "repeated path prefix did not increase confidence");
+    Req((sug.First(x => (x.GetProperty("SuggestedRootFragment").GetString() ?? "") == "texture").GetProperty("Category").GetString() ?? "") == "path_prefix_resource_candidate", "category mismatch");
+    Req(sug.Any(x => (x.GetProperty("SuggestedRootFragment").GetString() ?? "") == "m1" && (x.GetProperty("Category").GetString() ?? "") == "map_name_or_same_prefix_fragment" && (x.GetProperty("ProbeRecommendation").GetString() ?? "") == "not_recommended"), "map-name fragment was not demoted");
 
     Console.WriteLine("SAFETYTEST PASS");
 }

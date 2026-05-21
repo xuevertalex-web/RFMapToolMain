@@ -150,6 +150,10 @@ internal static class RfInventoryTool
 
     private static List<CandidateRootSuggestion> BuildCandidateRootSuggestions(Ctx c, List<UnresolvedReferenceRow> unresolved)
     {
+        var knownMapNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "accretia","bellato","cora","sette","platform01"
+        };
         var groups = new Dictionary<string, SuggestionAccumulator>(StringComparer.OrdinalIgnoreCase);
         foreach (var u in unresolved)
         {
@@ -160,6 +164,9 @@ internal static class RfInventoryTool
             string? frag = null;
             string reason;
             string confidence;
+            string category;
+            string demotion = "";
+            string probeRecommendation = "recommended";
 
             var norm = token.Replace('\\', '/').Trim();
             var slash = norm.IndexOf('/');
@@ -168,6 +175,7 @@ internal static class RfInventoryTool
                 frag = norm[..slash].ToLowerInvariant();
                 reason = "observed from unresolved token path prefix";
                 confidence = "medium";
+                category = "path_prefix_resource_candidate";
             }
             else if (norm.StartsWith("./", StringComparison.Ordinal) && norm.Length > 2)
             {
@@ -178,6 +186,7 @@ internal static class RfInventoryTool
                     frag = tail[..s2].ToLowerInvariant();
                     reason = "observed from unresolved token path prefix";
                     confidence = "medium";
+                    category = "path_prefix_resource_candidate";
                 }
                 else
                 {
@@ -185,6 +194,7 @@ internal static class RfInventoryTool
                     frag = ext switch { ".dds" or ".tga" => "texture", ".eff" => "effect", ".wav" or ".ogg" or ".snd" => "sound", _ => null };
                     reason = "observed from unresolved token extension-only guess";
                     confidence = "low";
+                    category = "extension_only_guess";
                 }
             }
             else
@@ -193,9 +203,22 @@ internal static class RfInventoryTool
                 frag = ext switch { ".dds" or ".tga" => "texture", ".eff" => "effect", ".wav" or ".ogg" or ".snd" => "sound", _ => null };
                 reason = "observed from unresolved token extension-only guess";
                 confidence = "low";
+                category = "extension_only_guess";
             }
 
             if (string.IsNullOrWhiteSpace(frag)) continue;
+            if (Regex.IsMatch(frag, @"^[0-9.\-]+$") || frag is "." or "..")
+            {
+                continue;
+            }
+            var mapName = u.MapName?.ToLowerInvariant() ?? "";
+            if (string.Equals(frag, mapName, StringComparison.OrdinalIgnoreCase) || string.Equals(frag, Path.GetFileNameWithoutExtension(u.SourceFile), StringComparison.OrdinalIgnoreCase) || knownMapNames.Contains(frag))
+            {
+                category = "map_name_or_same_prefix_fragment";
+                confidence = "low";
+                demotion = "fragment matches map-name/same-prefix/known-map";
+                probeRecommendation = "not_recommended";
+            }
             if (!groups.TryGetValue(frag, out var acc))
             {
                 acc = new SuggestionAccumulator();
@@ -208,6 +231,9 @@ internal static class RfInventoryTool
             if (acc.Examples.Count < 6) acc.Examples.Add(norm);
             acc.Confidence = MaxConfidence(acc.Confidence, confidence);
             acc.Reason = reason;
+            acc.Category = category;
+            if (!string.IsNullOrWhiteSpace(demotion)) acc.DemotionReason = demotion;
+            if (probeRecommendation == "not_recommended") acc.ProbeRecommendation = "not_recommended";
         }
 
         var outList = new List<CandidateRootSuggestion>();
@@ -215,7 +241,7 @@ internal static class RfInventoryTool
         {
             var acc = kv.Value;
             var conf = acc.Confidence;
-            if (acc.SourceMaps.Count >= 2 && conf == "medium") conf = "high";
+            if (acc.SourceMaps.Count >= 2 && conf == "medium" && acc.Category == "path_prefix_resource_candidate") conf = "high";
             outList.Add(new CandidateRootSuggestion
             {
                 SuggestedRootFragment = kv.Key,
@@ -226,6 +252,9 @@ internal static class RfInventoryTool
                 ExampleTokens = acc.Examples.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
                 Confidence = conf,
                 Reason = acc.Reason,
+                Category = acc.Category,
+                DemotionReason = acc.DemotionReason,
+                ProbeRecommendation = acc.ProbeRecommendation,
                 RequiresExplicitApprovedRootProbe = true
             });
         }
@@ -618,8 +647,8 @@ internal static class RfInventoryTool
     private sealed class CompanionFileMatrixSummary { public List<CompanionMatrixRow> Rows { get; set; } = new(); public List<KV> CommonExtensionCombinations { get; set; } = new(); public List<string> MissingCompanionObservations { get; set; } = new(); public List<string> RareCompanionObservations { get; set; } = new(); public List<string> InconsistentCompanionObservations { get; set; } = new(); public List<string> UniversalCompanions { get; set; } = new(); public List<string> FrequentCompanions { get; set; } = new(); public List<string> RareCompanions { get; set; } = new(); public List<string> MissingCompanions { get; set; } = new(); public List<string> UnstableOptionalCompanions { get; set; } = new(); public string RecommendedNextReadOnlyProbe { get; set; } = ""; }
     private sealed class UnresolvedReferenceRow { public string MapName { get; set; } = ""; public string SourceFile { get; set; } = ""; public string ExtractedToken { get; set; } = ""; public string NormalizedTarget { get; set; } = ""; public string TargetExtension { get; set; } = ""; public string Encoding { get; set; } = ""; public int ByteOffset { get; set; } public string EvidenceType { get; set; } = ""; public string Confidence { get; set; } = ""; public string ReasonUnresolved { get; set; } = ""; }
     private sealed class UnresolvedReferenceAggregation { public List<KV> ByExtension { get; set; } = new(); public List<KV> BySourceExtension { get; set; } = new(); public List<KV> ByMap { get; set; } = new(); public List<KV> MostCommonMissingTargets { get; set; } = new(); public List<KV> SourceFilesMostUnresolved { get; set; } = new(); public string Observation { get; set; } = ""; }
-    private sealed class CandidateRootSuggestion { public string SuggestedRootFragment { get; set; } = ""; public int EvidenceTokensCount { get; set; } public List<string> SourceMaps { get; set; } = new(); public List<string> SourceExtensions { get; set; } = new(); public List<string> TargetExtensions { get; set; } = new(); public List<string> ExampleTokens { get; set; } = new(); public string Confidence { get; set; } = "low"; public string Reason { get; set; } = ""; public bool RequiresExplicitApprovedRootProbe { get; set; } = true; }
-    private sealed class SuggestionAccumulator { public int Count; public HashSet<string> SourceMaps { get; } = new(StringComparer.OrdinalIgnoreCase); public HashSet<string> SourceExts { get; } = new(StringComparer.OrdinalIgnoreCase); public HashSet<string> TargetExts { get; } = new(StringComparer.OrdinalIgnoreCase); public List<string> Examples { get; } = new(); public string Confidence { get; set; } = "low"; public string Reason { get; set; } = ""; }
+    private sealed class CandidateRootSuggestion { public string SuggestedRootFragment { get; set; } = ""; public int EvidenceTokensCount { get; set; } public List<string> SourceMaps { get; set; } = new(); public List<string> SourceExtensions { get; set; } = new(); public List<string> TargetExtensions { get; set; } = new(); public List<string> ExampleTokens { get; set; } = new(); public string Confidence { get; set; } = "low"; public string Reason { get; set; } = ""; public string Category { get; set; } = ""; public string DemotionReason { get; set; } = ""; public string ProbeRecommendation { get; set; } = "recommended"; public bool RequiresExplicitApprovedRootProbe { get; set; } = true; }
+    private sealed class SuggestionAccumulator { public int Count; public HashSet<string> SourceMaps { get; } = new(StringComparer.OrdinalIgnoreCase); public HashSet<string> SourceExts { get; } = new(StringComparer.OrdinalIgnoreCase); public HashSet<string> TargetExts { get; } = new(StringComparer.OrdinalIgnoreCase); public List<string> Examples { get; } = new(); public string Confidence { get; set; } = "low"; public string Reason { get; set; } = ""; public string Category { get; set; } = "extension_only_guess"; public string DemotionReason { get; set; } = ""; public string ProbeRecommendation { get; set; } = "recommended"; }
     private sealed class CandidateResourceRootProbeSummary { public string ResourceRootMode { get; set; } = ""; public string PolicyDecision { get; set; } = ""; public string SanitizedRootLabel { get; set; } = ""; public bool IsRelativeInput { get; set; } public bool Missing { get; set; } public bool ReparseRejected { get; set; } public int FilesConsidered { get; set; } public int MatchesFound { get; set; } public int UnresolvedRefsResolvedAsCandidates { get; set; } public int UnresolvedRefsStillMissing { get; set; } public int SkippedDueToCaps { get; set; } public string Notes { get; set; } = ""; }
     private sealed class KV { public string Key { get; set; } = ""; public int Value { get; set; } }
     private sealed class Metrics { public int AsciiStringsSeen { get; set; } public int AsciiStringsKept { get; set; } public int AsciiStringsDiscarded { get; set; } public int Utf16StringsSeen { get; set; } public int Utf16StringsKept { get; set; } public int Utf16StringsDiscarded { get; set; } public int RefsSeen { get; set; } public int RefsKept { get; set; } public int RefsDiscarded { get; set; } public int DuplicateRefsSuppressed { get; set; } public int NoisyRefsDiscarded { get; set; } public int DependencyEdgesEmitted { get; set; } public int DependencyEdgesSuppressed { get; set; } public Dictionary<string, int> DiscardReasons { get; set; } = new(StringComparer.OrdinalIgnoreCase); }
