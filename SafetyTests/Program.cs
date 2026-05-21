@@ -89,6 +89,9 @@ try
     Req((sug.First(x => (x.GetProperty("SuggestedRootFragment").GetString() ?? "") == "texture").GetProperty("Confidence").GetString() ?? "") != "low", "repeated path prefix did not increase confidence");
     Req((sug.First(x => (x.GetProperty("SuggestedRootFragment").GetString() ?? "") == "texture").GetProperty("Category").GetString() ?? "") == "path_prefix_resource_candidate", "category mismatch");
     Req(sug.Any(x => (x.GetProperty("SuggestedRootFragment").GetString() ?? "") == "m1" && (x.GetProperty("Category").GetString() ?? "") == "map_name_or_same_prefix_fragment" && (x.GetProperty("ProbeRecommendation").GetString() ?? "") == "not_recommended"), "map-name fragment was not demoted");
+    Req(!sug.Any(x => (x.GetProperty("SuggestedRootFragment").GetString() ?? "") == "map" && (x.GetProperty("ProbeRecommendation").GetString() ?? "") == "recommended"), "map must be denied");
+    Req(!sug.Any(x => (x.GetProperty("SuggestedRootFragment").GetString() ?? "") == "ex" && (x.GetProperty("ProbeRecommendation").GetString() ?? "") == "recommended"), "ex must be denied");
+    Req(!sug.Any(x => (x.GetProperty("SuggestedRootFragment").GetString() ?? "").Contains(".dd.", StringComparison.OrdinalIgnoreCase)), "artifact-like fragment should be rejected");
 
     Console.WriteLine("SAFETYTEST PASS");
 }

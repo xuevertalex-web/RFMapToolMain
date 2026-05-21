@@ -167,6 +167,7 @@ internal static class RfInventoryTool
             string category;
             string demotion = "";
             string probeRecommendation = "recommended";
+            string notRecommendedReason = "";
 
             var norm = token.Replace('\\', '/').Trim();
             var slash = norm.IndexOf('/');
@@ -211,6 +212,36 @@ internal static class RfInventoryTool
             {
                 continue;
             }
+            var looksLikeFilename = Regex.IsMatch(frag, @"\.[A-Za-z0-9]{1,4}$");
+            var cleanScore = ComputeCleanFragmentScore(frag, looksLikeFilename);
+            if (frag.Equals("map", StringComparison.OrdinalIgnoreCase) || frag.Equals("ex", StringComparison.OrdinalIgnoreCase))
+            {
+                category = "noisy_or_numeric_rejected";
+                confidence = "low";
+                probeRecommendation = "not_recommended";
+                notRecommendedReason = "generic fragment denied";
+            }
+            else if (frag.Length < 3)
+            {
+                category = "noisy_or_numeric_rejected";
+                confidence = "low";
+                probeRecommendation = "not_recommended";
+                notRecommendedReason = "very short fragment rejected";
+            }
+            else if (frag.Contains(".dd.", StringComparison.OrdinalIgnoreCase) || Regex.IsMatch(frag, @"[^\w\-]$"))
+            {
+                category = "noisy_or_numeric_rejected";
+                confidence = "low";
+                probeRecommendation = "not_recommended";
+                notRecommendedReason = "artifact-like or punctuation-ending fragment";
+            }
+            else if (looksLikeFilename)
+            {
+                category = "noisy_or_numeric_rejected";
+                confidence = "low";
+                probeRecommendation = "not_recommended";
+                notRecommendedReason = "looks like filename not directory";
+            }
             var mapName = u.MapName?.ToLowerInvariant() ?? "";
             if (string.Equals(frag, mapName, StringComparison.OrdinalIgnoreCase) || string.Equals(frag, Path.GetFileNameWithoutExtension(u.SourceFile), StringComparison.OrdinalIgnoreCase) || knownMapNames.Contains(frag))
             {
@@ -218,6 +249,7 @@ internal static class RfInventoryTool
                 confidence = "low";
                 demotion = "fragment matches map-name/same-prefix/known-map";
                 probeRecommendation = "not_recommended";
+                notRecommendedReason = "map-name/same-prefix fragment demoted";
             }
             if (!groups.TryGetValue(frag, out var acc))
             {
@@ -234,6 +266,9 @@ internal static class RfInventoryTool
             acc.Category = category;
             if (!string.IsNullOrWhiteSpace(demotion)) acc.DemotionReason = demotion;
             if (probeRecommendation == "not_recommended") acc.ProbeRecommendation = "not_recommended";
+            if (!string.IsNullOrWhiteSpace(notRecommendedReason)) acc.NotRecommendedReason = notRecommendedReason;
+            acc.CleanFragmentScore = Math.Max(acc.CleanFragmentScore, cleanScore);
+            acc.LooksLikeFilename = acc.LooksLikeFilename || looksLikeFilename;
         }
 
         var outList = new List<CandidateRootSuggestion>();
@@ -255,10 +290,23 @@ internal static class RfInventoryTool
                 Category = acc.Category,
                 DemotionReason = acc.DemotionReason,
                 ProbeRecommendation = acc.ProbeRecommendation,
+                NotRecommendedReason = acc.NotRecommendedReason,
+                CleanFragmentScore = acc.CleanFragmentScore,
+                LooksLikeFilename = acc.LooksLikeFilename,
                 RequiresExplicitApprovedRootProbe = true
             });
         }
         return outList;
+    }
+
+    private static int ComputeCleanFragmentScore(string frag, bool looksLikeFilename)
+    {
+        var score = 0;
+        if (frag.Length >= 3) score += 2;
+        if (Regex.IsMatch(frag, "^[a-zA-Z0-9_\\-]+$")) score += 2;
+        if (!looksLikeFilename) score += 2;
+        if (!frag.Equals("map", StringComparison.OrdinalIgnoreCase) && !frag.Equals("ex", StringComparison.OrdinalIgnoreCase)) score += 1;
+        return score;
     }
 
     private static string MaxConfidence(string a, string b)
@@ -647,8 +695,8 @@ internal static class RfInventoryTool
     private sealed class CompanionFileMatrixSummary { public List<CompanionMatrixRow> Rows { get; set; } = new(); public List<KV> CommonExtensionCombinations { get; set; } = new(); public List<string> MissingCompanionObservations { get; set; } = new(); public List<string> RareCompanionObservations { get; set; } = new(); public List<string> InconsistentCompanionObservations { get; set; } = new(); public List<string> UniversalCompanions { get; set; } = new(); public List<string> FrequentCompanions { get; set; } = new(); public List<string> RareCompanions { get; set; } = new(); public List<string> MissingCompanions { get; set; } = new(); public List<string> UnstableOptionalCompanions { get; set; } = new(); public string RecommendedNextReadOnlyProbe { get; set; } = ""; }
     private sealed class UnresolvedReferenceRow { public string MapName { get; set; } = ""; public string SourceFile { get; set; } = ""; public string ExtractedToken { get; set; } = ""; public string NormalizedTarget { get; set; } = ""; public string TargetExtension { get; set; } = ""; public string Encoding { get; set; } = ""; public int ByteOffset { get; set; } public string EvidenceType { get; set; } = ""; public string Confidence { get; set; } = ""; public string ReasonUnresolved { get; set; } = ""; }
     private sealed class UnresolvedReferenceAggregation { public List<KV> ByExtension { get; set; } = new(); public List<KV> BySourceExtension { get; set; } = new(); public List<KV> ByMap { get; set; } = new(); public List<KV> MostCommonMissingTargets { get; set; } = new(); public List<KV> SourceFilesMostUnresolved { get; set; } = new(); public string Observation { get; set; } = ""; }
-    private sealed class CandidateRootSuggestion { public string SuggestedRootFragment { get; set; } = ""; public int EvidenceTokensCount { get; set; } public List<string> SourceMaps { get; set; } = new(); public List<string> SourceExtensions { get; set; } = new(); public List<string> TargetExtensions { get; set; } = new(); public List<string> ExampleTokens { get; set; } = new(); public string Confidence { get; set; } = "low"; public string Reason { get; set; } = ""; public string Category { get; set; } = ""; public string DemotionReason { get; set; } = ""; public string ProbeRecommendation { get; set; } = "recommended"; public bool RequiresExplicitApprovedRootProbe { get; set; } = true; }
-    private sealed class SuggestionAccumulator { public int Count; public HashSet<string> SourceMaps { get; } = new(StringComparer.OrdinalIgnoreCase); public HashSet<string> SourceExts { get; } = new(StringComparer.OrdinalIgnoreCase); public HashSet<string> TargetExts { get; } = new(StringComparer.OrdinalIgnoreCase); public List<string> Examples { get; } = new(); public string Confidence { get; set; } = "low"; public string Reason { get; set; } = ""; public string Category { get; set; } = "extension_only_guess"; public string DemotionReason { get; set; } = ""; public string ProbeRecommendation { get; set; } = "recommended"; }
+    private sealed class CandidateRootSuggestion { public string SuggestedRootFragment { get; set; } = ""; public int EvidenceTokensCount { get; set; } public List<string> SourceMaps { get; set; } = new(); public List<string> SourceExtensions { get; set; } = new(); public List<string> TargetExtensions { get; set; } = new(); public List<string> ExampleTokens { get; set; } = new(); public string Confidence { get; set; } = "low"; public string Reason { get; set; } = ""; public string Category { get; set; } = ""; public string DemotionReason { get; set; } = ""; public string ProbeRecommendation { get; set; } = "recommended"; public string NotRecommendedReason { get; set; } = ""; public int CleanFragmentScore { get; set; } public bool LooksLikeFilename { get; set; } public string NotProbedReason { get; set; } = ""; public bool RequiresExplicitApprovedRootProbe { get; set; } = true; }
+    private sealed class SuggestionAccumulator { public int Count; public HashSet<string> SourceMaps { get; } = new(StringComparer.OrdinalIgnoreCase); public HashSet<string> SourceExts { get; } = new(StringComparer.OrdinalIgnoreCase); public HashSet<string> TargetExts { get; } = new(StringComparer.OrdinalIgnoreCase); public List<string> Examples { get; } = new(); public string Confidence { get; set; } = "low"; public string Reason { get; set; } = ""; public string Category { get; set; } = "extension_only_guess"; public string DemotionReason { get; set; } = ""; public string ProbeRecommendation { get; set; } = "recommended"; public string NotRecommendedReason { get; set; } = ""; public int CleanFragmentScore { get; set; } = 0; public bool LooksLikeFilename { get; set; } = false; }
     private sealed class CandidateResourceRootProbeSummary { public string ResourceRootMode { get; set; } = ""; public string PolicyDecision { get; set; } = ""; public string SanitizedRootLabel { get; set; } = ""; public bool IsRelativeInput { get; set; } public bool Missing { get; set; } public bool ReparseRejected { get; set; } public int FilesConsidered { get; set; } public int MatchesFound { get; set; } public int UnresolvedRefsResolvedAsCandidates { get; set; } public int UnresolvedRefsStillMissing { get; set; } public int SkippedDueToCaps { get; set; } public string Notes { get; set; } = ""; }
     private sealed class KV { public string Key { get; set; } = ""; public int Value { get; set; } }
     private sealed class Metrics { public int AsciiStringsSeen { get; set; } public int AsciiStringsKept { get; set; } public int AsciiStringsDiscarded { get; set; } public int Utf16StringsSeen { get; set; } public int Utf16StringsKept { get; set; } public int Utf16StringsDiscarded { get; set; } public int RefsSeen { get; set; } public int RefsKept { get; set; } public int RefsDiscarded { get; set; } public int DuplicateRefsSuppressed { get; set; } public int NoisyRefsDiscarded { get; set; } public int DependencyEdgesEmitted { get; set; } public int DependencyEdgesSuppressed { get; set; } public Dictionary<string, int> DiscardReasons { get; set; } = new(StringComparer.OrdinalIgnoreCase); }
