@@ -62,12 +62,12 @@ try
     var uObs = uAgg.GetProperty("Observation").GetString() ?? "";
     Req(uObs.Contains("observed unresolved reference", StringComparison.OrdinalIgnoreCase), "observational wording missing");
     var probeNone = j1.RootElement.GetProperty("CandidateResourceRootProbe");
-    Req((probeNone.GetProperty("ResourceRootLabel").GetString() ?? "") == "none", "no-root probe state invalid");
+    Req((probeNone.GetProperty("PolicyDecision").GetString() ?? "") == "no_root", "no-root probe state invalid");
 
     var rr = Path.Combine(Directory.GetCurrentDirectory(), "_runs", "safety_resroot");
     Directory.CreateDirectory(rr);
     File.WriteAllBytes(Path.Combine(rr, "tx.tga"), Encoding.ASCII.GetBytes("X"));
-    var p3 = RfInventoryTool.Run(d, outDir, rr);
+    var p3 = RfInventoryTool.Run(d, outDir, null, rr);
     var j3 = JsonDocument.Parse(File.ReadAllText(p3));
     var probe = j3.RootElement.GetProperty("CandidateResourceRootProbe");
     Req(probe.GetProperty("MatchesFound").GetInt32() >= 1, "candidate root did not resolve missing target");
@@ -77,6 +77,7 @@ try
     var j4 = JsonDocument.Parse(File.ReadAllText(p4));
     var probeBad = j4.RootElement.GetProperty("CandidateResourceRootProbe");
     Req((probeBad.GetProperty("Notes").GetString() ?? "").Contains("rejected", StringComparison.OrdinalIgnoreCase), "outside workspace not rejected");
+    Req((probeBad.GetProperty("ResourceRootMode").GetString() ?? "") == "rejected_outside_workspace", "resource root mode not set");
 
     Console.WriteLine("SAFETYTEST PASS");
 }

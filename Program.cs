@@ -79,6 +79,7 @@ class Program
         string? rfInventoryInputArg = null;
         string? rfInventoryOutArg = null;
         string? rfInventoryResourceRootArg = null;
+        string? rfInventoryApprovedResourceRootArg = null;
         bool rfInventorySelfTest = args.Any(a => string.Equals(a, "--rf-inventory-selftest", StringComparison.OrdinalIgnoreCase));
         bool setteCleanIsolated = args.Any(a => string.Equals(a, "--sette-clean-isolated", StringComparison.OrdinalIgnoreCase));
         bool setteRaw = args.Any(a => string.Equals(a, "--sette-raw", StringComparison.OrdinalIgnoreCase));
@@ -336,6 +337,14 @@ class Program
         }
         for (int i = 0; i < args.Length - 1; i++)
         {
+            if (string.Equals(args[i], "--rf-inventory-approved-resource-root", StringComparison.OrdinalIgnoreCase))
+            {
+                rfInventoryApprovedResourceRootArg = args[i + 1];
+                break;
+            }
+        }
+        for (int i = 0; i < args.Length - 1; i++)
+        {
             if (string.Equals(args[i], "--repack-map", StringComparison.OrdinalIgnoreCase))
             {
                 repackMapArg = args[i + 1];
@@ -490,7 +499,7 @@ class Program
 
         if (!string.IsNullOrWhiteSpace(rfInventoryInputArg))
         {
-            var outPath = RfInventoryTool.Run(rfInventoryInputArg, rfInventoryOutArg, rfInventoryResourceRootArg);
+            var outPath = RfInventoryTool.Run(rfInventoryInputArg, rfInventoryOutArg, rfInventoryResourceRootArg, rfInventoryApprovedResourceRootArg);
             Console.WriteLine($"[RF-INVENTORY] Mode: read-only");
             Console.WriteLine($"[RF-INVENTORY] Report: {outPath}");
             return;

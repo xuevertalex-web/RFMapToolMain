@@ -25,7 +25,7 @@ internal static class RfInventoryTool
 
     public static void RunSelfTest() { }
 
-    public static string Run(string input, string? outRoot, string? resourceRoot = null)
+    public static string Run(string input, string? outRoot, string? resourceRoot = null, string? approvedExternalResourceRoot = null)
     {
         if (string.IsNullOrWhiteSpace(input)) throw new InvalidOperationException("rf_inventory requires input path");
         var full = Path.GetFullPath(input);
@@ -35,7 +35,7 @@ internal static class RfInventoryTool
         var outDir = ResolveOutputRoot(outRoot);
         Directory.CreateDirectory(outDir);
 
-        var report = BuildReport(ctx, full, resourceRoot);
+        var report = BuildReport(ctx, full, resourceRoot, approvedExternalResourceRoot);
         var json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
         if (Encoding.UTF8.GetByteCount(json) > MaxReport)
         {
@@ -64,7 +64,7 @@ internal static class RfInventoryTool
         return new Ctx(input, bsp.Select(Path.GetFileNameWithoutExtension).Cast<string>().OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(), false);
     }
 
-    private static Report BuildReport(Ctx c, string raw, string? resourceRoot)
+    private static Report BuildReport(Ctx c, string raw, string? resourceRoot, string? approvedExternalResourceRoot)
     {
         var m = new Metrics();
         var cap = new Caps();
@@ -119,7 +119,7 @@ internal static class RfInventoryTool
         ev = ev.OrderBy(x => x.SourceFile, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.ByteOffset).ThenBy(x => x.ExtractedToken, StringComparer.OrdinalIgnoreCase).ToList();
         var unresolvedAudit = BuildUnresolvedAudit(c, inv, ev, unresolved);
         var unresolvedAgg = BuildUnresolvedAggregation(c, unresolvedAudit);
-        var candidateProbe = BuildCandidateProbe(resourceRoot, unresolvedAudit);
+        var candidateProbe = BuildCandidateProbe(resourceRoot, approvedExternalResourceRoot, unresolvedAudit);
         var edges = BuildEdges(inv, ev, byName, m, cap);
         m.DependencyEdgesEmitted = edges.Count;
 
@@ -146,22 +146,38 @@ internal static class RfInventoryTool
         };
     }
 
-    private static CandidateResourceRootProbeSummary BuildCandidateProbe(string? resourceRoot, List<UnresolvedReferenceRow> unresolved)
+    private static CandidateResourceRootProbeSummary BuildCandidateProbe(string? resourceRoot, string? approvedExternalResourceRoot, List<UnresolvedReferenceRow> unresolved)
     {
+        if (!string.IsNullOrWhiteSpace(approvedExternalResourceRoot))
+        {
+            return BuildCandidateProbeCore(approvedExternalResourceRoot, unresolved, allowExternal: true);
+        }
         if (string.IsNullOrWhiteSpace(resourceRoot))
         {
-            return new CandidateResourceRootProbeSummary { ResourceRootLabel = "none", Notes = "no explicit candidate resource root provided" };
+            return new CandidateResourceRootProbeSummary { ResourceRootMode = "workspace_root", PolicyDecision = "no_root", SanitizedRootLabel = "none", Notes = "no explicit candidate resource root provided" };
         }
+        return BuildCandidateProbeCore(resourceRoot, unresolved, allowExternal: false);
+    }
+
+    private static CandidateResourceRootProbeSummary BuildCandidateProbeCore(string rootArg, List<UnresolvedReferenceRow> unresolved, bool allowExternal)
+    {
         string full;
-        try { full = Path.GetFullPath(resourceRoot); } catch { return new CandidateResourceRootProbeSummary { ResourceRootLabel = "invalid", Notes = "sanitized path error" }; }
+        var isRelative = !Path.IsPathFullyQualified(rootArg);
+        try { full = Path.GetFullPath(rootArg); } catch { return new CandidateResourceRootProbeSummary { ResourceRootMode = allowExternal ? "approved_external_candidate_root" : "workspace_root", PolicyDecision = "rejected_invalid_path", SanitizedRootLabel = "invalid", Notes = "sanitized path error" }; }
         var ws = Path.GetFullPath(Environment.CurrentDirectory);
-        if (!full.StartsWith(ws, StringComparison.OrdinalIgnoreCase))
+        var mode = allowExternal ? "approved_external_candidate_root" : "workspace_root";
+        if (!allowExternal && !full.StartsWith(ws, StringComparison.OrdinalIgnoreCase))
         {
-            return new CandidateResourceRootProbeSummary { ResourceRootLabel = Path.GetFileName(full), Notes = "candidate root rejected by workspace policy" };
+            return new CandidateResourceRootProbeSummary { ResourceRootMode = "rejected_outside_workspace", PolicyDecision = "rejected_outside_workspace", SanitizedRootLabel = Path.GetFileName(full), IsRelativeInput = isRelative, Notes = "candidate root rejected by workspace policy" };
         }
         if (!Directory.Exists(full))
         {
-            return new CandidateResourceRootProbeSummary { ResourceRootLabel = Path.GetFileName(full), Notes = "candidate root not found" };
+            return new CandidateResourceRootProbeSummary { ResourceRootMode = mode, PolicyDecision = "rejected_missing", SanitizedRootLabel = Path.GetFileName(full), IsRelativeInput = isRelative, Missing = true, Notes = "candidate root missing" };
+        }
+        var di = new DirectoryInfo(full);
+        if (di.Attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            return new CandidateResourceRootProbeSummary { ResourceRootMode = mode, PolicyDecision = "rejected_reparse", SanitizedRootLabel = Path.GetFileName(full), IsRelativeInput = isRelative, ReparseRejected = true, Notes = "reparse/symlink rejected" };
         }
         const int cap = 2000;
         var files = Directory.GetFiles(full, "*", SearchOption.TopDirectoryOnly).Take(cap + 1).Select(Path.GetFileName).Where(x => !string.IsNullOrWhiteSpace(x)).Cast<string>().ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -170,7 +186,10 @@ internal static class RfInventoryTool
         var matches = unresolved.Where(u => files.Contains(Path.GetFileName(u.NormalizedTarget))).ToList();
         return new CandidateResourceRootProbeSummary
         {
-            ResourceRootLabel = Path.GetFileName(full),
+            ResourceRootMode = mode,
+            PolicyDecision = "accepted",
+            SanitizedRootLabel = Path.GetFileName(full),
+            IsRelativeInput = isRelative,
             FilesConsidered = files.Count,
             MatchesFound = matches.Count,
             UnresolvedRefsResolvedAsCandidates = matches.Count,
@@ -507,7 +526,7 @@ internal static class RfInventoryTool
     private sealed class CompanionFileMatrixSummary { public List<CompanionMatrixRow> Rows { get; set; } = new(); public List<KV> CommonExtensionCombinations { get; set; } = new(); public List<string> MissingCompanionObservations { get; set; } = new(); public List<string> RareCompanionObservations { get; set; } = new(); public List<string> InconsistentCompanionObservations { get; set; } = new(); public List<string> UniversalCompanions { get; set; } = new(); public List<string> FrequentCompanions { get; set; } = new(); public List<string> RareCompanions { get; set; } = new(); public List<string> MissingCompanions { get; set; } = new(); public List<string> UnstableOptionalCompanions { get; set; } = new(); public string RecommendedNextReadOnlyProbe { get; set; } = ""; }
     private sealed class UnresolvedReferenceRow { public string MapName { get; set; } = ""; public string SourceFile { get; set; } = ""; public string ExtractedToken { get; set; } = ""; public string NormalizedTarget { get; set; } = ""; public string TargetExtension { get; set; } = ""; public string Encoding { get; set; } = ""; public int ByteOffset { get; set; } public string EvidenceType { get; set; } = ""; public string Confidence { get; set; } = ""; public string ReasonUnresolved { get; set; } = ""; }
     private sealed class UnresolvedReferenceAggregation { public List<KV> ByExtension { get; set; } = new(); public List<KV> BySourceExtension { get; set; } = new(); public List<KV> ByMap { get; set; } = new(); public List<KV> MostCommonMissingTargets { get; set; } = new(); public List<KV> SourceFilesMostUnresolved { get; set; } = new(); public string Observation { get; set; } = ""; }
-    private sealed class CandidateResourceRootProbeSummary { public string ResourceRootLabel { get; set; } = ""; public int FilesConsidered { get; set; } public int MatchesFound { get; set; } public int UnresolvedRefsResolvedAsCandidates { get; set; } public int UnresolvedRefsStillMissing { get; set; } public int SkippedDueToCaps { get; set; } public string Notes { get; set; } = ""; }
+    private sealed class CandidateResourceRootProbeSummary { public string ResourceRootMode { get; set; } = ""; public string PolicyDecision { get; set; } = ""; public string SanitizedRootLabel { get; set; } = ""; public bool IsRelativeInput { get; set; } public bool Missing { get; set; } public bool ReparseRejected { get; set; } public int FilesConsidered { get; set; } public int MatchesFound { get; set; } public int UnresolvedRefsResolvedAsCandidates { get; set; } public int UnresolvedRefsStillMissing { get; set; } public int SkippedDueToCaps { get; set; } public string Notes { get; set; } = ""; }
     private sealed class KV { public string Key { get; set; } = ""; public int Value { get; set; } }
     private sealed class Metrics { public int AsciiStringsSeen { get; set; } public int AsciiStringsKept { get; set; } public int AsciiStringsDiscarded { get; set; } public int Utf16StringsSeen { get; set; } public int Utf16StringsKept { get; set; } public int Utf16StringsDiscarded { get; set; } public int RefsSeen { get; set; } public int RefsKept { get; set; } public int RefsDiscarded { get; set; } public int DuplicateRefsSuppressed { get; set; } public int NoisyRefsDiscarded { get; set; } public int DependencyEdgesEmitted { get; set; } public int DependencyEdgesSuppressed { get; set; } public Dictionary<string, int> DiscardReasons { get; set; } = new(StringComparer.OrdinalIgnoreCase); }
     private sealed class Caps { public bool FileReadCapHit { get; set; } public bool AsciiCapHit { get; set; } public bool Utf16CapHit { get; set; } public bool RefsCapHit { get; set; } public bool DependencyEdgesCapHit { get; set; } public bool ReportSizeCapHit { get; set; } public bool SiblingScanCapHit { get; set; } }
