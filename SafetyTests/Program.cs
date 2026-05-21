@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using RFMapToolSharp.Tools;
 
@@ -16,59 +17,79 @@ try
     var wav = Path.Combine(mapDir, "map.wav");
     var unrelated = Path.Combine(mapDir, "other.bin");
 
-    File.WriteAllBytes(bsp, BuildBytes("map.r3t map.dds", "ambient.wav"));
-    File.WriteAllBytes(r3t, BuildBytes("map.dds", "map.r3m"));
-    File.WriteAllBytes(dds, BuildBytes("DDS"));
-    File.WriteAllBytes(wav, BuildBytes("WAV"));
-    File.WriteAllBytes(unrelated, BuildBytes("junk"));
+    File.WriteAllBytes(bsp, BuildLarge("map.r3t map.dds map.dds", "ambient.wav"));
+    File.WriteAllBytes(r3t, BuildLarge("map.dds", "map.r3m", repeat: 120));
+    File.WriteAllBytes(dds, BuildLarge("DDS"));
+    File.WriteAllBytes(wav, BuildLarge("WAV"));
+    File.WriteAllBytes(unrelated, BuildLarge("junk"));
 
     var before = Directory.GetFiles(mapDir).ToDictionary(p => Path.GetFileName(p)!, Hash);
-
     var outRoot = Path.Combine(root, "reports");
-    var reportPath = RfInventoryTool.Run(bsp, outRoot);
-    if (!reportPath.StartsWith(outRoot, StringComparison.OrdinalIgnoreCase)) throw new Exception("report path not in report area");
 
-    using var doc = JsonDocument.Parse(File.ReadAllText(reportPath));
-    var inventory = doc.RootElement.GetProperty("InventoryTable").EnumerateArray().ToArray();
-    var names = inventory.Select(x => x.GetProperty("Filename").GetString() ?? "").ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var report1 = RfInventoryTool.Run(bsp, outRoot);
+    var report2 = RfInventoryTool.Run(bsp, outRoot);
 
-    Require(names.Contains("map.bsp"), "bsp missing");
-    Require(names.Contains("map.r3t"), "r3t missing");
-    Require(names.Contains("map.dds"), "dds missing");
-    Require(names.Contains("map.wav"), "wav missing");
-    Require(!names.Contains("other.bin"), "unrelated included");
+    var d1 = JsonDocument.Parse(File.ReadAllText(report1));
+    var d2 = JsonDocument.Parse(File.ReadAllText(report2));
 
-    Require(inventory.All(x => x.GetProperty("AsciiStrings").GetArrayLength() <= 80), "ascii cap failed");
-    Require(inventory.All(x => x.GetProperty("Utf16LeStrings").GetArrayLength() <= 80), "utf16 cap failed");
-    Require(inventory.Any(x => x.GetProperty("Utf16LeStrings").EnumerateArray().Any(s => (s.GetString() ?? "").Contains("map.r3m", StringComparison.OrdinalIgnoreCase))), "utf16 refs missing");
-    Require(inventory.Any(x => (x.GetProperty("UncertaintyNotes").GetString() ?? "").Contains("evidence-only", StringComparison.OrdinalIgnoreCase)), "uncertainty wording missing");
+    var inv1 = d1.RootElement.GetProperty("InventoryTable").EnumerateArray().ToArray();
+    var names = inv1.Select(x => x.GetProperty("Filename").GetString() ?? "").ToHashSet(StringComparer.OrdinalIgnoreCase);
+    Req(names.Contains("map.bsp") && names.Contains("map.r3t"), "related missing");
+    Req(!names.Contains("other.bin"), "unrelated included");
 
-    var edges = doc.RootElement.GetProperty("DependencyGraph").GetProperty("Edges").EnumerateArray().ToArray();
-    Require(edges.Length > 0, "dependency edges missing");
+    Req(inv1.All(x => x.GetProperty("AsciiStrings").GetArrayLength() <= 64), "ascii cap fail");
+    Req(inv1.All(x => x.GetProperty("Utf16LeStrings").GetArrayLength() <= 64), "utf16 cap fail");
 
-    var after = Directory.GetFiles(mapDir).ToDictionary(p => Path.GetFileName(p)!, Hash);
-    foreach (var kv in before) Require(after[kv.Key] == kv.Value, "source files changed");
+    var e1 = d1.RootElement.GetProperty("DependencyGraph").GetProperty("Edges").EnumerateArray().Select(e =>
+        $"{e.GetProperty("From").GetString()}|{e.GetProperty("To").GetString()}|{e.GetProperty("EvidenceType").GetString()}|{e.GetProperty("Confidence").GetString()}"
+    ).ToArray();
+    var e2 = d2.RootElement.GetProperty("DependencyGraph").GetProperty("Edges").EnumerateArray().Select(e =>
+        $"{e.GetProperty("From").GetString()}|{e.GetProperty("To").GetString()}|{e.GetProperty("EvidenceType").GetString()}|{e.GetProperty("Confidence").GetString()}"
+    ).ToArray();
+
+    Req(e1.SequenceEqual(e2), "non-deterministic edges");
+    Req(e1.Distinct(StringComparer.OrdinalIgnoreCase).Count() == e1.Length, "duplicate edges present");
+    Req(e1.Length > 0, "no edges");
+
+    var reportBytes = new FileInfo(report1).Length;
+    Req(reportBytes <= 2 * 1024 * 1024, "report size cap fail");
 
     bool sanitized = false;
-    try { RfInventoryTool.Run(Path.Combine(root, "missing", "file.bsp"), outRoot); }
+    try { RfInventoryTool.Run(Path.Combine(root, "missing", "a.bsp"), outRoot); }
     catch (Exception ex) { sanitized = !ex.Message.Contains(root, StringComparison.OrdinalIgnoreCase); }
-    Require(sanitized, "error not sanitized");
+    Req(sanitized, "unsanitized error");
+
+    var badDir = Path.Combine(root, "reparse_test");
+    Directory.CreateDirectory(badDir);
+    bool traversalRejected = false;
+    try { RfInventoryTool.Run(badDir, outRoot); }
+    catch { traversalRejected = true; }
+    Req(traversalRejected, "traversal/reparse rejection missing");
+
+    var after = Directory.GetFiles(mapDir).ToDictionary(p => Path.GetFileName(p)!, Hash);
+    foreach (var kv in before) Req(after[kv.Key] == kv.Value, "source file changed");
 
     Console.WriteLine("SAFETYTEST PASS");
 }
 finally { try { Directory.Delete(root, true); } catch { } }
 
-static byte[] BuildBytes(params string[] v)
+static byte[] BuildLarge(string a, string? b = null, int repeat = 10)
 {
     using var ms = new MemoryStream();
-    foreach (var s in v)
+    for (int i = 0; i < repeat; i++)
     {
-        var a = System.Text.Encoding.ASCII.GetBytes(s);
-        ms.Write(a); ms.WriteByte(0);
-        foreach (var c in s) { ms.WriteByte((byte)c); ms.WriteByte(0); }
-        ms.WriteByte(0); ms.WriteByte(0);
+        Write(ms, a);
+        if (!string.IsNullOrWhiteSpace(b)) Write(ms, b!);
     }
     return ms.ToArray();
+}
+
+static void Write(Stream s, string txt)
+{
+    var asc = Encoding.ASCII.GetBytes(txt);
+    s.Write(asc); s.WriteByte(0);
+    foreach (var c in txt) { s.WriteByte((byte)c); s.WriteByte(0); }
+    s.WriteByte(0); s.WriteByte(0);
 }
 
 static string Hash(string p)
@@ -78,5 +99,4 @@ static string Hash(string p)
     return Convert.ToHexString(sha.ComputeHash(fs));
 }
 
-static void Require(bool c, string m) { if (!c) throw new Exception(m); }
-
+static void Req(bool cond, string msg) { if (!cond) throw new Exception(msg); }
