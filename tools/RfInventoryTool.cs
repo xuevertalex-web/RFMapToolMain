@@ -25,7 +25,7 @@ internal static class RfInventoryTool
 
     public static void RunSelfTest() { }
 
-    public static string Run(string input, string? outRoot)
+    public static string Run(string input, string? outRoot, string? resourceRoot = null)
     {
         if (string.IsNullOrWhiteSpace(input)) throw new InvalidOperationException("rf_inventory requires input path");
         var full = Path.GetFullPath(input);
@@ -35,7 +35,7 @@ internal static class RfInventoryTool
         var outDir = ResolveOutputRoot(outRoot);
         Directory.CreateDirectory(outDir);
 
-        var report = BuildReport(ctx, full);
+        var report = BuildReport(ctx, full, resourceRoot);
         var json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
         if (Encoding.UTF8.GetByteCount(json) > MaxReport)
         {
@@ -64,7 +64,7 @@ internal static class RfInventoryTool
         return new Ctx(input, bsp.Select(Path.GetFileNameWithoutExtension).Cast<string>().OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(), false);
     }
 
-    private static Report BuildReport(Ctx c, string raw)
+    private static Report BuildReport(Ctx c, string raw, string? resourceRoot)
     {
         var m = new Metrics();
         var cap = new Caps();
@@ -119,6 +119,7 @@ internal static class RfInventoryTool
         ev = ev.OrderBy(x => x.SourceFile, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.ByteOffset).ThenBy(x => x.ExtractedToken, StringComparer.OrdinalIgnoreCase).ToList();
         var unresolvedAudit = BuildUnresolvedAudit(c, inv, ev, unresolved);
         var unresolvedAgg = BuildUnresolvedAggregation(c, unresolvedAudit);
+        var candidateProbe = BuildCandidateProbe(resourceRoot, unresolvedAudit);
         var edges = BuildEdges(inv, ev, byName, m, cap);
         m.DependencyEdgesEmitted = edges.Count;
 
@@ -139,8 +140,43 @@ internal static class RfInventoryTool
             CompanionFileMatrix = BuildCompanionMatrix(c, inv, ev),
             UnresolvedReferenceAudit = unresolvedAudit,
             UnresolvedReferenceAggregation = unresolvedAgg,
+            CandidateResourceRootProbe = candidateProbe,
             ExtractionMetrics = m,
             CapHits = cap
+        };
+    }
+
+    private static CandidateResourceRootProbeSummary BuildCandidateProbe(string? resourceRoot, List<UnresolvedReferenceRow> unresolved)
+    {
+        if (string.IsNullOrWhiteSpace(resourceRoot))
+        {
+            return new CandidateResourceRootProbeSummary { ResourceRootLabel = "none", Notes = "no explicit candidate resource root provided" };
+        }
+        string full;
+        try { full = Path.GetFullPath(resourceRoot); } catch { return new CandidateResourceRootProbeSummary { ResourceRootLabel = "invalid", Notes = "sanitized path error" }; }
+        var ws = Path.GetFullPath(Environment.CurrentDirectory);
+        if (!full.StartsWith(ws, StringComparison.OrdinalIgnoreCase))
+        {
+            return new CandidateResourceRootProbeSummary { ResourceRootLabel = Path.GetFileName(full), Notes = "candidate root rejected by workspace policy" };
+        }
+        if (!Directory.Exists(full))
+        {
+            return new CandidateResourceRootProbeSummary { ResourceRootLabel = Path.GetFileName(full), Notes = "candidate root not found" };
+        }
+        const int cap = 2000;
+        var files = Directory.GetFiles(full, "*", SearchOption.TopDirectoryOnly).Take(cap + 1).Select(Path.GetFileName).Where(x => !string.IsNullOrWhiteSpace(x)).Cast<string>().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var skipped = files.Count > cap;
+        if (skipped) files = files.Take(cap).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var matches = unresolved.Where(u => files.Contains(Path.GetFileName(u.NormalizedTarget))).ToList();
+        return new CandidateResourceRootProbeSummary
+        {
+            ResourceRootLabel = Path.GetFileName(full),
+            FilesConsidered = files.Count,
+            MatchesFound = matches.Count,
+            UnresolvedRefsResolvedAsCandidates = matches.Count,
+            UnresolvedRefsStillMissing = Math.Max(0, unresolved.Count - matches.Count),
+            SkippedDueToCaps = skipped ? 1 : 0,
+            Notes = "candidate match; observed nearby resource candidate"
         };
     }
 
@@ -460,7 +496,7 @@ internal static class RfInventoryTool
     private sealed record StrTok(string Text, int Offset, string Encoding);
     private sealed record SignatureInfo(string First16BytesHex, string First64BytesHex, string First256BytesHash, string? WholeFileHash, string PrintablePrefixPreview, double ZeroByteRatioFirst256, double PrintableRatioFirst256, string SuspectedTextOrBinary);
 
-    private sealed class Report { public string Tool { get; set; } = "rf_inventory"; public string Mode { get; set; } = "read_only"; public string InputMode { get; set; } = ""; public string InputPathSanitized { get; set; } = ""; public string RootDirectorySanitized { get; set; } = ""; public string MapOrPrefix { get; set; } = ""; public DateTime GeneratedUtc { get; set; } public List<FileRec> InventoryTable { get; set; } = new(); public List<RefEvidence> ReferenceEvidence { get; set; } = new(); public Graph DependencyGraph { get; set; } = new(); public OffsetSummary OffsetEvidenceSummary { get; set; } = new(); public SignatureGroupingSummary SignatureGroupingSummary { get; set; } = new(); public CompanionFileMatrixSummary CompanionFileMatrix { get; set; } = new(); public List<UnresolvedReferenceRow> UnresolvedReferenceAudit { get; set; } = new(); public UnresolvedReferenceAggregation UnresolvedReferenceAggregation { get; set; } = new(); public Metrics ExtractionMetrics { get; set; } = new(); public Caps CapHits { get; set; } = new(); }
+    private sealed class Report { public string Tool { get; set; } = "rf_inventory"; public string Mode { get; set; } = "read_only"; public string InputMode { get; set; } = ""; public string InputPathSanitized { get; set; } = ""; public string RootDirectorySanitized { get; set; } = ""; public string MapOrPrefix { get; set; } = ""; public DateTime GeneratedUtc { get; set; } public List<FileRec> InventoryTable { get; set; } = new(); public List<RefEvidence> ReferenceEvidence { get; set; } = new(); public Graph DependencyGraph { get; set; } = new(); public OffsetSummary OffsetEvidenceSummary { get; set; } = new(); public SignatureGroupingSummary SignatureGroupingSummary { get; set; } = new(); public CompanionFileMatrixSummary CompanionFileMatrix { get; set; } = new(); public List<UnresolvedReferenceRow> UnresolvedReferenceAudit { get; set; } = new(); public UnresolvedReferenceAggregation UnresolvedReferenceAggregation { get; set; } = new(); public CandidateResourceRootProbeSummary CandidateResourceRootProbe { get; set; } = new(); public Metrics ExtractionMetrics { get; set; } = new(); public Caps CapHits { get; set; } = new(); }
     private sealed class FileRec { public string RelativePath { get; set; } = ""; public string Filename { get; set; } = ""; public string Extension { get; set; } = ""; public long Size { get; set; } public string SamePrefixGroup { get; set; } = ""; public List<string> ReferencedFilenames { get; set; } = new(); public long FileSize { get; set; } public string First16BytesHex { get; set; } = ""; public string First64BytesHex { get; set; } = ""; public string First256BytesHash { get; set; } = ""; public string? WholeFileHash { get; set; } public string PrintablePrefixPreview { get; set; } = ""; public double ZeroByteRatioFirst256 { get; set; } public double PrintableRatioFirst256 { get; set; } public string SuspectedTextOrBinary { get; set; } = ""; }
     private sealed class RefEvidence { public int ByteOffset { get; set; } public string Encoding { get; set; } = ""; public int TokenLength { get; set; } public string SourceFile { get; set; } = ""; public string ExtractedToken { get; set; } = ""; public string NormalizedTarget { get; set; } = ""; public string EvidenceType { get; set; } = "string_reference"; public string Confidence { get; set; } = "low"; }
     private sealed class Edge { public string From { get; set; } = ""; public string To { get; set; } = ""; public string EvidenceType { get; set; } = "string_reference"; public string Confidence { get; set; } = "low"; public string SourceExtension { get; set; } = ""; public string TargetExtension { get; set; } = ""; public int PrimaryReferenceOffset { get; set; } public List<int> ReferenceOffsets { get; set; } = new(); }
@@ -471,6 +507,7 @@ internal static class RfInventoryTool
     private sealed class CompanionFileMatrixSummary { public List<CompanionMatrixRow> Rows { get; set; } = new(); public List<KV> CommonExtensionCombinations { get; set; } = new(); public List<string> MissingCompanionObservations { get; set; } = new(); public List<string> RareCompanionObservations { get; set; } = new(); public List<string> InconsistentCompanionObservations { get; set; } = new(); public List<string> UniversalCompanions { get; set; } = new(); public List<string> FrequentCompanions { get; set; } = new(); public List<string> RareCompanions { get; set; } = new(); public List<string> MissingCompanions { get; set; } = new(); public List<string> UnstableOptionalCompanions { get; set; } = new(); public string RecommendedNextReadOnlyProbe { get; set; } = ""; }
     private sealed class UnresolvedReferenceRow { public string MapName { get; set; } = ""; public string SourceFile { get; set; } = ""; public string ExtractedToken { get; set; } = ""; public string NormalizedTarget { get; set; } = ""; public string TargetExtension { get; set; } = ""; public string Encoding { get; set; } = ""; public int ByteOffset { get; set; } public string EvidenceType { get; set; } = ""; public string Confidence { get; set; } = ""; public string ReasonUnresolved { get; set; } = ""; }
     private sealed class UnresolvedReferenceAggregation { public List<KV> ByExtension { get; set; } = new(); public List<KV> BySourceExtension { get; set; } = new(); public List<KV> ByMap { get; set; } = new(); public List<KV> MostCommonMissingTargets { get; set; } = new(); public List<KV> SourceFilesMostUnresolved { get; set; } = new(); public string Observation { get; set; } = ""; }
+    private sealed class CandidateResourceRootProbeSummary { public string ResourceRootLabel { get; set; } = ""; public int FilesConsidered { get; set; } public int MatchesFound { get; set; } public int UnresolvedRefsResolvedAsCandidates { get; set; } public int UnresolvedRefsStillMissing { get; set; } public int SkippedDueToCaps { get; set; } public string Notes { get; set; } = ""; }
     private sealed class KV { public string Key { get; set; } = ""; public int Value { get; set; } }
     private sealed class Metrics { public int AsciiStringsSeen { get; set; } public int AsciiStringsKept { get; set; } public int AsciiStringsDiscarded { get; set; } public int Utf16StringsSeen { get; set; } public int Utf16StringsKept { get; set; } public int Utf16StringsDiscarded { get; set; } public int RefsSeen { get; set; } public int RefsKept { get; set; } public int RefsDiscarded { get; set; } public int DuplicateRefsSuppressed { get; set; } public int NoisyRefsDiscarded { get; set; } public int DependencyEdgesEmitted { get; set; } public int DependencyEdgesSuppressed { get; set; } public Dictionary<string, int> DiscardReasons { get; set; } = new(StringComparer.OrdinalIgnoreCase); }
     private sealed class Caps { public bool FileReadCapHit { get; set; } public bool AsciiCapHit { get; set; } public bool Utf16CapHit { get; set; } public bool RefsCapHit { get; set; } public bool DependencyEdgesCapHit { get; set; } public bool ReportSizeCapHit { get; set; } public bool SiblingScanCapHit { get; set; } }

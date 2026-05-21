@@ -61,6 +61,22 @@ try
     Req(uAgg.GetProperty("ByExtension").EnumerateArray().SequenceEqual(uAgg.GetProperty("ByExtension").EnumerateArray().OrderBy(x => -x.GetProperty("Value").GetInt32()).ThenBy(x => x.GetProperty("Key").GetString()), JsonElementComparer.Instance), "unresolved aggregation not deterministic");
     var uObs = uAgg.GetProperty("Observation").GetString() ?? "";
     Req(uObs.Contains("observed unresolved reference", StringComparison.OrdinalIgnoreCase), "observational wording missing");
+    var probeNone = j1.RootElement.GetProperty("CandidateResourceRootProbe");
+    Req((probeNone.GetProperty("ResourceRootLabel").GetString() ?? "") == "none", "no-root probe state invalid");
+
+    var rr = Path.Combine(Directory.GetCurrentDirectory(), "_runs", "safety_resroot");
+    Directory.CreateDirectory(rr);
+    File.WriteAllBytes(Path.Combine(rr, "tx.tga"), Encoding.ASCII.GetBytes("X"));
+    var p3 = RfInventoryTool.Run(d, outDir, rr);
+    var j3 = JsonDocument.Parse(File.ReadAllText(p3));
+    var probe = j3.RootElement.GetProperty("CandidateResourceRootProbe");
+    Req(probe.GetProperty("MatchesFound").GetInt32() >= 1, "candidate root did not resolve missing target");
+    Req((probe.GetProperty("Notes").GetString() ?? "").Contains("candidate match", StringComparison.OrdinalIgnoreCase), "candidate wording missing");
+
+    var p4 = RfInventoryTool.Run(d, outDir, "C:\\Windows");
+    var j4 = JsonDocument.Parse(File.ReadAllText(p4));
+    var probeBad = j4.RootElement.GetProperty("CandidateResourceRootProbe");
+    Req((probeBad.GetProperty("Notes").GetString() ?? "").Contains("rejected", StringComparison.OrdinalIgnoreCase), "outside workspace not rejected");
 
     Console.WriteLine("SAFETYTEST PASS");
 }
