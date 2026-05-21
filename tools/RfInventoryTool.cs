@@ -78,6 +78,7 @@ internal static class RfInventoryTool
 
         var inv = new List<FileRec>();
         var ev = new List<RefEvidence>();
+        var unresolved = new List<UnresolvedReferenceRow>();
         var byName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var f in files)
@@ -89,8 +90,9 @@ internal static class RfInventoryTool
 
             var ascii = ExtractStrings(b, false, m, cap);
             var utf16 = ExtractStrings(b, true, m, cap);
-            var refs = ExtractRefs(ascii.Concat(utf16).ToList(), rel, m, cap);
+            var refs = ExtractRefs(ascii.Concat(utf16).ToList(), rel, c.Prefixes.FirstOrDefault() ?? "multi", m, cap, out var unresolvedFromExtract);
             ev.AddRange(refs);
+            unresolved.AddRange(unresolvedFromExtract);
 
             var sig = BuildSignature(f, b, hit);
             inv.Add(new FileRec
@@ -115,6 +117,8 @@ internal static class RfInventoryTool
         }
 
         ev = ev.OrderBy(x => x.SourceFile, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.ByteOffset).ThenBy(x => x.ExtractedToken, StringComparer.OrdinalIgnoreCase).ToList();
+        var unresolvedAudit = BuildUnresolvedAudit(c, inv, ev, unresolved);
+        var unresolvedAgg = BuildUnresolvedAggregation(c, unresolvedAudit);
         var edges = BuildEdges(inv, ev, byName, m, cap);
         m.DependencyEdgesEmitted = edges.Count;
 
@@ -133,8 +137,74 @@ internal static class RfInventoryTool
             OffsetEvidenceSummary = BuildOffsetSummary(ev),
             SignatureGroupingSummary = BuildSignatureGrouping(inv),
             CompanionFileMatrix = BuildCompanionMatrix(c, inv, ev),
+            UnresolvedReferenceAudit = unresolvedAudit,
+            UnresolvedReferenceAggregation = unresolvedAgg,
             ExtractionMetrics = m,
             CapHits = cap
+        };
+    }
+
+    private static List<UnresolvedReferenceRow> BuildUnresolvedAudit(Ctx c, List<FileRec> inv, List<RefEvidence> ev, List<UnresolvedReferenceRow> seed)
+    {
+        var rows = new List<UnresolvedReferenceRow>(seed);
+        var present = new HashSet<string>(inv.Select(x => x.Filename), StringComparer.OrdinalIgnoreCase);
+        foreach (var e in ev.OrderBy(x => x.SourceFile, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.ByteOffset).ThenBy(x => x.ExtractedToken, StringComparer.OrdinalIgnoreCase))
+        {
+            var targetName = Path.GetFileName(e.NormalizedTarget);
+            var ext = Path.GetExtension(e.NormalizedTarget);
+            string reason;
+            if (!RefExts.Contains(ext))
+            {
+                reason = "unsupported_extension";
+            }
+            else if (e.NormalizedTarget.Contains("../", StringComparison.Ordinal) || e.NormalizedTarget.Contains("..\\", StringComparison.Ordinal))
+            {
+                reason = "outside_bounded_scope";
+            }
+            else if (string.IsNullOrWhiteSpace(targetName))
+            {
+                reason = "candidate_missing";
+            }
+            else if (present.Contains(targetName))
+            {
+                continue;
+            }
+            else if (e.NormalizedTarget.Contains("/") || e.NormalizedTarget.Contains("\\"))
+            {
+                reason = "ambiguous_case_or_path";
+            }
+            else
+            {
+                reason = "not_present_in_same_directory";
+            }
+
+            rows.Add(new UnresolvedReferenceRow
+            {
+                MapName = c.Prefixes.FirstOrDefault() ?? "multi",
+                SourceFile = e.SourceFile,
+                ExtractedToken = e.ExtractedToken,
+                NormalizedTarget = e.NormalizedTarget,
+                TargetExtension = ext,
+                Encoding = e.Encoding,
+                ByteOffset = e.ByteOffset,
+                EvidenceType = e.EvidenceType,
+                Confidence = e.Confidence,
+                ReasonUnresolved = reason
+            });
+        }
+        return rows;
+    }
+
+    private static UnresolvedReferenceAggregation BuildUnresolvedAggregation(Ctx c, List<UnresolvedReferenceRow> rows)
+    {
+        return new UnresolvedReferenceAggregation
+        {
+            ByExtension = rows.GroupBy(x => x.TargetExtension, StringComparer.OrdinalIgnoreCase).Select(g => new KV { Key = g.Key, Value = g.Count() }).OrderByDescending(x => x.Value).ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase).ToList(),
+            BySourceExtension = rows.GroupBy(x => Path.GetExtension(x.SourceFile), StringComparer.OrdinalIgnoreCase).Select(g => new KV { Key = g.Key, Value = g.Count() }).OrderByDescending(x => x.Value).ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase).ToList(),
+            ByMap = rows.GroupBy(x => x.MapName, StringComparer.OrdinalIgnoreCase).Select(g => new KV { Key = g.Key, Value = g.Count() }).OrderByDescending(x => x.Value).ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase).ToList(),
+            MostCommonMissingTargets = rows.GroupBy(x => Path.GetFileName(x.NormalizedTarget), StringComparer.OrdinalIgnoreCase).Where(g => !string.IsNullOrWhiteSpace(g.Key)).Select(g => new KV { Key = g.Key!, Value = g.Count() }).OrderByDescending(x => x.Value).ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase).Take(20).ToList(),
+            SourceFilesMostUnresolved = rows.GroupBy(x => x.SourceFile, StringComparer.OrdinalIgnoreCase).Select(g => new KV { Key = g.Key, Value = g.Count() }).OrderByDescending(x => x.Value).ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase).Take(20).ToList(),
+            Observation = "observed unresolved reference; candidate external resource folder"
         };
     }
 
@@ -238,8 +308,9 @@ internal static class RfInventoryTool
         return outE;
     }
 
-    private static List<RefEvidence> ExtractRefs(List<StrTok> toks, string src, Metrics m, Caps c)
+    private static List<RefEvidence> ExtractRefs(List<StrTok> toks, string src, string mapName, Metrics m, Caps c, out List<UnresolvedReferenceRow> unresolved)
     {
+        unresolved = new List<UnresolvedReferenceRow>();
         var rx = new Regex(@"([A-Za-z0-9_\-./\\]+\.[A-Za-z0-9]{1,8})", RegexOptions.Compiled);
         var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var outL = new List<RefEvidence>();
@@ -250,12 +321,22 @@ internal static class RfInventoryTool
                 m.RefsSeen++;
                 var tok = mm.Groups[1].Value.Trim().Replace('\\', '/');
                 var ext = Path.GetExtension(tok);
-                if (!RefExts.Contains(ext)) { m.RefsDiscarded++; m.NoisyRefsDiscarded++; m.DiscardReasons.Inc("unsupported_extension"); continue; }
+                if (!RefExts.Contains(ext))
+                {
+                    m.RefsDiscarded++; m.NoisyRefsDiscarded++; m.DiscardReasons.Inc("unsupported_extension");
+                    unresolved.Add(new UnresolvedReferenceRow { MapName = mapName, SourceFile = src, ExtractedToken = tok, NormalizedTarget = tok, TargetExtension = ext, Encoding = t.Encoding, ByteOffset = t.Offset + mm.Groups[1].Index * (t.Encoding == "utf16le" ? 2 : 1), EvidenceType = "string_reference", Confidence = "low", ReasonUnresolved = "unsupported_extension" });
+                    continue;
+                }
                 var key = $"{src}|{t.Offset}|{tok}|{t.Encoding}";
                 if (!set.Add(key)) { m.DuplicateRefsSuppressed++; m.RefsDiscarded++; m.DiscardReasons.Inc("duplicate"); continue; }
                 outL.Add(new RefEvidence { ByteOffset = t.Offset + mm.Groups[1].Index * (t.Encoding == "utf16le" ? 2 : 1), Encoding = t.Encoding, TokenLength = tok.Length, SourceFile = src, ExtractedToken = tok, NormalizedTarget = tok, EvidenceType = "string_reference", Confidence = "low" });
                 m.RefsKept++;
-                if (outL.Count >= MaxRefs) { c.RefsCapHit = true; m.DiscardReasons.Inc("cap_reached"); return outL; }
+                if (outL.Count >= MaxRefs)
+                {
+                    c.RefsCapHit = true; m.DiscardReasons.Inc("cap_reached");
+                    unresolved.Add(new UnresolvedReferenceRow { MapName = mapName, SourceFile = src, ExtractedToken = tok, NormalizedTarget = tok, TargetExtension = ext, Encoding = t.Encoding, ByteOffset = t.Offset + mm.Groups[1].Index * (t.Encoding == "utf16le" ? 2 : 1), EvidenceType = "string_reference", Confidence = "low", ReasonUnresolved = "discarded_by_cap" });
+                    return outL;
+                }
             }
         }
         return outL;
@@ -379,7 +460,7 @@ internal static class RfInventoryTool
     private sealed record StrTok(string Text, int Offset, string Encoding);
     private sealed record SignatureInfo(string First16BytesHex, string First64BytesHex, string First256BytesHash, string? WholeFileHash, string PrintablePrefixPreview, double ZeroByteRatioFirst256, double PrintableRatioFirst256, string SuspectedTextOrBinary);
 
-    private sealed class Report { public string Tool { get; set; } = "rf_inventory"; public string Mode { get; set; } = "read_only"; public string InputMode { get; set; } = ""; public string InputPathSanitized { get; set; } = ""; public string RootDirectorySanitized { get; set; } = ""; public string MapOrPrefix { get; set; } = ""; public DateTime GeneratedUtc { get; set; } public List<FileRec> InventoryTable { get; set; } = new(); public List<RefEvidence> ReferenceEvidence { get; set; } = new(); public Graph DependencyGraph { get; set; } = new(); public OffsetSummary OffsetEvidenceSummary { get; set; } = new(); public SignatureGroupingSummary SignatureGroupingSummary { get; set; } = new(); public CompanionFileMatrixSummary CompanionFileMatrix { get; set; } = new(); public Metrics ExtractionMetrics { get; set; } = new(); public Caps CapHits { get; set; } = new(); }
+    private sealed class Report { public string Tool { get; set; } = "rf_inventory"; public string Mode { get; set; } = "read_only"; public string InputMode { get; set; } = ""; public string InputPathSanitized { get; set; } = ""; public string RootDirectorySanitized { get; set; } = ""; public string MapOrPrefix { get; set; } = ""; public DateTime GeneratedUtc { get; set; } public List<FileRec> InventoryTable { get; set; } = new(); public List<RefEvidence> ReferenceEvidence { get; set; } = new(); public Graph DependencyGraph { get; set; } = new(); public OffsetSummary OffsetEvidenceSummary { get; set; } = new(); public SignatureGroupingSummary SignatureGroupingSummary { get; set; } = new(); public CompanionFileMatrixSummary CompanionFileMatrix { get; set; } = new(); public List<UnresolvedReferenceRow> UnresolvedReferenceAudit { get; set; } = new(); public UnresolvedReferenceAggregation UnresolvedReferenceAggregation { get; set; } = new(); public Metrics ExtractionMetrics { get; set; } = new(); public Caps CapHits { get; set; } = new(); }
     private sealed class FileRec { public string RelativePath { get; set; } = ""; public string Filename { get; set; } = ""; public string Extension { get; set; } = ""; public long Size { get; set; } public string SamePrefixGroup { get; set; } = ""; public List<string> ReferencedFilenames { get; set; } = new(); public long FileSize { get; set; } public string First16BytesHex { get; set; } = ""; public string First64BytesHex { get; set; } = ""; public string First256BytesHash { get; set; } = ""; public string? WholeFileHash { get; set; } public string PrintablePrefixPreview { get; set; } = ""; public double ZeroByteRatioFirst256 { get; set; } public double PrintableRatioFirst256 { get; set; } public string SuspectedTextOrBinary { get; set; } = ""; }
     private sealed class RefEvidence { public int ByteOffset { get; set; } public string Encoding { get; set; } = ""; public int TokenLength { get; set; } public string SourceFile { get; set; } = ""; public string ExtractedToken { get; set; } = ""; public string NormalizedTarget { get; set; } = ""; public string EvidenceType { get; set; } = "string_reference"; public string Confidence { get; set; } = "low"; }
     private sealed class Edge { public string From { get; set; } = ""; public string To { get; set; } = ""; public string EvidenceType { get; set; } = "string_reference"; public string Confidence { get; set; } = "low"; public string SourceExtension { get; set; } = ""; public string TargetExtension { get; set; } = ""; public int PrimaryReferenceOffset { get; set; } public List<int> ReferenceOffsets { get; set; } = new(); }
@@ -388,6 +469,8 @@ internal static class RfInventoryTool
     private sealed class SignatureGroupingSummary { public List<KV> ByExtension { get; set; } = new(); public List<KV> ByFirst4Bytes { get; set; } = new(); public List<KV> ByFirst16Bytes { get; set; } = new(); public List<KV> ByFileSizeBucket { get; set; } = new(); public List<KV> ByHashPrefix { get; set; } = new(); public string Observation { get; set; } = ""; }
     private sealed class CompanionMatrixRow { public string MapName { get; set; } = ""; public string SamePrefixGroup { get; set; } = ""; public string Extension { get; set; } = ""; public int FileCount { get; set; } public string EvidenceSource { get; set; } = ""; }
     private sealed class CompanionFileMatrixSummary { public List<CompanionMatrixRow> Rows { get; set; } = new(); public List<KV> CommonExtensionCombinations { get; set; } = new(); public List<string> MissingCompanionObservations { get; set; } = new(); public List<string> RareCompanionObservations { get; set; } = new(); public List<string> InconsistentCompanionObservations { get; set; } = new(); public List<string> UniversalCompanions { get; set; } = new(); public List<string> FrequentCompanions { get; set; } = new(); public List<string> RareCompanions { get; set; } = new(); public List<string> MissingCompanions { get; set; } = new(); public List<string> UnstableOptionalCompanions { get; set; } = new(); public string RecommendedNextReadOnlyProbe { get; set; } = ""; }
+    private sealed class UnresolvedReferenceRow { public string MapName { get; set; } = ""; public string SourceFile { get; set; } = ""; public string ExtractedToken { get; set; } = ""; public string NormalizedTarget { get; set; } = ""; public string TargetExtension { get; set; } = ""; public string Encoding { get; set; } = ""; public int ByteOffset { get; set; } public string EvidenceType { get; set; } = ""; public string Confidence { get; set; } = ""; public string ReasonUnresolved { get; set; } = ""; }
+    private sealed class UnresolvedReferenceAggregation { public List<KV> ByExtension { get; set; } = new(); public List<KV> BySourceExtension { get; set; } = new(); public List<KV> ByMap { get; set; } = new(); public List<KV> MostCommonMissingTargets { get; set; } = new(); public List<KV> SourceFilesMostUnresolved { get; set; } = new(); public string Observation { get; set; } = ""; }
     private sealed class KV { public string Key { get; set; } = ""; public int Value { get; set; } }
     private sealed class Metrics { public int AsciiStringsSeen { get; set; } public int AsciiStringsKept { get; set; } public int AsciiStringsDiscarded { get; set; } public int Utf16StringsSeen { get; set; } public int Utf16StringsKept { get; set; } public int Utf16StringsDiscarded { get; set; } public int RefsSeen { get; set; } public int RefsKept { get; set; } public int RefsDiscarded { get; set; } public int DuplicateRefsSuppressed { get; set; } public int NoisyRefsDiscarded { get; set; } public int DependencyEdgesEmitted { get; set; } public int DependencyEdgesSuppressed { get; set; } public Dictionary<string, int> DiscardReasons { get; set; } = new(StringComparer.OrdinalIgnoreCase); }
     private sealed class Caps { public bool FileReadCapHit { get; set; } public bool AsciiCapHit { get; set; } public bool Utf16CapHit { get; set; } public bool RefsCapHit { get; set; } public bool DependencyEdgesCapHit { get; set; } public bool ReportSizeCapHit { get; set; } public bool SiblingScanCapHit { get; set; } }

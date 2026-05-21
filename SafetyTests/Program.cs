@@ -13,7 +13,7 @@ try
     Directory.CreateDirectory(d);
 
     File.WriteAllBytes(Path.Combine(d, "m1.bsp"), BuildAsciiUtf16());
-    File.WriteAllBytes(Path.Combine(d, "m1.r3t"), Encoding.ASCII.GetBytes("m1.dds m1.dds\0"));
+    File.WriteAllBytes(Path.Combine(d, "m1.r3t"), Encoding.ASCII.GetBytes("m1.dds m1.dds ../outside/tx.tga bad.zzz\0"));
     File.WriteAllBytes(Path.Combine(d, "m1.r3m"), Encoding.ASCII.GetBytes("MAT\0"));
     File.WriteAllBytes(Path.Combine(d, "m1.dds"), Encoding.ASCII.GetBytes("DDS\0"));
     File.WriteAllBytes(Path.Combine(d, "m1.big"), new byte[700000]);
@@ -53,6 +53,14 @@ try
     Req(rows.Any(r => r.GetProperty("Extension").GetString() == ".r3m"), "matrix missing r3m");
     Req(matrix.GetProperty("MissingCompanionObservations").GetArrayLength() >= 0, "missing companion observations absent");
     Req(rows.SequenceEqual(rows.OrderBy(r => r.GetProperty("MapName").GetString()).ThenBy(r => r.GetProperty("SamePrefixGroup").GetString()).ThenBy(r => r.GetProperty("Extension").GetString()).ThenBy(r => r.GetProperty("EvidenceSource").GetString()), JsonElementComparer.Instance), "matrix ordering not deterministic");
+    var ua = j1.RootElement.GetProperty("UnresolvedReferenceAudit").EnumerateArray().ToArray();
+    Req(ua.Any(x => (x.GetProperty("NormalizedTarget").GetString() ?? "").Contains("outside", StringComparison.OrdinalIgnoreCase) && x.GetProperty("ReasonUnresolved").GetString() == "outside_bounded_scope"), "outside bounded unresolved missing");
+    Req(ua.Any(x => x.GetProperty("ReasonUnresolved").GetString() == "unsupported_extension"), "unsupported extension unresolved missing");
+    Req(ua.All(x => !(x.GetProperty("SourceFile").GetString() ?? "").Contains(":\\", StringComparison.OrdinalIgnoreCase)), "raw absolute path leaked");
+    var uAgg = j1.RootElement.GetProperty("UnresolvedReferenceAggregation");
+    Req(uAgg.GetProperty("ByExtension").EnumerateArray().SequenceEqual(uAgg.GetProperty("ByExtension").EnumerateArray().OrderBy(x => -x.GetProperty("Value").GetInt32()).ThenBy(x => x.GetProperty("Key").GetString()), JsonElementComparer.Instance), "unresolved aggregation not deterministic");
+    var uObs = uAgg.GetProperty("Observation").GetString() ?? "";
+    Req(uObs.Contains("observed unresolved reference", StringComparison.OrdinalIgnoreCase), "observational wording missing");
 
     Console.WriteLine("SAFETYTEST PASS");
 }
