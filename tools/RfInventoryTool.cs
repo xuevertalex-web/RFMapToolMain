@@ -24,6 +24,28 @@ internal static class RfInventoryTool
     private const int MaxEdges = 512;
     private const int MaxReportBytes = 2 * 1024 * 1024;
 
+    public static void RunSelfTest()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "rf_inventory_selftest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var mapDir = Path.Combine(root, "map");
+            Directory.CreateDirectory(mapDir);
+            var bsp = Path.Combine(mapDir, "map.bsp");
+            var r3t = Path.Combine(mapDir, "map.r3t");
+            File.WriteAllBytes(bsp, Encoding.ASCII.GetBytes("map.r3t\0"));
+            File.WriteAllBytes(r3t, Encoding.ASCII.GetBytes("map.dds\0"));
+            var outRoot = Path.Combine(root, "reports");
+            var outPath = Run(bsp, outRoot);
+            if (!File.Exists(outPath)) throw new InvalidOperationException("selftest report missing");
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
     public static string Run(string inputPath, string? explicitOutputRoot)
     {
         try
