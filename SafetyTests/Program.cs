@@ -13,7 +13,7 @@ try
     Directory.CreateDirectory(d);
 
     File.WriteAllBytes(Path.Combine(d, "m1.bsp"), BuildAsciiUtf16());
-    File.WriteAllBytes(Path.Combine(d, "m1.r3t"), Encoding.ASCII.GetBytes("m1.dds m1.dds ../outside/tx.tga bad.zzz\0"));
+    File.WriteAllBytes(Path.Combine(d, "m1.r3t"), Encoding.ASCII.GetBytes("m1.dds texture/foo.dds effect/bar.eff 12345 ../outside/tx.tga bad.zzz\0"));
     File.WriteAllBytes(Path.Combine(d, "m1.r3m"), Encoding.ASCII.GetBytes("MAT\0"));
     File.WriteAllBytes(Path.Combine(d, "m1.dds"), Encoding.ASCII.GetBytes("DDS\0"));
     File.WriteAllBytes(Path.Combine(d, "m1.big"), new byte[700000]);
@@ -78,6 +78,15 @@ try
     var probeBad = j4.RootElement.GetProperty("CandidateResourceRootProbe");
     Req((probeBad.GetProperty("Notes").GetString() ?? "").Contains("rejected", StringComparison.OrdinalIgnoreCase), "outside workspace not rejected");
     Req((probeBad.GetProperty("ResourceRootMode").GetString() ?? "") == "rejected_outside_workspace", "resource root mode not set");
+
+    var sug = j1.RootElement.GetProperty("CandidateRootSuggestions").EnumerateArray().ToArray();
+    Req(sug.Any(x => (x.GetProperty("SuggestedRootFragment").GetString() ?? "") == "texture"), "path-like token did not suggest texture");
+    Req(sug.Any(x => (x.GetProperty("SuggestedRootFragment").GetString() ?? "") == "effect"), "path-like token did not suggest effect");
+    Req(sug.Any(x => (x.GetProperty("SuggestedRootFragment").GetString() ?? "") == "sound" || (x.GetProperty("SuggestedRootFragment").GetString() ?? "") == "texture"), "extension-based low confidence suggestion missing");
+    Req(!sug.Any(x => (x.GetProperty("SuggestedRootFragment").GetString() ?? "") == "12345"), "noisy numeric token produced suggestion");
+    Req(sug.All(x => x.GetProperty("RequiresExplicitApprovedRootProbe").GetBoolean()), "suggestions must require explicit probe");
+    Req(sug.SequenceEqual(sug.OrderBy(x => x.GetProperty("SuggestedRootFragment").GetString()), JsonElementComparer.Instance), "suggestion ordering not deterministic");
+    Req((sug.First(x => (x.GetProperty("SuggestedRootFragment").GetString() ?? "") == "texture").GetProperty("Confidence").GetString() ?? "") != "low", "repeated path prefix did not increase confidence");
 
     Console.WriteLine("SAFETYTEST PASS");
 }

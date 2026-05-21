@@ -119,6 +119,7 @@ internal static class RfInventoryTool
         ev = ev.OrderBy(x => x.SourceFile, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.ByteOffset).ThenBy(x => x.ExtractedToken, StringComparer.OrdinalIgnoreCase).ToList();
         var unresolvedAudit = BuildUnresolvedAudit(c, inv, ev, unresolved);
         var unresolvedAgg = BuildUnresolvedAggregation(c, unresolvedAudit);
+        var suggestions = BuildCandidateRootSuggestions(c, unresolvedAudit);
         var candidateProbe = BuildCandidateProbe(resourceRoot, approvedExternalResourceRoot, unresolvedAudit);
         var edges = BuildEdges(inv, ev, byName, m, cap);
         m.DependencyEdgesEmitted = edges.Count;
@@ -140,10 +141,101 @@ internal static class RfInventoryTool
             CompanionFileMatrix = BuildCompanionMatrix(c, inv, ev),
             UnresolvedReferenceAudit = unresolvedAudit,
             UnresolvedReferenceAggregation = unresolvedAgg,
+            CandidateRootSuggestions = suggestions,
             CandidateResourceRootProbe = candidateProbe,
             ExtractionMetrics = m,
             CapHits = cap
         };
+    }
+
+    private static List<CandidateRootSuggestion> BuildCandidateRootSuggestions(Ctx c, List<UnresolvedReferenceRow> unresolved)
+    {
+        var groups = new Dictionary<string, SuggestionAccumulator>(StringComparer.OrdinalIgnoreCase);
+        foreach (var u in unresolved)
+        {
+            var token = u.NormalizedTarget ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(token)) continue;
+            if (Regex.IsMatch(token, @"^[0-9.\-]+$")) continue;
+
+            string? frag = null;
+            string reason;
+            string confidence;
+
+            var norm = token.Replace('\\', '/').Trim();
+            var slash = norm.IndexOf('/');
+            if (slash > 0 && !norm.StartsWith("./", StringComparison.Ordinal))
+            {
+                frag = norm[..slash].ToLowerInvariant();
+                reason = "observed from unresolved token path prefix";
+                confidence = "medium";
+            }
+            else if (norm.StartsWith("./", StringComparison.Ordinal) && norm.Length > 2)
+            {
+                var tail = norm[2..];
+                var s2 = tail.IndexOf('/');
+                if (s2 > 0)
+                {
+                    frag = tail[..s2].ToLowerInvariant();
+                    reason = "observed from unresolved token path prefix";
+                    confidence = "medium";
+                }
+                else
+                {
+                    var ext = Path.GetExtension(norm).ToLowerInvariant();
+                    frag = ext switch { ".dds" or ".tga" => "texture", ".eff" => "effect", ".wav" or ".ogg" or ".snd" => "sound", _ => null };
+                    reason = "observed from unresolved token extension-only guess";
+                    confidence = "low";
+                }
+            }
+            else
+            {
+                var ext = Path.GetExtension(norm).ToLowerInvariant();
+                frag = ext switch { ".dds" or ".tga" => "texture", ".eff" => "effect", ".wav" or ".ogg" or ".snd" => "sound", _ => null };
+                reason = "observed from unresolved token extension-only guess";
+                confidence = "low";
+            }
+
+            if (string.IsNullOrWhiteSpace(frag)) continue;
+            if (!groups.TryGetValue(frag, out var acc))
+            {
+                acc = new SuggestionAccumulator();
+                groups[frag] = acc;
+            }
+            acc.Count++;
+            acc.SourceMaps.Add(u.MapName);
+            acc.SourceExts.Add(Path.GetExtension(u.SourceFile));
+            acc.TargetExts.Add(u.TargetExtension);
+            if (acc.Examples.Count < 6) acc.Examples.Add(norm);
+            acc.Confidence = MaxConfidence(acc.Confidence, confidence);
+            acc.Reason = reason;
+        }
+
+        var outList = new List<CandidateRootSuggestion>();
+        foreach (var kv in groups.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            var acc = kv.Value;
+            var conf = acc.Confidence;
+            if (acc.SourceMaps.Count >= 2 && conf == "medium") conf = "high";
+            outList.Add(new CandidateRootSuggestion
+            {
+                SuggestedRootFragment = kv.Key,
+                EvidenceTokensCount = acc.Count,
+                SourceMaps = acc.SourceMaps.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
+                SourceExtensions = acc.SourceExts.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
+                TargetExtensions = acc.TargetExts.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
+                ExampleTokens = acc.Examples.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
+                Confidence = conf,
+                Reason = acc.Reason,
+                RequiresExplicitApprovedRootProbe = true
+            });
+        }
+        return outList;
+    }
+
+    private static string MaxConfidence(string a, string b)
+    {
+        static int Score(string c) => c == "high" ? 3 : c == "medium" ? 2 : 1;
+        return Score(a) >= Score(b) ? a : b;
     }
 
     private static CandidateResourceRootProbeSummary BuildCandidateProbe(string? resourceRoot, string? approvedExternalResourceRoot, List<UnresolvedReferenceRow> unresolved)
@@ -515,7 +607,7 @@ internal static class RfInventoryTool
     private sealed record StrTok(string Text, int Offset, string Encoding);
     private sealed record SignatureInfo(string First16BytesHex, string First64BytesHex, string First256BytesHash, string? WholeFileHash, string PrintablePrefixPreview, double ZeroByteRatioFirst256, double PrintableRatioFirst256, string SuspectedTextOrBinary);
 
-    private sealed class Report { public string Tool { get; set; } = "rf_inventory"; public string Mode { get; set; } = "read_only"; public string InputMode { get; set; } = ""; public string InputPathSanitized { get; set; } = ""; public string RootDirectorySanitized { get; set; } = ""; public string MapOrPrefix { get; set; } = ""; public DateTime GeneratedUtc { get; set; } public List<FileRec> InventoryTable { get; set; } = new(); public List<RefEvidence> ReferenceEvidence { get; set; } = new(); public Graph DependencyGraph { get; set; } = new(); public OffsetSummary OffsetEvidenceSummary { get; set; } = new(); public SignatureGroupingSummary SignatureGroupingSummary { get; set; } = new(); public CompanionFileMatrixSummary CompanionFileMatrix { get; set; } = new(); public List<UnresolvedReferenceRow> UnresolvedReferenceAudit { get; set; } = new(); public UnresolvedReferenceAggregation UnresolvedReferenceAggregation { get; set; } = new(); public CandidateResourceRootProbeSummary CandidateResourceRootProbe { get; set; } = new(); public Metrics ExtractionMetrics { get; set; } = new(); public Caps CapHits { get; set; } = new(); }
+    private sealed class Report { public string Tool { get; set; } = "rf_inventory"; public string Mode { get; set; } = "read_only"; public string InputMode { get; set; } = ""; public string InputPathSanitized { get; set; } = ""; public string RootDirectorySanitized { get; set; } = ""; public string MapOrPrefix { get; set; } = ""; public DateTime GeneratedUtc { get; set; } public List<FileRec> InventoryTable { get; set; } = new(); public List<RefEvidence> ReferenceEvidence { get; set; } = new(); public Graph DependencyGraph { get; set; } = new(); public OffsetSummary OffsetEvidenceSummary { get; set; } = new(); public SignatureGroupingSummary SignatureGroupingSummary { get; set; } = new(); public CompanionFileMatrixSummary CompanionFileMatrix { get; set; } = new(); public List<UnresolvedReferenceRow> UnresolvedReferenceAudit { get; set; } = new(); public UnresolvedReferenceAggregation UnresolvedReferenceAggregation { get; set; } = new(); public List<CandidateRootSuggestion> CandidateRootSuggestions { get; set; } = new(); public CandidateResourceRootProbeSummary CandidateResourceRootProbe { get; set; } = new(); public Metrics ExtractionMetrics { get; set; } = new(); public Caps CapHits { get; set; } = new(); }
     private sealed class FileRec { public string RelativePath { get; set; } = ""; public string Filename { get; set; } = ""; public string Extension { get; set; } = ""; public long Size { get; set; } public string SamePrefixGroup { get; set; } = ""; public List<string> ReferencedFilenames { get; set; } = new(); public long FileSize { get; set; } public string First16BytesHex { get; set; } = ""; public string First64BytesHex { get; set; } = ""; public string First256BytesHash { get; set; } = ""; public string? WholeFileHash { get; set; } public string PrintablePrefixPreview { get; set; } = ""; public double ZeroByteRatioFirst256 { get; set; } public double PrintableRatioFirst256 { get; set; } public string SuspectedTextOrBinary { get; set; } = ""; }
     private sealed class RefEvidence { public int ByteOffset { get; set; } public string Encoding { get; set; } = ""; public int TokenLength { get; set; } public string SourceFile { get; set; } = ""; public string ExtractedToken { get; set; } = ""; public string NormalizedTarget { get; set; } = ""; public string EvidenceType { get; set; } = "string_reference"; public string Confidence { get; set; } = "low"; }
     private sealed class Edge { public string From { get; set; } = ""; public string To { get; set; } = ""; public string EvidenceType { get; set; } = "string_reference"; public string Confidence { get; set; } = "low"; public string SourceExtension { get; set; } = ""; public string TargetExtension { get; set; } = ""; public int PrimaryReferenceOffset { get; set; } public List<int> ReferenceOffsets { get; set; } = new(); }
@@ -526,6 +618,8 @@ internal static class RfInventoryTool
     private sealed class CompanionFileMatrixSummary { public List<CompanionMatrixRow> Rows { get; set; } = new(); public List<KV> CommonExtensionCombinations { get; set; } = new(); public List<string> MissingCompanionObservations { get; set; } = new(); public List<string> RareCompanionObservations { get; set; } = new(); public List<string> InconsistentCompanionObservations { get; set; } = new(); public List<string> UniversalCompanions { get; set; } = new(); public List<string> FrequentCompanions { get; set; } = new(); public List<string> RareCompanions { get; set; } = new(); public List<string> MissingCompanions { get; set; } = new(); public List<string> UnstableOptionalCompanions { get; set; } = new(); public string RecommendedNextReadOnlyProbe { get; set; } = ""; }
     private sealed class UnresolvedReferenceRow { public string MapName { get; set; } = ""; public string SourceFile { get; set; } = ""; public string ExtractedToken { get; set; } = ""; public string NormalizedTarget { get; set; } = ""; public string TargetExtension { get; set; } = ""; public string Encoding { get; set; } = ""; public int ByteOffset { get; set; } public string EvidenceType { get; set; } = ""; public string Confidence { get; set; } = ""; public string ReasonUnresolved { get; set; } = ""; }
     private sealed class UnresolvedReferenceAggregation { public List<KV> ByExtension { get; set; } = new(); public List<KV> BySourceExtension { get; set; } = new(); public List<KV> ByMap { get; set; } = new(); public List<KV> MostCommonMissingTargets { get; set; } = new(); public List<KV> SourceFilesMostUnresolved { get; set; } = new(); public string Observation { get; set; } = ""; }
+    private sealed class CandidateRootSuggestion { public string SuggestedRootFragment { get; set; } = ""; public int EvidenceTokensCount { get; set; } public List<string> SourceMaps { get; set; } = new(); public List<string> SourceExtensions { get; set; } = new(); public List<string> TargetExtensions { get; set; } = new(); public List<string> ExampleTokens { get; set; } = new(); public string Confidence { get; set; } = "low"; public string Reason { get; set; } = ""; public bool RequiresExplicitApprovedRootProbe { get; set; } = true; }
+    private sealed class SuggestionAccumulator { public int Count; public HashSet<string> SourceMaps { get; } = new(StringComparer.OrdinalIgnoreCase); public HashSet<string> SourceExts { get; } = new(StringComparer.OrdinalIgnoreCase); public HashSet<string> TargetExts { get; } = new(StringComparer.OrdinalIgnoreCase); public List<string> Examples { get; } = new(); public string Confidence { get; set; } = "low"; public string Reason { get; set; } = ""; }
     private sealed class CandidateResourceRootProbeSummary { public string ResourceRootMode { get; set; } = ""; public string PolicyDecision { get; set; } = ""; public string SanitizedRootLabel { get; set; } = ""; public bool IsRelativeInput { get; set; } public bool Missing { get; set; } public bool ReparseRejected { get; set; } public int FilesConsidered { get; set; } public int MatchesFound { get; set; } public int UnresolvedRefsResolvedAsCandidates { get; set; } public int UnresolvedRefsStillMissing { get; set; } public int SkippedDueToCaps { get; set; } public string Notes { get; set; } = ""; }
     private sealed class KV { public string Key { get; set; } = ""; public int Value { get; set; } }
     private sealed class Metrics { public int AsciiStringsSeen { get; set; } public int AsciiStringsKept { get; set; } public int AsciiStringsDiscarded { get; set; } public int Utf16StringsSeen { get; set; } public int Utf16StringsKept { get; set; } public int Utf16StringsDiscarded { get; set; } public int RefsSeen { get; set; } public int RefsKept { get; set; } public int RefsDiscarded { get; set; } public int DuplicateRefsSuppressed { get; set; } public int NoisyRefsDiscarded { get; set; } public int DependencyEdgesEmitted { get; set; } public int DependencyEdgesSuppressed { get; set; } public Dictionary<string, int> DiscardReasons { get; set; } = new(StringComparer.OrdinalIgnoreCase); }
