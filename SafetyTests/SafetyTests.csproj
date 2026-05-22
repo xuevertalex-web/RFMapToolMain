@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\tools\RfInventoryTool.cs" Link="RfInventoryTool.cs" />
+    <Compile Include="..\tools\SafePatchIsolationGuard.cs" Link="SafePatchIsolationGuard.cs" />
   </ItemGroup>
 </Project>

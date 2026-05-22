@@ -1426,6 +1426,14 @@ class Program
         public int MatGroupsPatched { get; set; }
         public int TotalMappedVertices { get; set; }
         public int FVerticesChanged { get; set; }
+        public List<string> PlannedNodes { get; } = new();
+        public List<string> AllowedNonBspNodes { get; } = new();
+        public List<string> RejectedBspNodes { get; } = new();
+        public List<string> RejectedDummyNodes { get; } = new();
+        public bool WouldPatchExistingGeometry { get; set; }
+        public bool WouldChangeExistingVertexPool { get; set; }
+        public bool StrictIsolationMode { get; set; }
+        public string? AbortReason { get; set; }
         public List<object> MatGroups { get; } = new();
     }
 
@@ -1435,6 +1443,12 @@ class Program
         var model = ModelRoot.Load(glbPath);
         var bytes = File.ReadAllBytes(srcBspPath);
         var report = new Glb2BspReport();
+        var strictIsolationMode = !string.Equals(Environment.GetEnvironmentVariable("RFMAP_STRICT_NONBSP_ISOLATION"), "0", StringComparison.OrdinalIgnoreCase);
+        report.StrictIsolationMode = strictIsolationMode;
+        var allowNamesEnv = Environment.GetEnvironmentVariable("RFMAP_ALLOWED_NONBSP_NODES");
+        var allowedNames = string.IsNullOrWhiteSpace(allowNamesEnv)
+            ? new[] { "SAFE_NONBSP_TEST_MESH" }
+            : allowNamesEnv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         int? targetMg = null;
         var targetMgEnv = Environment.GetEnvironmentVariable("RFMAP_TARGET_MGID");
         if (!string.IsNullOrWhiteSpace(targetMgEnv) && int.TryParse(targetMgEnv, out var parsedTargetMg) && parsedTargetMg >= 0)
@@ -1443,12 +1457,52 @@ class Program
         var mgNodes = model.LogicalNodes
             .Where(n => n.Mesh != null)
             .ToList();
+        var plannedNames = mgNodes.Select(n => !string.IsNullOrWhiteSpace(n.Name) ? n.Name! : n.Mesh?.Name ?? "noname").ToList();
+        var guardPlan = SafePatchIsolationGuard.BuildPlan(plannedNames, allowedNames);
+        report.PlannedNodes.AddRange(guardPlan.PlannedNodes);
+        report.AllowedNonBspNodes.AddRange(guardPlan.AllowedNonBspNodes);
+        report.RejectedBspNodes.AddRange(guardPlan.RejectedBspNodes);
+        report.RejectedDummyNodes.AddRange(guardPlan.RejectedDummyNodes);
+
+        int prospectiveExistingMgTouches = 0;
+        bool wouldChangeExistingVertexPool = false;
+        if (strictIsolationMode)
+        {
+            foreach (var node in mgNodes)
+            {
+                var tagName = !string.IsNullOrWhiteSpace(node.Name) ? node.Name : node.Mesh?.Name;
+                if (string.IsNullOrWhiteSpace(tagName) || !tagName.StartsWith("BSP_mg", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                int mgId = ParseMatGroupFromNodeName(tagName);
+                if (mgId < 0 || mgId >= bsp.MatGroups.Count) continue;
+                if (targetMg.HasValue && mgId != targetMg.Value) continue;
+                var mg = bsp.MatGroups[mgId];
+                if (mg.ObjectId > 0) continue;
+                var exportedPositions = ReadNodePositions(node);
+                if (exportedPositions.Count == 0) continue;
+                var refs = BuildMatGroupVertexRefs(bsp, mgId, mg.FaceStartId, mg.FaceNum);
+                int mapped = Math.Min(refs.Count, exportedPositions.Count);
+                if (mapped > 0)
+                {
+                    prospectiveExistingMgTouches++;
+                    wouldChangeExistingVertexPool = true;
+                }
+            }
+        }
+
+        report.WouldPatchExistingGeometry = strictIsolationMode && prospectiveExistingMgTouches > 0;
+        report.WouldChangeExistingVertexPool = strictIsolationMode && wouldChangeExistingVertexPool;
 
         var fvertAcc = new Dictionary<int, (Vector3 sum, int count)>();
 
         foreach (var node in mgNodes)
         {
             var tagName = !string.IsNullOrWhiteSpace(node.Name) ? node.Name : node.Mesh?.Name;
+            if (strictIsolationMode)
+            {
+                if (string.IsNullOrWhiteSpace(tagName) || !allowedNames.Any(x => string.Equals(x, tagName, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+            }
             int mgId = ParseMatGroupFromNodeName(tagName);
             if (mgId < 0 || mgId >= bsp.MatGroups.Count) continue;
             if (targetMg.HasValue && mgId != targetMg.Value) continue;
@@ -1514,6 +1568,32 @@ class Program
         }
         report.FVerticesChanged = changed;
         report.MatGroups.Add(new { safeMaxDelta = maxDelta, skippedByDelta, targetMg = targetMg?.ToString() ?? "all" });
+
+        if (strictIsolationMode)
+        {
+            var abortReason = SafePatchIsolationGuard.EvaluateAbortReason(
+                report switch
+                {
+                    _ => new SafePatchDryRunPlan
+                    {
+                        PlannedNodes = report.PlannedNodes.ToList(),
+                        AllowedNonBspNodes = report.AllowedNonBspNodes.ToList(),
+                        RejectedBspNodes = report.RejectedBspNodes.ToList(),
+                        RejectedDummyNodes = report.RejectedDummyNodes.ToList(),
+                        WouldPatchExistingGeometry = report.WouldPatchExistingGeometry,
+                        WouldChangeExistingVertexPool = report.WouldChangeExistingVertexPool
+                    }
+                },
+                report.MatGroupsPatched,
+                report.FVerticesChanged > 0);
+            if (!string.IsNullOrWhiteSpace(abortReason))
+            {
+                report.AbortReason = abortReason;
+                Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
+                File.WriteAllText(reportPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+                throw new InvalidOperationException(abortReason);
+            }
+        }
 
         Directory.CreateDirectory(Path.GetDirectoryName(outBspPath)!);
         File.WriteAllBytes(outBspPath, bytes);

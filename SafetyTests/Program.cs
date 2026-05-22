@@ -145,6 +145,26 @@ try
     catch (InvalidOperationException ex) { dirRejected = ex.Message.Contains("directory", StringComparison.OrdinalIgnoreCase); }
     Req(dirRejected, "directory input should be rejected");
 
+    // strict non-BSP isolation guard tests
+    var plan = SafePatchIsolationGuard.BuildPlan(
+        new[] { "BSP_mg0_mtl0_obj0_attr8192", "dummy01", "SAFE_NONBSP_TEST_MESH" },
+        new[] { "SAFE_NONBSP_TEST_MESH" });
+    Req(plan.AllowedNonBspNodes.Count == 1 && plan.AllowedNonBspNodes[0] == "SAFE_NONBSP_TEST_MESH", "strict guard allowlist mismatch");
+    Req(plan.RejectedBspNodes.Count == 1, "strict guard should reject bsp node");
+    Req(plan.RejectedDummyNodes.Count == 1, "strict guard should reject dummy node");
+    var planUnsafe = new SafePatchDryRunPlan
+    {
+        PlannedNodes = plan.PlannedNodes,
+        AllowedNonBspNodes = plan.AllowedNonBspNodes,
+        RejectedBspNodes = plan.RejectedBspNodes,
+        RejectedDummyNodes = plan.RejectedDummyNodes,
+        WouldPatchExistingGeometry = true,
+        WouldChangeExistingVertexPool = true
+    };
+    var abortReason = SafePatchIsolationGuard.EvaluateAbortReason(planUnsafe, patchedMgCount: 182, wouldChangeExistingVertexPool: true);
+    Req(!string.IsNullOrWhiteSpace(abortReason), "strict guard must fail closed for regression-like pattern");
+    Req(abortReason!.Contains("existing BSP_mg geometry", StringComparison.OrdinalIgnoreCase), "strict guard abort reason missing geometry detail");
+
     Console.WriteLine("SAFETYTEST PASS");
 }
 finally
