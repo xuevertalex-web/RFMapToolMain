@@ -80,6 +80,8 @@ class Program
         string? rfInventoryOutArg = null;
         string? rfInventoryResourceRootArg = null;
         string? rfInventoryApprovedResourceRootArg = null;
+        string? rfRfsinfoObserveArg = null;
+        string? rfRfsinfoObserveOutArg = null;
         bool rfInventorySelfTest = args.Any(a => string.Equals(a, "--rf-inventory-selftest", StringComparison.OrdinalIgnoreCase));
         bool setteCleanIsolated = args.Any(a => string.Equals(a, "--sette-clean-isolated", StringComparison.OrdinalIgnoreCase));
         bool setteRaw = args.Any(a => string.Equals(a, "--sette-raw", StringComparison.OrdinalIgnoreCase));
@@ -345,6 +347,22 @@ class Program
         }
         for (int i = 0; i < args.Length - 1; i++)
         {
+            if (string.Equals(args[i], "--rf-rfsinfo-observe", StringComparison.OrdinalIgnoreCase))
+            {
+                rfRfsinfoObserveArg = args[i + 1];
+                break;
+            }
+        }
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--rf-rfsinfo-observe-out", StringComparison.OrdinalIgnoreCase))
+            {
+                rfRfsinfoObserveOutArg = args[i + 1];
+                break;
+            }
+        }
+        for (int i = 0; i < args.Length - 1; i++)
+        {
             if (string.Equals(args[i], "--repack-map", StringComparison.OrdinalIgnoreCase))
             {
                 repackMapArg = args[i + 1];
@@ -502,6 +520,14 @@ class Program
             var outPath = RfInventoryTool.Run(rfInventoryInputArg, rfInventoryOutArg, rfInventoryResourceRootArg, rfInventoryApprovedResourceRootArg);
             Console.WriteLine($"[RF-INVENTORY] Mode: read-only");
             Console.WriteLine($"[RF-INVENTORY] Report: {outPath}");
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(rfRfsinfoObserveArg))
+        {
+            var outPath = RfInventoryTool.RunRfsinfoObserve(rfRfsinfoObserveArg, rfRfsinfoObserveOutArg);
+            Console.WriteLine($"[RF-RFSINFO-OBSERVE] Mode: read-only");
+            Console.WriteLine($"[RF-RFSINFO-OBSERVE] Report: {outPath}");
             return;
         }
 

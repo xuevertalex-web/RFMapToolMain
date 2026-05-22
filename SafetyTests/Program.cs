@@ -2,6 +2,7 @@
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using RFMapToolSharp.Tools;
 
@@ -93,6 +94,51 @@ try
     Req(!sug.Any(x => (x.GetProperty("SuggestedRootFragment").GetString() ?? "") == "ex" && (x.GetProperty("ProbeRecommendation").GetString() ?? "") == "recommended"), "ex must be denied");
     Req(!sug.Any(x => (x.GetProperty("SuggestedRootFragment").GetString() ?? "").Contains(".dd.", StringComparison.OrdinalIgnoreCase)), "artifact-like fragment should be rejected");
 
+    // rf_rfsinfo_observe tests
+    var obsRoot = Path.Combine(root, "obs");
+    Directory.CreateDirectory(obsRoot);
+    var valid = Path.Combine(obsRoot, "rfsinfo.dat");
+    File.WriteAllBytes(valid, BuildObserveSampleBytes());
+    var obsOut = Path.Combine(root, "obs_reports");
+    var beforeHash = Sha256File(valid);
+    var obsReportPath = RfInventoryTool.RunRfsinfoObserve(valid, obsOut);
+    Req(File.Exists(obsReportPath), "observe report missing");
+    Req(string.Equals(Path.GetFileName(obsReportPath), "rf_rfsinfo_observe_report.json", StringComparison.OrdinalIgnoreCase), "observe report filename mismatch");
+    var obsJson = JsonDocument.Parse(File.ReadAllText(obsReportPath));
+    Req(obsJson.RootElement.GetProperty("Tool").GetString() == "rf_rfsinfo_observe", "observe tool mismatch");
+    Req(obsJson.RootElement.GetProperty("HeaderFingerprints").GetProperty("FileSize").GetInt64() == new FileInfo(valid).Length, "observe filesize mismatch");
+    Req(obsJson.RootElement.GetProperty("StringRegions").ValueKind == JsonValueKind.Array, "observe regions missing");
+    Req(obsJson.RootElement.GetProperty("CandidateClusters").ValueKind == JsonValueKind.Array, "observe clusters missing");
+    Req(obsJson.RootElement.GetProperty("ExplicitNoFullParserImplementation").GetString()?.Contains("No full parser implementation", StringComparison.OrdinalIgnoreCase) == true, "observe parser statement missing");
+    Req(obsJson.RootElement.GetProperty("ExplicitNoExtraction").GetString()?.Contains("No extraction", StringComparison.OrdinalIgnoreCase) == true, "observe extraction statement missing");
+    Req(obsJson.RootElement.GetProperty("ExplicitReadOnlyOnly").GetString()?.Contains("Read-only", StringComparison.OrdinalIgnoreCase) == true, "observe readonly statement missing");
+    var observeText = File.ReadAllText(obsReportPath);
+    Req(!Regex.IsMatch(observeText, "\\bparsed\\b|\\bdecoded\\b|\\bfield\\b|\\btable\\b|\\bentry\\b|\\bextracted\\b", RegexOptions.IgnoreCase), "forbidden wording present in observe report");
+    Req(string.Equals(beforeHash, Sha256File(valid), StringComparison.OrdinalIgnoreCase), "observe input file changed");
+    Req(Path.GetFullPath(obsReportPath).StartsWith(Path.GetFullPath(obsOut), StringComparison.OrdinalIgnoreCase), "observe report written outside requested output area");
+    var obsReportPath2 = RfInventoryTool.RunRfsinfoObserve(valid, obsOut);
+    var obsJson2 = JsonDocument.Parse(File.ReadAllText(obsReportPath2));
+    Req(obsJson.RootElement.GetProperty("HeaderFingerprints").GetRawText() == obsJson2.RootElement.GetProperty("HeaderFingerprints").GetRawText(), "observe deterministic header mismatch");
+    Req(obsJson.RootElement.GetProperty("StringRegions").GetRawText() == obsJson2.RootElement.GetProperty("StringRegions").GetRawText(), "observe deterministic regions mismatch");
+    Req(obsJson.RootElement.GetProperty("CandidateClusters").GetRawText() == obsJson2.RootElement.GetProperty("CandidateClusters").GetRawText(), "observe deterministic clusters mismatch");
+
+    bool missingRejected = false;
+    try { RfInventoryTool.RunRfsinfoObserve(Path.Combine(obsRoot, "missing.dat"), obsOut); }
+    catch (InvalidOperationException ex) { missingRejected = ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase); }
+    Req(missingRejected, "missing file should be rejected with sanitized message");
+
+    bool wrongNameRejected = false;
+    var wrongName = Path.Combine(obsRoot, "foo.dat");
+    File.WriteAllBytes(wrongName, Encoding.ASCII.GetBytes("abc"));
+    try { RfInventoryTool.RunRfsinfoObserve(wrongName, obsOut); }
+    catch (InvalidOperationException ex) { wrongNameRejected = ex.Message.Contains("rfsinfo.dat", StringComparison.OrdinalIgnoreCase); }
+    Req(wrongNameRejected, "non-rfsinfo filename should be rejected");
+
+    bool dirRejected = false;
+    try { RfInventoryTool.RunRfsinfoObserve(obsRoot, obsOut); }
+    catch (InvalidOperationException ex) { dirRejected = ex.Message.Contains("directory", StringComparison.OrdinalIgnoreCase); }
+    Req(dirRejected, "directory input should be rejected");
+
     Console.WriteLine("SAFETYTEST PASS");
 }
 finally
@@ -112,6 +158,22 @@ static byte[] BuildAsciiUtf16()
 }
 
 static void Req(bool cond, string msg) { if (!cond) throw new Exception(msg); }
+static string Sha256File(string path)
+{
+    using var sha = System.Security.Cryptography.SHA256.Create();
+    using var fs = File.OpenRead(path);
+    return Convert.ToHexString(sha.ComputeHash(fs));
+}
+static byte[] BuildObserveSampleBytes()
+{
+    using var ms = new MemoryStream();
+    ms.Write(Encoding.ASCII.GetBytes("RFSINFO_START texture_path .dds mesh_ref .msh ani_ref .ani \0"));
+    if ((ms.Length % 2) != 0) ms.WriteByte(0);
+    foreach (var c in "utf16_token tex player character") { ms.WriteByte((byte)c); ms.WriteByte(0); }
+    ms.WriteByte(0); ms.WriteByte(0);
+    ms.Write(Encoding.ASCII.GetBytes("RFSINFO_START texture_path .dds mesh_ref .msh ani_ref .ani \0"));
+    return ms.ToArray();
+}
 sealed class JsonElementComparer : IEqualityComparer<JsonElement>
 {
     public static readonly JsonElementComparer Instance = new();

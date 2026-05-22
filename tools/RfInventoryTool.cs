@@ -22,6 +22,10 @@ internal static class RfInventoryTool
     private const int MaxFiles = 256;
     private const int MaxEdges = 512;
     private const int MaxReport = 2 * 1024 * 1024;
+    private const int ObserveMaxRead = 1024 * 1024;
+    private const int ObserveMaxRegions = 160;
+    private const int ObserveMaxSamples = 8;
+    private const int ObserveMaxClusters = 512;
 
     public static void RunSelfTest() { }
 
@@ -48,6 +52,260 @@ internal static class RfInventoryTool
         var outPath = Path.Combine(outDir, $"rf_inventory_{report.MapOrPrefix}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.json");
         File.WriteAllText(outPath, json, Encoding.UTF8);
         return outPath;
+    }
+
+    public static string RunRfsinfoObserve(string inputFile, string? outRoot)
+    {
+        var explicitFile = ValidateObserveInput(inputFile);
+        var outDir = ResolveObserveOutputRoot(outRoot);
+        Directory.CreateDirectory(outDir);
+
+        bool readCapHit;
+        var bytes = Read(explicitFile, ObserveMaxRead, out readCapHit);
+        var sig = BuildSignature(explicitFile, bytes, readCapHit);
+
+        var metrics = new Metrics();
+        var caps = new Caps { FileReadCapHit = readCapHit };
+        var ascii = ExtractStrings(bytes, false, metrics, caps);
+        var utf16 = ExtractStrings(bytes, true, metrics, caps);
+        var regions = BuildObserveRegions(ascii, utf16, bytes.Length);
+        var clusters = BuildObserveClusters(regions, bytes);
+        if (clusters.Count > ObserveMaxClusters)
+        {
+            clusters = clusters
+                .OrderByDescending(x => x.SupportCount)
+                .ThenBy(x => x.RegionStartOffset)
+                .Take(ObserveMaxClusters)
+                .ToList();
+            caps.ReportSizeCapHit = true;
+        }
+
+        var contradictions = BuildObserveContradictions(regions, clusters);
+        var confidenceSummary = BuildObserveConfidenceSummary(regions, clusters, contradictions);
+
+        var report = new ObserveReport
+        {
+            Tool = "rf_rfsinfo_observe",
+            Mode = "read_only",
+            ExactInputLabel = SanObservePath(explicitFile),
+            GeneratedUtc = DateTime.UtcNow,
+            CapsUsed = new ObserveCaps
+            {
+                MaxBytesRead = ObserveMaxRead,
+                MaxRegions = ObserveMaxRegions,
+                MaxSamplesPerRegion = ObserveMaxSamples,
+                ReadCapped = readCapHit
+            },
+            HeaderFingerprints = new ObserveHeader
+            {
+                FileSize = new FileInfo(explicitFile).Length,
+                First4BytesHex = string.Join(" ", sig.First16BytesHex.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(4)),
+                First8BytesHex = string.Join(" ", sig.First16BytesHex.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(8)),
+                First16BytesHex = sig.First16BytesHex,
+                First32BytesHex = ToHex(bytes.Take(32).ToArray()),
+                First64BytesHex = sig.First64BytesHex,
+                First128BytesHash = HashBytes(bytes.Take(128).ToArray()),
+                First256BytesHash = sig.First256BytesHash,
+                ZeroByteRatioFirst256 = sig.ZeroByteRatioFirst256,
+                PrintableRatioFirst256 = sig.PrintableRatioFirst256,
+                SuspectedTextOrBinary = sig.SuspectedTextOrBinary
+            },
+            StringRegions = regions,
+            CandidateClusters = clusters,
+            OffsetAlignmentObservations = BuildObserveOffsetAlignment(regions, clusters),
+            Contradictions = contradictions,
+            ConfidenceSummary = confidenceSummary,
+            UncertaintyNotes = new List<string>
+            {
+                "uncertainty note: observational analyzer only; no semantic interpretation.",
+                "uncertainty note: candidate cluster relationships can include coincidental byte similarity."
+            },
+            ExplicitNoFullParserImplementation = "No full parser implementation occurred.",
+            ExplicitNoExtraction = "No extraction occurred.",
+            ExplicitNoMutation = "No mutation occurred.",
+            ExplicitReadOnlyOnly = "Read-only only."
+        };
+
+        var json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
+        if (Encoding.UTF8.GetByteCount(json) > MaxReport)
+        {
+            report.CapsUsed.ReportTruncated = true;
+            report.StringRegions = report.StringRegions.Take(64).ToList();
+            report.CandidateClusters = report.CandidateClusters.Take(128).ToList();
+            report.Contradictions = report.Contradictions.Take(64).ToList();
+            json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
+        }
+
+        var outPath = Path.Combine(outDir, "rf_rfsinfo_observe_report.json");
+        File.WriteAllText(outPath, json, Encoding.UTF8);
+        return outPath;
+    }
+
+    private static string ValidateObserveInput(string inputFile)
+    {
+        if (string.IsNullOrWhiteSpace(inputFile))
+            throw new InvalidOperationException("rf_rfsinfo_observe requires explicit file path");
+
+        var full = Path.GetFullPath(inputFile);
+        if (Directory.Exists(full))
+            throw new InvalidOperationException("rf_rfsinfo_observe requires file input, directory is not allowed");
+        if (!File.Exists(full))
+            throw new InvalidOperationException("rf_rfsinfo_observe input file not found");
+        if (!string.Equals(Path.GetExtension(full), ".dat", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("rf_rfsinfo_observe file extension must be .dat");
+        if (!string.Equals(Path.GetFileName(full), "rfsinfo.dat", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("rf_rfsinfo_observe file name must be rfsinfo.dat");
+
+        var attrs = File.GetAttributes(full);
+        if ((attrs & FileAttributes.ReparsePoint) != 0)
+            throw new InvalidOperationException("rf_rfsinfo_observe rejected reparse path");
+
+        return full;
+    }
+
+    private static string ResolveObserveOutputRoot(string? outRoot)
+    {
+        if (!string.IsNullOrWhiteSpace(outRoot))
+            return Path.GetFullPath(outRoot);
+        var a = Environment.GetEnvironmentVariable("ArtifactOutputRoot");
+        return !string.IsNullOrWhiteSpace(a)
+            ? Path.Combine(Path.GetFullPath(a), "reports", "rf_rfsinfo_observe")
+            : Path.Combine(Environment.CurrentDirectory, "_runs", "reports", "rf_rfsinfo_observe");
+    }
+
+    private static string SanObservePath(string p) => San(p);
+
+    private static List<ObserveRegion> BuildObserveRegions(List<StrTok> ascii, List<StrTok> utf16, int totalLen)
+    {
+        var outL = new List<ObserveRegion>();
+        void Add(StrTok t)
+        {
+            var len = t.Encoding == "utf16le" ? t.Text.Length * 2 : t.Text.Length;
+            var end = t.Offset + Math.Max(0, len - 1);
+            outL.Add(new ObserveRegion
+            {
+                StartOffset = t.Offset,
+                EndOffset = end,
+                LengthBytes = len,
+                Encoding = t.Encoding,
+                TokenCountEstimate = Math.Max(1, t.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length),
+                SampleTokens = t.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(ObserveMaxSamples).ToList(),
+                RegionDensity = totalLen == 0 ? 0d : len / (double)totalLen
+            });
+        }
+        foreach (var t in ascii.OrderBy(x => x.Offset).ThenBy(x => x.Text, StringComparer.OrdinalIgnoreCase)) Add(t);
+        foreach (var t in utf16.OrderBy(x => x.Offset).ThenBy(x => x.Text, StringComparer.OrdinalIgnoreCase)) Add(t);
+        return outL
+            .OrderBy(x => x.StartOffset)
+            .ThenBy(x => x.Encoding, StringComparer.OrdinalIgnoreCase)
+            .Take(ObserveMaxRegions)
+            .ToList();
+    }
+
+    private static List<ObserveCluster> BuildObserveClusters(List<ObserveRegion> regions, byte[] bytes)
+    {
+        var clusters = new List<ObserveCluster>();
+        foreach (var r in regions)
+        {
+            var before = ReadWindow(bytes, r.StartOffset - 8, 8);
+            var after = ReadWindow(bytes, r.EndOffset + 1, 8);
+            var boundary = ReadWindow(bytes, r.StartOffset - 4, 16);
+            clusters.Add(new ObserveCluster
+            {
+                RegionStartOffset = r.StartOffset,
+                RegionEndOffset = r.EndOffset,
+                ClusterType = "candidate_cluster_boundary",
+                PatternHexOrHash = ToHex(boundary),
+                SupportCount = 1,
+                NearbyStringSamples = r.SampleTokens.Take(ObserveMaxSamples).ToList(),
+                Confidence = "low_medium",
+                UncertaintyNote = "uncertainty note: boundary bytes are observational only."
+            });
+            clusters.Add(new ObserveCluster
+            {
+                RegionStartOffset = r.StartOffset,
+                RegionEndOffset = r.EndOffset,
+                ClusterType = "candidate_cluster_before_after",
+                PatternHexOrHash = $"{ToHex(before)}|{ToHex(after)}",
+                SupportCount = 1,
+                NearbyStringSamples = r.SampleTokens.Take(ObserveMaxSamples).ToList(),
+                Confidence = "low",
+                UncertaintyNote = "uncertainty note: before/after bytes can repeat by chance."
+            });
+        }
+
+        var grouped = clusters
+            .GroupBy(x => $"{x.ClusterType}|{x.PatternHexOrHash}", StringComparer.OrdinalIgnoreCase)
+            .Select(g => new ObserveCluster
+            {
+                RegionStartOffset = g.Min(x => x.RegionStartOffset),
+                RegionEndOffset = g.Max(x => x.RegionEndOffset),
+                ClusterType = g.First().ClusterType,
+                PatternHexOrHash = g.First().PatternHexOrHash,
+                SupportCount = g.Count(),
+                NearbyStringSamples = g.SelectMany(x => x.NearbyStringSamples).Distinct(StringComparer.OrdinalIgnoreCase).Take(ObserveMaxSamples).ToList(),
+                Confidence = g.Count() >= 4 ? "medium" : g.Count() >= 2 ? "low_medium" : "low",
+                UncertaintyNote = "uncertainty note: candidate cluster support is observational."
+            })
+            .OrderByDescending(x => x.SupportCount)
+            .ThenBy(x => x.RegionStartOffset)
+            .ToList();
+        return grouped;
+    }
+
+    private static List<ObserveOffsetAlignment> BuildObserveOffsetAlignment(List<ObserveRegion> regions, List<ObserveCluster> clusters)
+    {
+        var outL = new List<ObserveOffsetAlignment>();
+        foreach (var r in regions)
+        {
+            outL.Add(new ObserveOffsetAlignment
+            {
+                StartOffset = r.StartOffset,
+                AlignmentBucket = $"mod16_{r.StartOffset % 16}",
+                RelatedClusterCount = clusters.Count(x => x.RegionStartOffset <= r.EndOffset && x.RegionEndOffset >= r.StartOffset),
+                Observation = "alignment observation"
+            });
+        }
+        return outL.OrderBy(x => x.StartOffset).ToList();
+    }
+
+    private static List<string> BuildObserveContradictions(List<ObserveRegion> regions, List<ObserveCluster> clusters)
+    {
+        var outL = new List<string>();
+        if (regions.Count == 0) outL.Add("no_string_regions_found");
+        if (clusters.Count == 0) outL.Add("no_candidate_clusters_found");
+        if (regions.Count > 0 && clusters.Count > 0)
+        {
+            var uncovered = regions.Count(r => !clusters.Any(c => c.RegionStartOffset <= r.EndOffset && c.RegionEndOffset >= r.StartOffset));
+            if (uncovered > 0) outL.Add($"uncovered_regions={uncovered}");
+        }
+        return outL;
+    }
+
+    private static ObserveConfidenceSummary BuildObserveConfidenceSummary(List<ObserveRegion> regions, List<ObserveCluster> clusters, List<string> contradictions)
+    {
+        var high = clusters.Count(x => x.Confidence == "medium");
+        var mid = clusters.Count(x => x.Confidence == "low_medium");
+        var low = clusters.Count(x => x.Confidence == "low");
+        var overall = contradictions.Count > Math.Max(3, regions.Count / 2) ? "low" : high >= 3 ? "medium" : "low_medium";
+        return new ObserveConfidenceSummary
+        {
+            HighConfidenceClusterCount = high,
+            MediumConfidenceClusterCount = mid,
+            LowConfidenceClusterCount = low,
+            Overall = overall
+        };
+    }
+
+    private static byte[] ReadWindow(byte[] src, int start, int len)
+    {
+        if (src.Length == 0 || len <= 0) return Array.Empty<byte>();
+        var s = Math.Max(0, start);
+        if (s >= src.Length) return Array.Empty<byte>();
+        var e = Math.Min(src.Length - 1, s + len - 1);
+        var outL = new byte[e - s + 1];
+        Buffer.BlockCopy(src, s, outL, 0, outL.Length);
+        return outL;
     }
 
     private static Ctx BuildContext(string input)
@@ -701,6 +959,64 @@ internal static class RfInventoryTool
     private sealed class KV { public string Key { get; set; } = ""; public int Value { get; set; } }
     private sealed class Metrics { public int AsciiStringsSeen { get; set; } public int AsciiStringsKept { get; set; } public int AsciiStringsDiscarded { get; set; } public int Utf16StringsSeen { get; set; } public int Utf16StringsKept { get; set; } public int Utf16StringsDiscarded { get; set; } public int RefsSeen { get; set; } public int RefsKept { get; set; } public int RefsDiscarded { get; set; } public int DuplicateRefsSuppressed { get; set; } public int NoisyRefsDiscarded { get; set; } public int DependencyEdgesEmitted { get; set; } public int DependencyEdgesSuppressed { get; set; } public Dictionary<string, int> DiscardReasons { get; set; } = new(StringComparer.OrdinalIgnoreCase); }
     private sealed class Caps { public bool FileReadCapHit { get; set; } public bool AsciiCapHit { get; set; } public bool Utf16CapHit { get; set; } public bool RefsCapHit { get; set; } public bool DependencyEdgesCapHit { get; set; } public bool ReportSizeCapHit { get; set; } public bool SiblingScanCapHit { get; set; } }
+
+    private sealed class ObserveReport
+    {
+        public string Tool { get; set; } = "rf_rfsinfo_observe";
+        public string Mode { get; set; } = "read_only";
+        public string ExactInputLabel { get; set; } = "";
+        public DateTime GeneratedUtc { get; set; }
+        public ObserveCaps CapsUsed { get; set; } = new();
+        public ObserveHeader HeaderFingerprints { get; set; } = new();
+        public List<ObserveRegion> StringRegions { get; set; } = new();
+        public List<ObserveCluster> CandidateClusters { get; set; } = new();
+        public List<ObserveOffsetAlignment> OffsetAlignmentObservations { get; set; } = new();
+        public List<string> Contradictions { get; set; } = new();
+        public ObserveConfidenceSummary ConfidenceSummary { get; set; } = new();
+        public List<string> UncertaintyNotes { get; set; } = new();
+        public string ExplicitNoFullParserImplementation { get; set; } = "No full parser implementation occurred.";
+        public string ExplicitNoExtraction { get; set; } = "No extraction occurred.";
+        public string ExplicitNoMutation { get; set; } = "No mutation occurred.";
+        public string ExplicitReadOnlyOnly { get; set; } = "Read-only only.";
+    }
+    private sealed class ObserveCaps { public int MaxBytesRead { get; set; } public int MaxRegions { get; set; } public int MaxSamplesPerRegion { get; set; } public bool ReadCapped { get; set; } public bool ReportTruncated { get; set; } }
+    private sealed class ObserveHeader
+    {
+        public long FileSize { get; set; }
+        public string First4BytesHex { get; set; } = "";
+        public string First8BytesHex { get; set; } = "";
+        public string First16BytesHex { get; set; } = "";
+        public string First32BytesHex { get; set; } = "";
+        public string First64BytesHex { get; set; } = "";
+        public string First128BytesHash { get; set; } = "";
+        public string First256BytesHash { get; set; } = "";
+        public double ZeroByteRatioFirst256 { get; set; }
+        public double PrintableRatioFirst256 { get; set; }
+        public string SuspectedTextOrBinary { get; set; } = "";
+    }
+    private sealed class ObserveRegion
+    {
+        public int StartOffset { get; set; }
+        public int EndOffset { get; set; }
+        public int LengthBytes { get; set; }
+        public string Encoding { get; set; } = "";
+        public int TokenCountEstimate { get; set; }
+        public List<string> SampleTokens { get; set; } = new();
+        public double RegionDensity { get; set; }
+    }
+    private sealed class ObserveCluster
+    {
+        public int RegionStartOffset { get; set; }
+        public int RegionEndOffset { get; set; }
+        public string ClusterType { get; set; } = "";
+        public string PatternHexOrHash { get; set; } = "";
+        public int SupportCount { get; set; }
+        public List<string> NearbyStringSamples { get; set; } = new();
+        public string Confidence { get; set; } = "low";
+        public string UncertaintyNote { get; set; } = "";
+    }
+    private sealed class ObserveOffsetAlignment { public int StartOffset { get; set; } public string AlignmentBucket { get; set; } = ""; public int RelatedClusterCount { get; set; } public string Observation { get; set; } = ""; }
+    private sealed class ObserveConfidenceSummary { public int HighConfidenceClusterCount { get; set; } public int MediumConfidenceClusterCount { get; set; } public int LowConfidenceClusterCount { get; set; } public string Overall { get; set; } = "low"; }
 }
 
 internal static class D { public static void Inc(this Dictionary<string, int> d, string k) { d[k] = d.TryGetValue(k, out var v) ? v + 1 : 1; } }
