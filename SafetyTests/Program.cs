@@ -2,7 +2,6 @@
 using System.IO;
 using System.Linq;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Text.Json;
 using RFMapToolSharp.Tools;
 
@@ -112,8 +111,15 @@ try
     Req(obsJson.RootElement.GetProperty("ExplicitNoFullParserImplementation").GetString()?.Contains("No full parser implementation", StringComparison.OrdinalIgnoreCase) == true, "observe parser statement missing");
     Req(obsJson.RootElement.GetProperty("ExplicitNoExtraction").GetString()?.Contains("No extraction", StringComparison.OrdinalIgnoreCase) == true, "observe extraction statement missing");
     Req(obsJson.RootElement.GetProperty("ExplicitReadOnlyOnly").GetString()?.Contains("Read-only", StringComparison.OrdinalIgnoreCase) == true, "observe readonly statement missing");
-    var observeText = File.ReadAllText(obsReportPath);
-    Req(!Regex.IsMatch(observeText, "\\bparsed\\b|\\bdecoded\\b|\\bfield\\b|\\btable\\b|\\bentry\\b|\\bextracted\\b", RegexOptions.IgnoreCase), "forbidden wording present in observe report");
+    var forbidden = new[] { "parsed", "decoded", "field", "table", "entry", "extracted" };
+    foreach (var f in Directory.EnumerateFiles(obsOut, "rf_rfsinfo_observe_report.*", SearchOption.TopDirectoryOnly))
+    {
+        var txt = File.ReadAllText(f);
+        foreach (var bad in forbidden)
+        {
+            Req(!txt.Contains(bad, StringComparison.OrdinalIgnoreCase), $"forbidden wording present in observe output: {bad}");
+        }
+    }
     Req(string.Equals(beforeHash, Sha256File(valid), StringComparison.OrdinalIgnoreCase), "observe input file changed");
     Req(Path.GetFullPath(obsReportPath).StartsWith(Path.GetFullPath(obsOut), StringComparison.OrdinalIgnoreCase), "observe report written outside requested output area");
     var obsReportPath2 = RfInventoryTool.RunRfsinfoObserve(valid, obsOut);

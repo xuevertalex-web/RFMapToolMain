@@ -107,7 +107,7 @@ internal static class RfInventoryTool
                 First128BytesHash = HashBytes(bytes.Take(128).ToArray()),
                 First256BytesHash = sig.First256BytesHash,
                 ZeroByteRatioFirst256 = sig.ZeroByteRatioFirst256,
-                PrintableRatioFirst256 = sig.PrintableRatioFirst256,
+                AsciiVisibleRatioFirst256 = sig.PrintableRatioFirst256,
                 SuspectedTextOrBinary = sig.SuspectedTextOrBinary
             },
             StringRegions = regions,
@@ -991,7 +991,7 @@ internal static class RfInventoryTool
         public string First128BytesHash { get; set; } = "";
         public string First256BytesHash { get; set; } = "";
         public double ZeroByteRatioFirst256 { get; set; }
-        public double PrintableRatioFirst256 { get; set; }
+        public double AsciiVisibleRatioFirst256 { get; set; }
         public string SuspectedTextOrBinary { get; set; } = "";
     }
     private sealed class ObserveRegion
