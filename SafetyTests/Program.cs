@@ -117,6 +117,9 @@ RunProjectMap_EntrypointsDetected_ByNameRules();
 RunProjectMap_UnknownPaths_FallbackStable();
 RunProjectRetrievalPlanner_ZoneRoleSelection();
 RunProjectRetrievalPlanner_UnknownFallback();
+RunQueryConceptAliasMapper_DetectsKnownConcepts();
+RunQueryConceptAliasMapper_NoMatchOnUnrelatedText();
+RunQueryConceptAliasMapper_PlannerIntegration();
 RunRetrievalSignalScorer_TargetedRanking();
 RunRetrievalSignalScorer_Determinism();
 await RunRetrievalDiagnostics_TopSignalsAndVsixDeepMode();
@@ -8055,6 +8058,72 @@ static void RunProjectRetrievalPlanner_UnknownFallback()
     AssertTrue(plan.FallbackUsed, "Unknown task should fallback.");
     AssertTrue(plan.Confidence == 0.0, "Unknown task confidence should be 0.");
     Console.WriteLine("PASS ProjectRetrievalPlanner_UnknownFallback");
+}
+
+static void RunQueryConceptAliasMapper_DetectsKnownConcepts()
+{
+    // workspace_bootstrap concept: triggered by "workspace" or "bootstrap"
+    var ws = QueryConceptAliasMapper.Detect("How does workspace bootstrap work?");
+    AssertTrue(ws.Any(m => m.Concept == "workspace_bootstrap"), "Should detect workspace_bootstrap concept.");
+    var wsMatch = ws.First(m => m.Concept == "workspace_bootstrap");
+    AssertTrue(wsMatch.ZoneHints.Contains("Core", StringComparer.OrdinalIgnoreCase), "workspace_bootstrap should hint Core zone.");
+    AssertTrue(wsMatch.ZoneHints.Contains("Security", StringComparer.OrdinalIgnoreCase), "workspace_bootstrap should hint Security zone.");
+    AssertTrue(wsMatch.FileNameHints.Contains("workspaceResolver", StringComparer.OrdinalIgnoreCase), "workspace_bootstrap should hint workspaceResolver file.");
+
+    // intent_routing concept: triggered by "intent" or "routing"
+    var ir = QueryConceptAliasMapper.Detect("explain intent routing flow");
+    AssertTrue(ir.Any(m => m.Concept == "intent_routing"), "Should detect intent_routing concept.");
+    var irMatch = ir.First(m => m.Concept == "intent_routing");
+    AssertTrue(irMatch.FileNameHints.Contains("IntentDecisionEngine", StringComparer.OrdinalIgnoreCase), "intent_routing should hint IntentDecisionEngine.");
+
+    // guard_approval_security: triggered by "permission"
+    var sec = QueryConceptAliasMapper.Detect("permission guard");
+    AssertTrue(sec.Any(m => m.Concept == "guard_approval_security"), "Should detect guard_approval_security concept.");
+
+    // Case-insensitive: "WORKSPACE" should still match
+    var upper = QueryConceptAliasMapper.Detect("WORKSPACE INIT");
+    AssertTrue(upper.Any(m => m.Concept == "workspace_bootstrap"), "Case-insensitive: WORKSPACE should match workspace_bootstrap.");
+
+    Console.WriteLine("PASS QueryConceptAliasMapper_DetectsKnownConcepts");
+}
+
+static void RunQueryConceptAliasMapper_NoMatchOnUnrelatedText()
+{
+    var empty = QueryConceptAliasMapper.Detect("");
+    AssertTrue(empty.Count == 0, "Empty string should produce zero matches.");
+
+    var unrelated = QueryConceptAliasMapper.Detect("hello world how are you today");
+    AssertTrue(unrelated.Count == 0, "Unrelated text should produce zero matches.");
+
+    var nullInput = QueryConceptAliasMapper.Detect(null!);
+    AssertTrue(nullInput.Count == 0, "Null input should produce zero matches.");
+
+    Console.WriteLine("PASS QueryConceptAliasMapper_NoMatchOnUnrelatedText");
+}
+
+static void RunQueryConceptAliasMapper_PlannerIntegration()
+{
+    var snapshot = ProjectMapBuilder.Build("repo", new[]
+    {
+        "Core/Agent.cs",
+        "Security/PermissionGuard.cs",
+        "Context/ContextBuilder.cs",
+        "vscode-extension/panelRunController.js"
+    });
+
+    // Query uses alias "bootstrap" which only the mapper knows about (not in planner Match keywords)
+    var plan = ProjectRetrievalPlanner.Plan("how does bootstrap work", snapshot);
+    AssertTrue(plan.SelectedZones.Contains("Core", StringComparer.OrdinalIgnoreCase), "Alias mapper should inject Core zone for bootstrap query.");
+    AssertTrue(plan.SelectedZones.Contains("Security", StringComparer.OrdinalIgnoreCase), "Alias mapper should inject Security zone for bootstrap query.");
+    AssertTrue(!plan.FallbackUsed, "Bootstrap query should not fall back when mapper provides zones.");
+    AssertTrue(plan.Reason.Contains("alias:workspace_bootstrap", StringComparison.OrdinalIgnoreCase), "Reason should mention alias:workspace_bootstrap.");
+
+    // Query with both planner Match keyword AND mapper alias — should combine
+    var combined = ProjectRetrievalPlanner.Plan("fix permission guard approval flow", snapshot);
+    AssertTrue(combined.SelectedZones.Contains("Security", StringComparer.OrdinalIgnoreCase), "Combined query should include Security zone.");
+    AssertTrue(combined.SelectedRoles.Contains("security", StringComparer.OrdinalIgnoreCase), "Combined query should include security role from mapper.");
+
+    Console.WriteLine("PASS QueryConceptAliasMapper_PlannerIntegration");
 }
 
 static void RunRetrievalSignalScorer_TargetedRanking()
