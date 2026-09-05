@@ -5,7 +5,9 @@ using System.Linq;
 using System.Numerics;
 using RFMapToolSharp.Models;
 using RFMapToolSharp.Parsing.Bsp;
-using RFMapToolSharp.Parsing; 
+using RFMapToolSharp.Parsing;
+using RFMapToolSharp.Collision;
+using RFMapToolSharp.Rvp;
 using SharpGLTF.Schema2;
 using SharpGLTF.Geometry;
 using SharpGLTF.Geometry.VertexTypes;
@@ -720,6 +722,18 @@ namespace RFMapToolSharp.Export
                 ProcessSpt(scene.RootPath, gltfScene, MirrorWorldY, helperMeshes, name);
             }
 
+            // --- EBP (FX / SOUND EMITTERS) ---
+            if (!string.Equals(SptOptions.Mode, "off", StringComparison.OrdinalIgnoreCase))
+            {
+                ProcessEbp(scene.RootPath, gltfScene, MirrorWorldY, name, model);
+            }
+
+            // --- RVP (CUTSCENE / FLYING OBJECTS) ---
+            if (!string.Equals(SptOptions.Mode, "off", StringComparison.OrdinalIgnoreCase))
+            {
+                ProcessRvp(scene.RootPath, gltfScene, MirrorWorldY, name, model);
+            }
+
             model.SaveGLB(Path.Combine(exportDir, $"{name}.glb"));
             DiagnosticsOutput.WriteDiagnostic(name, "stretched_faces.json", JsonSerializer.Serialize(stretchedFaces, SafeJson));
             DiagnosticsOutput.WriteDiagnostic(name, "uv_anomaly_faces.json", JsonSerializer.Serialize(uvAnomalyFaces, SafeJson));
@@ -906,6 +920,493 @@ namespace RFMapToolSharp.Export
             }
             Console.WriteLine($"[SPT] Created markers: {count}");
             DiagnosticsOutput.WriteDiagnostic(mapName, "spt_resolve_log.json", JsonSerializer.Serialize(resolveLog, SafeJson));
+        }
+
+        /// <summary>
+        /// Эмиттеры эффектов и звуков из .ebp (ExtBsp): фонтаны, лава, листопад,
+        /// ambient-звуки. Сами частицы (.R3E) в GLB не конвертируются — ставим
+        /// полупрозрачные маркеры с метаданными в extras (effect path, fade,
+        /// shader, wave-файл и т.д.), чтобы эмиттеры были видны и адресуемы.
+        /// </summary>
+        private static void ProcessEbp(string mapRootPath, Scene gltfScene, bool mirrorY, string mapName, ModelRoot model)
+        {
+            var ebpFile = Directory.GetFiles(mapRootPath, "*.ebp", SearchOption.TopDirectoryOnly)
+                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+            if (ebpFile == null) return;
+
+            ExtBspFile ebp;
+            try
+            {
+                ebp = ExtBspFile.Load(ebpFile);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FX] Failed to load {Path.GetFileName(ebpFile)}: {ex.Message}");
+                return;
+            }
+
+            var fxMesh = CreateUnitCube(model, "FX_marker", "FX_marker_mat", new Vector4(1.0f, 0.2f, 1.0f, 0.35f), 0.5f);
+            var sndMesh = CreateUnitCube(model, "SND_marker", "SND_marker_mat", new Vector4(0.45f, 0.3f, 1.0f, 0.35f), 0.5f);
+
+            // Корень данных клиента (...\Maps) — для проверки наличия wav в Snd.
+            var mapsRoot = GetClientDataRoot(mapRootPath);
+
+            int fxCount = 0, sndCount = 0;
+            var log = new List<object>();
+
+            for (int i = 0; i < ebp.MapEntitiesList.Count; i++)
+            {
+                var inst = ebp.MapEntitiesList[i];
+                var entry = inst.Id >= 0 && inst.Id < ebp.EntityList.Count ? ebp.EntityList[inst.Id] : null;
+                var effectPath = entry?.Name ?? string.Empty;
+                var baseName = SanitizeNodeName(Path.GetFileNameWithoutExtension(effectPath.Replace('\\', '/')));
+                if (string.IsNullOrEmpty(baseName)) baseName = $"id{inst.Id}";
+
+                var pos = new Vector3(inst.Pos.X, mirrorY ? -inst.Pos.Y : inst.Pos.Y, inst.Pos.Z);
+                if (!IsFinite(pos)) pos = Vector3.Zero;
+
+                var node = gltfScene.CreateNode($"FX_{i}_{baseName}");
+                try { node.LocalTransform = Matrix4x4.CreateTranslation(pos); }
+                catch { continue; }
+
+                var size = new Vector3(
+                    MathF.Abs(inst.BbMax.X - inst.BbMin.X),
+                    MathF.Abs(inst.BbMax.Y - inst.BbMin.Y),
+                    MathF.Abs(inst.BbMax.Z - inst.BbMin.Z));
+                if (size.X < 1f && size.Y < 1f && size.Z < 1f)
+                {
+                    float s = IsFinite(inst.Scale) && inst.Scale > 0 ? 100f * inst.Scale : 100f;
+                    size = new Vector3(Math.Clamp(s, 10f, 5000f));
+                }
+                size = new Vector3(
+                    Math.Clamp(size.X, 1f, 200000f),
+                    Math.Clamp(size.Y, 1f, 200000f),
+                    Math.Clamp(size.Z, 1f, 200000f));
+
+                var box = node.CreateNode($"FX_{i}_{baseName}_box");
+                box.Mesh = fxMesh;
+                try { box.LocalTransform = Matrix4x4.CreateScale(size); }
+                catch { box.LocalTransform = Matrix4x4.CreateScale(new Vector3(100f)); }
+
+                SetNodeExtras(node, new
+                {
+                    type = "fx_emitter",
+                    effect = effectPath,
+                    effectExists = ResolveEffectFile(mapsRoot, effectPath) != null,
+                    effectFile = ResolveEffectFile(mapsRoot, effectPath),
+                    isParticle = entry?.IsParticle ?? 0,
+                    isFileExist = entry?.IsFileExist ?? 0,
+                    fadeStart = entry?.FadeStart ?? 0f,
+                    fadeEnd = entry?.FadeEnd ?? 0f,
+                    shaderId = entry?.ShaderId ?? 0,
+                    scale = inst.Scale,
+                    rotX = inst.RotX,
+                    rotY = inst.RotY
+                });
+
+                log.Add(new
+                {
+                    Index = i,
+                    inst.Id,
+                    Effect = effectPath,
+                    IsParticle = entry?.IsParticle ?? 0,
+                    Position = pos,
+                    Size = size,
+                    inst.Scale,
+                    inst.RotX,
+                    inst.RotY,
+                    FadeStart = entry?.FadeStart ?? 0f,
+                    FadeEnd = entry?.FadeEnd ?? 0f,
+                    ShaderId = entry?.ShaderId ?? 0
+                });
+                fxCount++;
+            }
+
+            for (int i = 0; i < ebp.SoundEntitiesList.Count; i++)
+            {
+                var inst = ebp.SoundEntitiesList[i];
+                var wave = inst.Id >= 0 && inst.Id < ebp.SoundEntityList.Count ? ebp.SoundEntityList[inst.Id].Name : string.Empty;
+                var baseName = SanitizeNodeName(Path.GetFileNameWithoutExtension(wave.Replace('\\', '/')));
+                if (string.IsNullOrEmpty(baseName)) baseName = $"id{inst.Id}";
+
+                var pos = new Vector3(inst.Pos.X, mirrorY ? -inst.Pos.Y : inst.Pos.Y, inst.Pos.Z);
+                if (!IsFinite(pos)) pos = Vector3.Zero;
+
+                var node = gltfScene.CreateNode($"SND_{i}_{baseName}");
+                try { node.LocalTransform = Matrix4x4.CreateTranslation(pos); }
+                catch { continue; }
+
+                var box = node.CreateNode($"SND_{i}_{baseName}_box");
+                box.Mesh = sndMesh;
+                try { box.LocalTransform = Matrix4x4.CreateScale(25f); }
+                catch { }
+
+                var waveRel = wave.TrimStart('\\', '/').Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
+                var waveBase = Path.GetFileName(waveRel);
+                bool waveExists = false;
+                string? waveResolved = null;
+                if (!string.IsNullOrWhiteSpace(waveRel))
+                {
+                    foreach (var candidate in new[]
+                    {
+                        Path.Combine(mapsRoot, waveRel),
+                        Path.Combine(mapsRoot, "Snd", waveRel),
+                    })
+                    {
+                        if (File.Exists(candidate)) { waveExists = true; waveResolved = candidate; break; }
+                    }
+                    if (!waveExists)
+                    {
+                        var index = GetSoundIndex(mapsRoot);
+                        if (waveBase.Length > 0 && index.TryGetValue(waveBase, out var found))
+                        {
+                            waveExists = true;
+                            waveResolved = found;
+                        }
+                    }
+                }
+
+                SetNodeExtras(node, new
+                {
+                    type = "sound_emitter",
+                    wave,
+                    waveExists,
+                    waveFile = waveResolved != null ? Path.GetRelativePath(mapsRoot, waveResolved).Replace('\\', '/') : null,
+                    eventTime = inst.EventTime,
+                    attn = inst.Attn,
+                    flag = inst.Flag,
+                    scale = inst.Scale
+                });
+
+                log.Add(new
+                {
+                    Index = i,
+                    inst.Id,
+                    Wave = wave,
+                    WaveExists = waveExists,
+                    Position = pos,
+                    inst.EventTime,
+                    inst.Attn,
+                    inst.Flag,
+                    inst.Scale
+                });
+                sndCount++;
+            }
+
+            Console.WriteLine($"[FX] emitters: {fxCount}, sounds: {sndCount}");
+            if (fxCount + sndCount > 0)
+                DiagnosticsOutput.WriteDiagnostic(mapName, "ebp_fx.json", JsonSerializer.Serialize(log, SafeJson));
+        }
+
+        private static string SanitizeNodeName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return string.Empty;
+            var chars = name.Select(c => char.IsLetterOrDigit(c) || c == '_' || c == '-' || c == '.' ? c : '_').ToArray();
+            return new string(chars);
+        }
+
+        private static void SetNodeExtras(Node node, object payload)
+        {
+            try
+            {
+                node.Extras = JsonSerializer.SerializeToNode(payload);
+            }
+            catch
+            {
+                // extras — опциональные метаданные; не валим экспорт, если API недоступен
+            }
+        }
+
+        // Индекс звуковых файлов клиента: basename (lower) -> полный путь. Кэшируется на mapsRoot.
+        private static readonly Dictionary<string, Dictionary<string, string>> _soundIndexCache = new(StringComparer.OrdinalIgnoreCase);
+
+        private static Dictionary<string, string> GetSoundIndex(string mapsRoot)
+        {
+            if (_soundIndexCache.TryGetValue(mapsRoot, out var cached)) return cached;
+            var index = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var sndRoot = Path.Combine(mapsRoot, "Snd");
+            if (Directory.Exists(sndRoot))
+            {
+                foreach (var f in Directory.EnumerateFiles(sndRoot, "*.*", SearchOption.AllDirectories))
+                {
+                    if (!f.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) &&
+                        !f.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase) &&
+                        !f.EndsWith(".ogg", StringComparison.OrdinalIgnoreCase)) continue;
+                    var baseName = Path.GetFileName(f);
+                    if (!index.ContainsKey(baseName)) index[baseName] = f;
+                }
+            }
+            _soundIndexCache[mapsRoot] = index;
+            return index;
+        }
+
+        // Индекс файлов эффектов (.r3e) по всему дереву данных клиента.
+        private static readonly Dictionary<string, Dictionary<string, string>> _effectIndexCache = new(StringComparer.OrdinalIgnoreCase);
+
+        private static string? ResolveEffectFile(string mapsRoot, string effectPath)
+        {
+            if (string.IsNullOrWhiteSpace(effectPath)) return null;
+            var rel = effectPath.TrimStart('\\', '/').Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
+            foreach (var candidate in new[]
+            {
+                Path.Combine(mapsRoot, rel),
+                Path.Combine(mapsRoot, "Effect", rel),
+            })
+            {
+                if (File.Exists(candidate))
+                    return Path.GetRelativePath(mapsRoot, candidate).Replace('\\', '/');
+            }
+            if (!_effectIndexCache.TryGetValue(mapsRoot, out var index))
+            {
+                index = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (Directory.Exists(mapsRoot))
+                {
+                    foreach (var f in Directory.EnumerateFiles(mapsRoot, "*.r3e", SearchOption.AllDirectories))
+                    {
+                        var baseName = Path.GetFileName(f);
+                        if (!index.ContainsKey(baseName))
+                            index[baseName] = Path.GetRelativePath(mapsRoot, f).Replace('\\', '/');
+                    }
+                }
+                _effectIndexCache[mapsRoot] = index;
+            }
+            var baseNameOnly = Path.GetFileName(rel);
+            return baseNameOnly.Length > 0 && index.TryGetValue(baseNameOnly, out var found) ? found : null;
+        }
+
+        /// <summary>Корень данных клиента (...\Maps): mapRootPath = Maps\Map\X → Maps.</summary>
+        private static string GetClientDataRoot(string mapRootPath)
+        {
+            var root = Directory.GetParent(mapRootPath)?.FullName ?? mapRootPath;
+            if (string.Equals(Path.GetFileName(root), "Map", StringComparison.OrdinalIgnoreCase))
+                root = Directory.GetParent(root)?.FullName ?? root;
+            return root;
+        }
+
+        // Индекс файлов по расширению по всему дереву данных клиента (кэш на root+ext).
+        private static readonly Dictionary<string, Dictionary<string, string>> _extIndexCache = new(StringComparer.OrdinalIgnoreCase);
+
+        private static Dictionary<string, string> GetExtIndex(string dataRoot, string ext)
+        {
+            var key = dataRoot + "|" + ext;
+            if (_extIndexCache.TryGetValue(key, out var cached)) return cached;
+            var index = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (Directory.Exists(dataRoot))
+            {
+                foreach (var f in Directory.EnumerateFiles(dataRoot, "*" + ext, SearchOption.AllDirectories))
+                {
+                    var baseName = Path.GetFileName(f);
+                    if (!index.ContainsKey(baseName)) index[baseName] = f;
+                }
+            }
+            _extIndexCache[key] = index;
+            return index;
+        }
+
+        /// <summary>Резолв пути вида ".\Chef\RealTime_00\Mesh\x.msh" относительно корня данных клиента.</summary>
+        private static string? ResolveClientPath(string dataRoot, string? relPath, string extForIndex)
+        {
+            if (string.IsNullOrWhiteSpace(relPath)) return null;
+            var rel = relPath.TrimStart('.', '\\', '/').Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
+            var direct = Path.Combine(dataRoot, rel);
+            if (File.Exists(direct)) return direct;
+            var baseName = Path.GetFileName(rel);
+            if (baseName.Length == 0) return null;
+            var index = GetExtIndex(dataRoot, extForIndex);
+            return index.TryGetValue(baseName, out var found) ? found : null;
+        }
+
+        /// <summary>
+        /// Летающие/катсценовые объекты из .rvp (корабли, бабочки и т.п.):
+        /// меши из Chef\RealTime_*, позиции/повороты — из треков DummyNN в .cam.
+        /// Экспортируется как ноды RVP_* с анимацией (30 fps).
+        /// </summary>
+        private static void ProcessRvp(string mapRootPath, Scene gltfScene, bool mirrorY, string mapName, ModelRoot model)
+        {
+            var rvpFiles = Directory.GetFiles(mapRootPath, "*.rvp", SearchOption.TopDirectoryOnly)
+                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (rvpFiles.Length == 0) return;
+
+            var dataRoot = GetClientDataRoot(mapRootPath);
+
+            CamFile? cam = null;
+            var camPath = Directory.GetFiles(mapRootPath, "*.cam", SearchOption.TopDirectoryOnly).FirstOrDefault();
+            if (camPath != null)
+            {
+                try { cam = CamFile.Load(camPath); }
+                catch (Exception ex) { Console.WriteLine($"[RVP] cam load failed: {ex.Message}"); }
+            }
+
+            var dummies = new Dictionary<string, CamFile.CamDummy>(StringComparer.OrdinalIgnoreCase);
+            if (cam != null)
+                foreach (var d in cam.Dummies)
+                    if (!dummies.ContainsKey(d.Name))
+                        dummies[d.Name] = d;
+
+            var markerMesh = CreateUnitCube(model, "RVP_marker", "RVP_marker_mat", new Vector4(0.2f, 1f, 1f, 0.45f), 0.5f);
+            Animation? anim = null;
+            int created = 0, withMesh = 0, withAnim = 0, noDummy = 0;
+            var log = new List<object>();
+
+            foreach (var rvpPath in rvpFiles)
+            {
+                RvpFile rvp;
+                try { rvp = RvpFile.Load(rvpPath); }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[RVP] {Path.GetFileName(rvpPath)}: parse failed: {ex.Message}");
+                    continue;
+                }
+
+                var bindings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var b in rvp.PrepareBindings)
+                    bindings[b.ObjectName] = b.DummyName.TrimStart('*');
+
+                foreach (var obj in rvp.Objects)
+                {
+                    bindings.TryGetValue(obj.Name, out var dummyName);
+                    CamFile.CamDummy? dummy = null;
+                    if (dummyName != null) dummies.TryGetValue(dummyName, out dummy);
+
+                    if (dummy == null)
+                    {
+                        noDummy++;
+                        log.Add(new { Object = obj.Name, Rvp = Path.GetFileName(rvpPath), Dummy = dummyName, Error = "no dummy track" });
+                        continue;
+                    }
+
+                    var node = gltfScene.CreateNode($"RVP_{obj.Name}");
+
+                    string? resolvedMesh = ResolveClientPath(dataRoot, obj.MeshPath, ".msh");
+                    bool meshOk = false;
+                    string? meshErr = null;
+                    if (resolvedMesh != null)
+                    {
+                        if (SptModelBridge.TryCreateMesh(model, resolvedMesh, out var mesh, out var reason) && mesh != null)
+                        {
+                            node.Mesh = mesh;
+                            meshOk = true;
+                            withMesh++;
+                        }
+                        else meshErr = reason;
+                    }
+                    if (!meshOk)
+                    {
+                        var box = node.CreateNode($"RVP_{obj.Name}_box");
+                        box.Mesh = markerMesh;
+                        try { box.LocalTransform = Matrix4x4.CreateScale(100f); } catch { }
+                    }
+
+                    bool animated = false;
+                    var posKeys = dummy.PosKeys
+                        .Where(k => k.Key >= 0 && IsFinite(k.Value))
+                        .GroupBy(k => k.Key)
+                        .Select(g => g.First())
+                        .OrderBy(k => k.Key)
+                        .ToList();
+
+                    if (posKeys.Count > 0)
+                    {
+                        var trs = new Dictionary<float, Vector3>();
+                        var rts = new Dictionary<float, Quaternion>();
+                        Quaternion prevQ = default;
+                        foreach (var k in posKeys)
+                        {
+                            float t = k.Key / 30f;
+                            trs[t] = new Vector3(k.Value.X, mirrorY ? -k.Value.Y : k.Value.Y, k.Value.Z);
+
+                            // поворот: ближайший ключ rot по frame, иначе baseQuat
+                            var rq = dummy.BaseQuat;
+                            if (dummy.RotKeys.Count > 0)
+                            {
+                                rq = dummy.RotKeys
+                                    .OrderBy(rk => Math.Abs(rk.Key - k.Key))
+                                    .First().Value;
+                            }
+                            var rm = Matrix4x4.CreateFromQuaternion(rq);
+                            rm = MirrorSptMatrix(rm, mirrorY);
+                            if (Matrix4x4.Decompose(rm, out _, out var q, out _))
+                            {
+                                if (rts.Count > 0 && Quaternion.Dot(q, prevQ) < 0f) q = Negate(q);
+                                prevQ = q;
+                                rts[t] = q;
+                            }
+
+                            if (posKeys.Count == 1) break;
+                        }
+
+                        if (trs.Count > 0)
+                        {
+                            anim ??= model.CreateAnimation($"{mapName}_RVP");
+                            anim.CreateTranslationChannel(node, trs, true);
+                            if (rts.Count > 0) anim.CreateRotationChannel(node, rts, true);
+                            // начальный трансформ = первый ключ (для статичных просмотрщиков)
+                            try
+                            {
+                                var firstT = trs.OrderBy(x => x.Key).First();
+                                node.LocalTransform = Matrix4x4.CreateTranslation(firstT.Value);
+                            }
+                            catch { }
+                            animated = true;
+                            withAnim++;
+                        }
+                    }
+
+                    if (!animated)
+                    {
+                        var pos = new Vector3(dummy.BasePos.X, mirrorY ? -dummy.BasePos.Y : dummy.BasePos.Y, dummy.BasePos.Z);
+                        if (!IsFinite(pos)) pos = Vector3.Zero;
+                        var rm = Matrix4x4.CreateFromQuaternion(dummy.BaseQuat);
+                        rm = MirrorSptMatrix(rm, mirrorY);
+                        var m = rm * Matrix4x4.CreateTranslation(pos);
+                        if (obj.Scale is > 0 and < 1000)
+                            m = Matrix4x4.CreateScale(obj.Scale.Value) * m;
+                        try { node.LocalTransform = IsFinite(m) ? m : Matrix4x4.CreateTranslation(pos); }
+                        catch { node.LocalTransform = Matrix4x4.CreateTranslation(pos); }
+                    }
+
+                    SetNodeExtras(node, new
+                    {
+                        type = "rvp_object",
+                        rvp = Path.GetFileName(rvpPath),
+                        dummy = dummyName,
+                        mesh = obj.MeshPath,
+                        meshResolved = resolvedMesh != null ? Path.GetRelativePath(dataRoot, resolvedMesh).Replace('\\', '/') : null,
+                        meshOk,
+                        meshError = meshErr,
+                        animated,
+                        collision = obj.Collision,
+                        meshId = obj.MeshId,
+                        scale = obj.Scale
+                    });
+
+                    log.Add(new
+                    {
+                        Object = obj.Name,
+                        Rvp = Path.GetFileName(rvpPath),
+                        Dummy = dummyName,
+                        Mesh = obj.MeshPath,
+                        MeshOk = meshOk,
+                        MeshError = meshErr,
+                        Animated = animated,
+                        PosKeys = dummy.PosKeys.Count,
+                        RotKeys = dummy.RotKeys.Count
+                    });
+                    created++;
+                }
+            }
+
+            Console.WriteLine($"[RVP] objects: {created} (meshes: {withMesh}, animated: {withAnim}), no-dummy: {noDummy}");
+            if (cam != null && cam.Warnings.Count > 0)
+                Console.WriteLine($"[RVP] cam warnings: {cam.Warnings.Count}");
+            DiagnosticsOutput.WriteDiagnostic(mapName, "rvp_objects.json", JsonSerializer.Serialize(new
+            {
+                CamFile = camPath != null ? Path.GetFileName(camPath) : null,
+                CamWarnings = cam?.Warnings,
+                Objects = log
+            }, SafeJson));
         }
 
         private static string? ResolveModelPath(string mapRootPath, string modelName)

@@ -7,6 +7,7 @@ public record RvpColor(byte R, byte G, byte B);
 public class RvpObject
 {
     public string Name { get; set; } = string.Empty;
+    public string? MeshPath { get; set; }
     public string? TexPath { get; set; }
     public string? Bone { get; set; }
     public List<string> Animations { get; } = new();

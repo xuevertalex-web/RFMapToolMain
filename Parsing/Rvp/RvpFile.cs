@@ -54,7 +54,28 @@ public class RvpFile
             {
                 if (token.StartsWith("*", StringComparison.Ordinal))
                 {
+                    if (lower == "*magic")
+                    {
+                        // Служебный блок привязки эффекта (*magic N + magic_id/
+                        // char_link/char_dummy/map_dummy) — это не RVP-объект.
+                        // Пропускаем индекс, остальные токены съест switch ниже.
+                        ReadNext(tokens, ref i);
+                        continue;
+                    }
+
                     currentObject = new RvpObject { Name = token.TrimStart('*') };
+                    // Следующий токен — путь к .msh (например, ".\Chef\RealTime_00\Mesh\s_fight.msh")
+                    if (i + 1 < tokens.Count)
+                    {
+                        var next = tokens[i + 1];
+                        bool looksLikePath = !next.StartsWith("*", StringComparison.Ordinal) &&
+                                             (next.Contains('\\') || next.Contains('/') || next.EndsWith(".msh", StringComparison.OrdinalIgnoreCase));
+                        if (looksLikePath)
+                        {
+                            i++;
+                            currentObject.MeshPath = next;
+                        }
+                    }
                     rvp.Objects.Add(currentObject);
                     continue;
                 }
@@ -93,6 +114,14 @@ public class RvpFile
                     case "scale":
                         currentObject.Scale = ReadNextFloat(tokens, ref i);
                         break;
+                    case "magic_id":
+                    case "char_link":
+                    case "char_dummy":
+                    case "map_dummy":
+                        // Поля блока *magic — просто поглощаем значение,
+                        // чтобы следующий за ним токен (*b_NN) не стал объектом.
+                        ReadNext(tokens, ref i);
+                        break;
                 }
 
                 continue;
@@ -104,11 +133,18 @@ public class RvpFile
                 {
                     var objName = token.TrimStart('*');
                     var dummy = ReadNext(tokens, ref i);
-                    rvp.PrepareBindings.Add(new RvpPrepareBinding
+                    // Preparetrack-биндинг имеет вид `*obj *DummyNN`. В файлах без
+                    // секции [Track] строки вида `ani *b_01 0` идут сразу после
+                    // [PrepareTrack] и не должны затирать биндинги: второй токен
+                    // обязан быть именем dummy (тоже начинается с '*').
+                    if (dummy.StartsWith("*", StringComparison.Ordinal))
                     {
-                        ObjectName = objName,
-                        DummyName = dummy
-                    });
+                        rvp.PrepareBindings.Add(new RvpPrepareBinding
+                        {
+                            ObjectName = objName,
+                            DummyName = dummy
+                        });
+                    }
                     continue;
                 }
 

@@ -1368,7 +1368,11 @@ public sealed class BspFile
 
         // Before first key: interpolate from last -> first (looping animation)
         float first = frameAt(0);
-        if (nowFrame <= first)
+        // Строгое '<': при nowFrame == first обычный цикл ниже вернёт ровно
+        // первый ключ. Ветка wrap для first==0 вырождается (b += a даёт b == a,
+        // denom=0 → alpha=0 → Slerp возвращает ПОСЛЕДНИЙ ключ вместо первого),
+        // что давало скачок дельта-канала на кадре 0 (0 → тысячи единиц).
+        if (nowFrame < first)
         {
             root = count - 1;
             next = 0;
@@ -1735,7 +1739,9 @@ public sealed class ExtBspFile
         var isParticle = br.ReadByte();
         var isFileExist = br.ReadByte();
         var nameBytes = br.ReadBytes(62);
-        var name = Encoding.ASCII.GetString(nameBytes).TrimEnd('\0');
+        var rawName = Encoding.ASCII.GetString(nameBytes);
+        var nulIdx = rawName.IndexOf('\0');
+        var name = nulIdx >= 0 ? rawName[..nulIdx] : rawName.TrimEnd('\0');
         var fadeStart = br.ReadSingle();
         var fadeEnd = br.ReadSingle();
         var flag = br.ReadUInt16();
@@ -1777,7 +1783,9 @@ public sealed class ExtBspFile
     private static ReadSoundEntity ReadSoundEntity(BinaryReader br)
     {
         var nameBytes = br.ReadBytes(64);
-        var name = Encoding.ASCII.GetString(nameBytes).TrimEnd('\0');
+        var rawName = Encoding.ASCII.GetString(nameBytes);
+        var nulIdx = rawName.IndexOf('\0');
+        var name = nulIdx >= 0 ? rawName[..nulIdx] : rawName.TrimEnd('\0');
         return new ReadSoundEntity { Name = name };
     }
 
