@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -989,6 +989,160 @@ public sealed class BspFile
             if (read[i].Frames > 0)
                 _animatedObjectIds.Add(i + 1);
         }
+    }
+
+    // ===== Public API для экспортёра: иерархия и world-сэмплы объектов =====
+
+    /// <summary>World-матрица (converted space), с которой вершины были запечены при загрузке (кадр ObjectTransformFrame).</summary>
+    public Matrix4x4? GetBakedObjectMatrix(int objectId1Based)
+    {
+        int idx = objectId1Based - 1;
+        if (idx < 0 || idx >= ObjectMatrices.Length) return null;
+        return ObjectMatrices[idx];
+    }
+
+    /// <summary>Parent объекта (1-based, 0 = нет родителя); -1 если объект не найден.</summary>
+    public int GetObjectParent1Based(int objectId1Based)
+    {
+        var read = ReadAniObjects();
+        int idx = objectId1Based - 1;
+        if (idx < 0 || idx >= read.Length) return -1;
+        return read[idx].Parent;
+    }
+
+    /// <summary>Длина анимации объекта в кадрах (0 = статичный); -1 если объект не найден.</summary>
+    public int GetObjectFrames(int objectId1Based)
+    {
+        var read = ReadAniObjects();
+        int idx = objectId1Based - 1;
+        if (idx < 0 || idx >= read.Length) return -1;
+        return read[idx].Frames;
+    }
+
+    /// <summary>
+    /// World-матрица объекта (converted space) на произвольном кадре.
+    /// Повторяет математику BuildObjectMatrices, чтобы кадр ObjectTransformFrame
+    /// совпадал с матрицей, использованной при запекании вершин.
+    /// </summary>
+    public Matrix4x4? GetObjectWorldMatrixAtFrame(int objectId1Based, float frame)
+    {
+        var read = ReadAniObjects();
+        int idx = objectId1Based - 1;
+        if (idx < 0 || idx >= read.Length) return null;
+        return ComputeWorldMatricesAtFrame(read, frame)[idx];
+    }
+
+    /// <summary>
+    /// World-матрицы всех объектов (converted space) на кадре; индекс = objectId-1.
+    /// Эффективнее вызова GetObjectWorldMatrixAtFrame по одному объекту:
+    /// матрицы всей иерархии всё равно вычисляются целиком.
+    /// </summary>
+    public Matrix4x4[] GetObjectWorldMatricesAtFrame(float frame)
+    {
+        var read = ReadAniObjects();
+        if (read.Length == 0) return Array.Empty<Matrix4x4>();
+        return ComputeWorldMatricesAtFrame(read, frame);
+    }
+
+    /// <summary>
+    /// Локальные компоненты объекта (3ds-max space, ДО ConvertFrom3dsMaxMatrix) на кадре:
+    /// local = R(rot)·scaleMat с translation = pos. Нужны экспортёру для факторизации
+    /// world-дельты в TRS-цепочку (когда прямая дельта содержит shear).
+    /// </summary>
+    public bool TryGetObjectLocalComponents(int objectId1Based, float frame,
+        out Vector3 pos, out Quaternion rot, out Matrix4x4 scaleMat)
+    {
+        pos = default;
+        rot = Quaternion.Identity;
+        scaleMat = Matrix4x4.Identity;
+        var read = ReadAniObjects();
+        int idx = objectId1Based - 1;
+        if (idx < 0 || idx >= read.Length) return false;
+        var obj = read[idx];
+        float nowFrame = obj.Frames == 0 ? 0f : GetFloatMod(frame, obj.Frames);
+        rot = obj.RotCnt > 0
+            ? SampleRot(read, idx, nowFrame)
+            : new Quaternion(obj.Quat.X, obj.Quat.Y, obj.Quat.Z, obj.Quat.W);
+        rot = Quaternion.Normalize(rot);
+        pos = obj.PosCnt > 0
+            ? SamplePos(read, idx, nowFrame)
+            : new Vector3(obj.Pos.X, obj.Pos.Y, obj.Pos.Z);
+        scaleMat = obj.ScaleCnt > 0
+            ? SampleScaleMatrix(read, idx, nowFrame)
+            : BuildScaleMatrix(new Vector3(obj.Scale.X, obj.Scale.Y, obj.Scale.Z),
+                new Quaternion(obj.ScaleQuat.X, obj.ScaleQuat.Y, obj.ScaleQuat.Z, obj.ScaleQuat.W));
+        return true;
+    }
+
+    private Matrix4x4[] ComputeWorldMatricesAtFrame(ReadAniObject[] read, float targetFrame)
+    {
+        int count = read.Length;
+        var locals = new Matrix4x4[count];
+        for (int i = 0; i < count; i++)
+        {
+            float parentFrame = 0f;
+            int parent = read[i].Parent - 1;
+            if (parent >= 0 && parent < count && read[parent].Frames != 0)
+                parentFrame = GetFloatMod(targetFrame, read[parent].Frames);
+            float nowFrame = read[i].Frames == 0 ? 0f : GetFloatMod(targetFrame, read[i].Frames);
+            locals[i] = GetAniMatrixWithParentFrame(read, i, nowFrame, parentFrame);
+        }
+
+        var world = new Matrix4x4[count];
+        if (StrictLegacyObjectTransform)
+        {
+            var localsLegacy = new Matrix4x4[count];
+            for (int i = 0; i < count; i++)
+                localsLegacy[i] = ConvertFrom3dsMaxMatrix(locals[i]);
+            for (int i = 0; i < count; i++)
+                world[i] = BuildWorldLegacy(i, read, localsLegacy, world);
+        }
+        else
+        {
+            for (int i = 0; i < count; i++)
+                world[i] = BuildWorld(i, read, locals, world);
+            for (int i = 0; i < count; i++)
+                world[i] = ConvertFrom3dsMaxMatrix(world[i]);
+        }
+        return world;
+    }
+
+    /// <summary>Диагностический дамп сырых pos/rot/scale треков объекта (JSON-строка).</summary>
+    public string DumpObjectTracksJson(int objectId1Based)
+    {
+        var read = ReadAniObjects();
+        int idx = objectId1Based - 1;
+        if (idx < 0 || idx >= read.Length) return "{}";
+        var obj = read[idx];
+
+        var posList = new List<object>();
+        foreach (var t in ReadTracks<PosTrack>(obj.PosOffset, obj.PosCnt))
+            posList.Add(new { t.Frame, Pos = new[] { t.Pos.X, t.Pos.Y, t.Pos.Z } });
+        var rotList = new List<object>();
+        foreach (var t in ReadTracks<RotTrack>(obj.RotOffset, obj.RotCnt))
+            rotList.Add(new { t.Frame, Quat = new[] { t.Quat.X, t.Quat.Y, t.Quat.Z, t.Quat.W } });
+        var scaleList = new List<object>();
+        foreach (var t in ReadTracks<ScaleTrack>(obj.ScaleOffset, obj.ScaleCnt))
+            scaleList.Add(new
+            {
+                t.Frame,
+                Scale = new[] { t.Scale.X, t.Scale.Y, t.Scale.Z },
+                ScaleAxis = new[] { t.ScaleAxis.X, t.ScaleAxis.Y, t.ScaleAxis.Z, t.ScaleAxis.W }
+            });
+
+        return JsonSerializer.Serialize(new
+        {
+            ObjectId = objectId1Based,
+            obj.Parent,
+            obj.Frames,
+            BasePos = new[] { obj.Pos.X, obj.Pos.Y, obj.Pos.Z },
+            BaseQuat = new[] { obj.Quat.X, obj.Quat.Y, obj.Quat.Z, obj.Quat.W },
+            BaseScale = new[] { obj.Scale.X, obj.Scale.Y, obj.Scale.Z },
+            BaseScaleQuat = new[] { obj.ScaleQuat.X, obj.ScaleQuat.Y, obj.ScaleQuat.Z, obj.ScaleQuat.W },
+            PosTrack = posList,
+            RotTrack = rotList,
+            ScaleTrack = scaleList
+        }, SafeJson);
     }
 
     private static float[] MatrixToArray(Matrix4x4 m) => new[]

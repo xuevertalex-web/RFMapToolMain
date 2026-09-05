@@ -178,6 +178,308 @@ namespace RFMapToolSharp.Export
             var mgTrace = new List<object>();
             var mgNodesByObjectId = new Dictionary<int, List<(Node Node, int Attr)>>();
 
+            // --- Иерархия нод по parent-chain BSP-объектов ---
+            // Активна только в «родном» режиме запекания вершин: вершины групп запечены
+            // через ObjectMatrices (converted world), значит mesh-ноды можно повесить
+            // под объектные ноды, а анимацию задать дельтами от запечённой позы:
+            //   T_i(f) = S · WiB⁻¹ · Wi(f) · Wp(f)⁻¹ · WpB · S   (S = mirror Y, B = baked frame)
+            // Телескопируется с каналами родителя к S·WiB⁻¹·Wi(f)·S, на baked-кадре = identity.
+            // Если дельта содержит shear (анизотропный scale × поворот — glTF не хранит shear),
+            // для корневых объектов используется точная факторизация в цепочку из трёх TRS-нод:
+            //   t(f) = U·T(-pB)·SC_B⁻¹·V · U·R_B⁻¹R(f)·V · U·SC(f)·T(p(f))·V,  U = S·P, V = P·S,
+            // где P — перестановка Y/Z из ConvertFrom3dsMaxMatrix, p/rot/SC — локальные треки.
+            bool hierarchyMode = MirrorWorldY
+                && !Collision.BspFile.DisableObjectTransform
+                && Collision.BspFile.ObjectTransformMode == 0
+                && Collision.BspFile.AnimatedObjectsMode == 0
+                && Collision.BspFile.ObjectTransformTarget == 0;
+
+            var objectNodes = new Dictionary<int, Node>();       // корень объекта (identity)
+            var objectAttachNodes = new Dictionary<int, Node>(); // нода, несущая world-движение (mode 2 — конец цепочки)
+            var objectChainNodes = new Dictionary<int, (Node Inv, Node Rot, Node Scl)>();
+            var objectNodeParent = new Dictionary<int, int>();
+            var preparedChannels = new Dictionary<int, List<PreparedChannel>>();
+            int maxFrames = 0;
+            var mirror = Matrix4x4.CreateScale(1f, -1f, 1f);
+            var yzSwap = new Matrix4x4(
+                1f, 0f, 0f, 0f,
+                0f, 0f, 1f, 0f,
+                0f, 1f, 0f, 0f,
+                0f, 0f, 0f, 1f);
+
+            bool IsBakedGroup(int oid, int attr) =>
+                oid > 0
+                && !(Collision.BspFile.SkipTransformForAttr8192 && attr == 8192)
+                && !Collision.BspFile.SkipTransformObjectIds.Contains(oid)
+                && scene.Bsp.GetBakedObjectMatrix(oid).HasValue;
+
+            if (hierarchyMode)
+            {
+                // Кандидаты: объекты из MatGroups + их предки по parent-chain.
+                var candidateIds = new SortedSet<int>();
+                if (scene.Bsp.MatGroups != null)
+                    foreach (var mg in scene.Bsp.MatGroups)
+                        if (IsBakedGroup(mg.ObjectId, mg.Attr)) candidateIds.Add(mg.ObjectId);
+                var ancestorQueue = new Queue<int>(candidateIds);
+                while (ancestorQueue.Count > 0)
+                {
+                    int p = scene.Bsp.GetObjectParent1Based(ancestorQueue.Dequeue());
+                    if (p > 0 && scene.Bsp.GetBakedObjectMatrix(p).HasValue && candidateIds.Add(p))
+                        ancestorQueue.Enqueue(p);
+                }
+
+                // Эффективный родитель: только если он тоже кандидат и chain без циклов.
+                foreach (var oid in candidateIds)
+                {
+                    int parent = scene.Bsp.GetObjectParent1Based(oid);
+                    if (parent <= 0 || parent == oid || !candidateIds.Contains(parent))
+                    {
+                        objectNodeParent[oid] = 0;
+                        continue;
+                    }
+                    var seen = new HashSet<int> { oid };
+                    int p = parent;
+                    bool cycle = false;
+                    while (p > 0)
+                    {
+                        if (!seen.Add(p)) { cycle = true; break; }
+                        int np = scene.Bsp.GetObjectParent1Based(p);
+                        p = candidateIds.Contains(np) ? np : 0;
+                    }
+                    if (cycle)
+                    {
+                        Console.WriteLine($"[GLTF] WARN: obj{oid}: цикл в parent-chain, нода уходит в корень сцены");
+                        objectNodeParent[oid] = 0;
+                    }
+                    else
+                    {
+                        objectNodeParent[oid] = parent;
+                    }
+                }
+
+                foreach (var oid in candidateIds)
+                    maxFrames = Math.Max(maxFrames, scene.Bsp.GetObjectFrames(oid));
+
+                // Согласованность: world@ObjectTransformFrame должна совпадать с матрицей запекания.
+                var noAnimObjects = new HashSet<int>();
+                foreach (var oid in candidateIds)
+                {
+                    var baked = scene.Bsp.GetBakedObjectMatrix(oid)!.Value;
+                    var atFrame = scene.Bsp.GetObjectWorldMatrixAtFrame(oid, Collision.BspFile.ObjectTransformFrame);
+                    if (atFrame == null || !NearlyEqual(baked, atFrame.Value))
+                    {
+                        Console.WriteLine($"[GLTF] WARN: obj{oid}: world@frame({Collision.BspFile.ObjectTransformFrame}) != baked matrix, каналы пропущены");
+                        noAnimObjects.Add(oid);
+                    }
+                }
+
+                if (maxFrames > 0)
+                {
+                    // Сэмплим world-матрицы один раз на кадр для всей иерархии.
+                    var frameCount = maxFrames + 1;
+                    var allFrames = new Matrix4x4[frameCount][];
+                    for (int f = 0; f < frameCount; f++)
+                        allFrames[f] = scene.Bsp.GetObjectWorldMatricesAtFrame(f);
+                    var worldFramesByObject = new Dictionary<int, Matrix4x4[]>();
+                    foreach (var oid in candidateIds)
+                    {
+                        var arr = new Matrix4x4[frameCount];
+                        int idx = oid - 1;
+                        for (int f = 0; f < frameCount; f++)
+                            arr[f] = idx >= 0 && idx < allFrames[f].Length
+                                ? allFrames[f][idx]
+                                : scene.Bsp.GetBakedObjectMatrix(oid)!.Value;
+                        worldFramesByObject[oid] = arr;
+                    }
+
+                    // Отладочный дамп world-матриц и сырых треков (вкл.: RF_DEBUG_OBJANIM=1)
+                    if (Environment.GetEnvironmentVariable("RF_DEBUG_OBJANIM") == "1")
+                    {
+                        var dump = worldFramesByObject.ToDictionary(
+                            kv => $"obj{kv.Key}",
+                            kv => kv.Value.Select(MatrixToFloats).ToArray());
+                        DiagnosticsOutput.WriteDiagnostic(name, "objanim_frames.json",
+                            JsonSerializer.Serialize(dump, SafeJson));
+                        foreach (var oid in candidateIds)
+                            DiagnosticsOutput.WriteDiagnostic(name, $"objanim_tracks_obj{oid}.json",
+                                scene.Bsp.DumpObjectTracksJson(oid));
+                    }
+
+                    // Подготовка каналов (до создания нод: от режима зависит структура иерархии).
+                    foreach (var oid in candidateIds)
+                    {
+                        if (noAnimObjects.Contains(oid)) continue;
+                        PrepareObjectChannels(oid, worldFramesByObject);
+                    }
+                }
+            }
+
+            // Прямой путь: дельта world-матрицы в TRS-канал на объектной ноде.
+            // При shear — факторизация в цепочку inv/rot/scl (только корневые объекты).
+            void PrepareObjectChannels(int oid, Dictionary<int, Matrix4x4[]> worldFramesByObject)
+            {
+                var w = worldFramesByObject[oid];
+                var baked = scene.Bsp.GetBakedObjectMatrix(oid)!.Value;
+                if (!Matrix4x4.Invert(baked, out var w0inv))
+                {
+                    Console.WriteLine($"[GLTF] WARN: obj{oid}: baked matrix необратима, каналы пропущены");
+                    return;
+                }
+                int parent = objectNodeParent[oid];
+                var pw = parent > 0 ? worldFramesByObject[parent] : null;
+                Matrix4x4 pwB = default;
+                if (pw != null) pwB = scene.Bsp.GetBakedObjectMatrix(parent)!.Value;
+
+                var trs = new Dictionary<float, Vector3>();
+                var rts = new Dictionary<float, Quaternion>();
+                var scs = new Dictionary<float, Vector3>();
+                bool varies = false, directOk = true;
+                Quaternion prevRot = default;
+                for (int f = 0; f <= maxFrames && directOk; f++)
+                {
+                    var t = mirror * (w0inv * w[f]);
+                    if (pw != null)
+                    {
+                        if (!Matrix4x4.Invert(pw[f], out var pfInv)) { directOk = false; break; }
+                        t = t * (pfInv * pwB);
+                    }
+                    t = t * mirror;
+                    if (!Matrix4x4.Decompose(t, out var sc, out var rot, out var tr)) { directOk = false; break; }
+                    if (f > 0 && Quaternion.Dot(rot, prevRot) < 0f) rot = Negate(rot);
+                    prevRot = rot;
+                    float time = f / 30f;
+                    trs[time] = tr;
+                    rts[time] = rot;
+                    scs[time] = sc;
+                    if (!varies && !NearlyIdentity(t)) varies = true;
+                }
+                if (directOk)
+                {
+                    if (varies)
+                        preparedChannels[oid] = new List<PreparedChannel> { PreparedChannel.Animated("", trs, rts, scs) };
+                    return;
+                }
+
+                if (parent > 0)
+                {
+                    Console.WriteLine($"[GLTF] WARN: obj{oid}: world-дельта не раскладывается в TRS (shear), объект с родителем — каналы пропущены");
+                    return;
+                }
+                var chain = BuildFactoredChannels(oid, w, w0inv);
+                if (chain == null)
+                {
+                    Console.WriteLine($"[GLTF] WARN: obj{oid}: world-дельта не раскладывается в TRS, факторизация не удалась — каналы пропущены");
+                    return;
+                }
+                if (chain.Count > 0)
+                    preparedChannels[oid] = chain;
+            }
+
+            // Точная факторизация дельты корневого объекта в цепочку из трёх TRS-нод.
+            // Возвращает null при неудаче; пустой список — если движения нет.
+            List<PreparedChannel>? BuildFactoredChannels(int oid, Matrix4x4[] w, Matrix4x4 w0inv)
+            {
+                bool dbg = Environment.GetEnvironmentVariable("RF_DEBUG_OBJANIM") == "1";
+                float baseFrame = Collision.BspFile.ObjectTransformFrame;
+                if (!scene.Bsp.TryGetObjectLocalComponents(oid, baseFrame, out var p0, out var r0q, out var sc0))
+                    { if (dbg) Console.WriteLine($"[GLTF] DEBUG obj{oid}: factored: нет local components @base"); return null; }
+                var R0 = Matrix4x4.CreateFromQuaternion(r0q);
+                if (!Matrix4x4.Invert(R0, out var R0inv)) { if (dbg) Console.WriteLine($"[GLTF] DEBUG obj{oid}: factored: R0 необратима"); return null; }
+                if (!Matrix4x4.Invert(sc0, out var sc0inv)) { if (dbg) Console.WriteLine($"[GLTF] DEBUG obj{oid}: factored: SC0 необратима"); return null; }
+                var U = mirror * yzSwap;
+                if (!Matrix4x4.Invert(U, out var V)) { if (dbg) Console.WriteLine($"[GLTF] DEBUG obj{oid}: factored: U необратима"); return null; }
+                var F1 = Matrix4x4.CreateTranslation(-p0) * sc0inv;
+
+                var t1 = new Dictionary<float, Vector3>(); var r1 = new Dictionary<float, Quaternion>(); var s1 = new Dictionary<float, Vector3>();
+                var t2 = new Dictionary<float, Vector3>(); var r2 = new Dictionary<float, Quaternion>(); var s2 = new Dictionary<float, Vector3>();
+                var t3 = new Dictionary<float, Vector3>(); var r3 = new Dictionary<float, Quaternion>(); var s3 = new Dictionary<float, Vector3>();
+                bool varies1 = false, varies2 = false, varies3 = false;
+                Quaternion prev1 = default, prev2 = default, prev3 = default;
+                SharpGLTF.Transforms.AffineTransform const1 = default, const2 = default, const3 = default;
+                Matrix4x4 L10 = default, L20 = default, L30 = default;
+
+                for (int f = 0; f <= maxFrames; f++)
+                {
+                    if (!scene.Bsp.TryGetObjectLocalComponents(oid, f, out var pf, out var rqf, out var scf))
+                        { if (dbg) Console.WriteLine($"[GLTF] DEBUG obj{oid}: factored: нет local components @{f}"); return null; }
+                    var Rf = Matrix4x4.CreateFromQuaternion(rqf);
+                    var L1 = U * F1 * V;
+                    var L2 = U * (R0inv * Rf) * V;
+                    var L3 = U * (scf * Matrix4x4.CreateTranslation(pf)) * V;
+
+                    // Контроль: цепочка обязана телескопироваться в world-дельту.
+                    // Допуск масштабируется по обусловленности: w0inv содержит 1/minScale
+                    // (у obj1/2 ~1/0.005 ≈ 200), float32-шум в w0inv·w[f] даёт ~1e-2 абс.
+                    var tCheck = mirror * (w0inv * w[f]) * mirror;
+                    var chainProd = L1 * L2 * L3;
+                    float chainTol = 5e-5f * MaxAbs(w0inv) * MathF.Max(1f, MaxAbs(w[f]));
+                    if (MaxAbsDiff(chainProd, tCheck) > chainTol)
+                    {
+                        if (dbg)
+                            Console.WriteLine($"[GLTF] DEBUG obj{oid}: factored: цепочка != дельта на кадре {f}, maxdiff={MaxAbsDiff(chainProd, tCheck):G6}, tol={chainTol:G6}");
+                        return null;
+                    }
+
+                    if (!Matrix4x4.Decompose(L1, out var sc1, out var rt1, out var tr1)) { if (dbg) Console.WriteLine($"[GLTF] DEBUG obj{oid}: factored: Decompose L1 @{f}"); return null; }
+                    if (!Matrix4x4.Decompose(L2, out var sc2, out var rt2, out var tr2)) { if (dbg) Console.WriteLine($"[GLTF] DEBUG obj{oid}: factored: Decompose L2 @{f}"); return null; }
+                    if (!Matrix4x4.Decompose(L3, out var sc3, out var rt3, out var tr3)) { if (dbg) Console.WriteLine($"[GLTF] DEBUG obj{oid}: factored: Decompose L3 @{f}"); return null; }
+                    if (f > 0)
+                    {
+                        if (Quaternion.Dot(rt1, prev1) < 0f) rt1 = Negate(rt1);
+                        if (Quaternion.Dot(rt2, prev2) < 0f) rt2 = Negate(rt2);
+                        if (Quaternion.Dot(rt3, prev3) < 0f) rt3 = Negate(rt3);
+                    }
+                    prev1 = rt1; prev2 = rt2; prev3 = rt3;
+                    if (f == 0)
+                    {
+                        const1 = new SharpGLTF.Transforms.AffineTransform(sc1, rt1, tr1);
+                        const2 = new SharpGLTF.Transforms.AffineTransform(sc2, rt2, tr2);
+                        const3 = new SharpGLTF.Transforms.AffineTransform(sc3, rt3, tr3);
+                        L10 = L1; L20 = L2; L30 = L3;
+                    }
+                    float time = f / 30f;
+                    t1[time] = tr1; r1[time] = rt1; s1[time] = sc1;
+                    t2[time] = tr2; r2[time] = rt2; s2[time] = sc2;
+                    t3[time] = tr3; r3[time] = rt3; s3[time] = sc3;
+                    // «varies» = значение меняется по кадрам (сравнение с кадром 0),
+                    // а не отличие от identity: константная нода получает static local.
+                    if (!varies1 && !NearlyEqual(L1, L10)) varies1 = true;
+                    if (!varies2 && !NearlyEqual(L2, L20)) varies2 = true;
+                    if (!varies3 && !NearlyEqual(L3, L30)) varies3 = true;
+                }
+
+                var result = new List<PreparedChannel>();
+                if (!varies1 && !varies2 && !varies3)
+                    return result; // движения нет — цепочка не нужна, объект статичен
+                result.Add(varies1 ? PreparedChannel.Animated("inv", t1, r1, s1) : PreparedChannel.Constant("inv", const1));
+                result.Add(varies2 ? PreparedChannel.Animated("rot", t2, r2, s2) : PreparedChannel.Constant("rot", const2));
+                result.Add(varies3 ? PreparedChannel.Animated("scl", t3, r3, s3) : PreparedChannel.Constant("scl", const3));
+                return result;
+            }
+
+            Node GetOrCreateObjectNode(int oid)
+            {
+                if (objectAttachNodes.TryGetValue(oid, out var existing)) return existing;
+                int parent = objectNodeParent.TryGetValue(oid, out var pp) ? pp : 0;
+                var objNode = parent > 0
+                    ? GetOrCreateObjectNode(parent).CreateNode($"BSP_obj{oid}")
+                    : gltfScene.CreateNode($"BSP_obj{oid}");
+                objectNodes[oid] = objNode;
+
+                Node attach = objNode;
+                if (preparedChannels.TryGetValue(oid, out var ch) && ch.Count > 0 && ch[0].Role == "inv")
+                {
+                    // Факторизованный объект: obj(identity) → inv → rot → scl → mesh/дети.
+                    var inv = objNode.CreateNode($"BSP_obj{oid}_inv");
+                    var rot = inv.CreateNode($"BSP_obj{oid}_rot");
+                    var scl = rot.CreateNode($"BSP_obj{oid}_scl");
+                    objectChainNodes[oid] = (inv, rot, scl);
+                    attach = scl;
+                }
+                objectAttachNodes[oid] = attach;
+                return attach;
+            }
+
             foreach (var matGroup in groups)
             {
                 var groupFaceNormals = new List<Vector3>();
@@ -300,7 +602,17 @@ namespace RFMapToolSharp.Export
                     mgAttr = mg.Attr;
                 }
                 var nodeName = $"BSP_mg{mgId}_mtl{mgMtlId}_obj{mgObjectId}_attr{mgAttr}";
-                var node = gltfScene.CreateNode(nodeName);
+                Node node;
+                if (hierarchyMode && IsBakedGroup(mgObjectId, mgAttr))
+                {
+                    // Вершины запечены world-матрицей объекта: local mesh-ноды = identity,
+                    // поза задаётся каналами на объектной ноде (см. блок анимации ниже).
+                    node = GetOrCreateObjectNode(mgObjectId).CreateNode(nodeName);
+                }
+                else
+                {
+                    node = gltfScene.CreateNode(nodeName);
+                }
                 node.Mesh = model.CreateMesh(meshBuilder);
                 if (mgObjectId > 0)
                 {
@@ -322,12 +634,46 @@ namespace RFMapToolSharp.Export
                 });
             }
 
-            // --- BSP object animations: все карты, все анимированные объекты ---
-            // Анимируем только ноды, чьи вершины запечены с object transform (иначе
-            // канал анимации двигал бы raw-геометрию из локального пространства).
-            if (scene.Bsp != null && !Collision.BspFile.DisableObjectTransform && mgNodesByObjectId.Count > 0)
+            // --- BSP object animations ---
+            if (hierarchyMode)
             {
-                // Сначала собираем пригодные объекты: анимацию создаём, только если есть что анимировать.
+                // Каналы подготовлены в pre-pass (до создания нод). Остаётся создать
+                // Animation и развесить каналы/константные local-трансформы по нодам.
+                Animation? anim = null;
+                int animatedNodes = 0;
+                foreach (var (oid, channels) in preparedChannels.OrderBy(kv => kv.Key))
+                {
+                    foreach (var ch in channels)
+                    {
+                        Node target = ch.Role switch
+                        {
+                            "inv" => objectChainNodes[oid].Inv,
+                            "rot" => objectChainNodes[oid].Rot,
+                            "scl" => objectChainNodes[oid].Scl,
+                            _ => objectNodes[oid]
+                        };
+                        if (ch.T != null)
+                        {
+                            anim ??= model.CreateAnimation($"{name}_BSP_Objects");
+                            anim.CreateTranslationChannel(target, ch.T, true);
+                            anim.CreateRotationChannel(target, ch.R!, true);
+                            anim.CreateScaleChannel(target, ch.S!, true);
+                            animatedNodes++;
+                        }
+                        else if (ch.ConstantLocal.HasValue)
+                        {
+                            target.LocalTransform = ch.ConstantLocal.Value;
+                        }
+                    }
+                }
+                if (anim != null)
+                    Console.WriteLine($"[GLTF] BSP animations: objects={preparedChannels.Count}, nodes={animatedNodes}, frames={maxFrames + 1}, mode=hierarchy");
+            }
+            else if (scene.Bsp != null && !Collision.BspFile.DisableObjectTransform && mgNodesByObjectId.Count > 0)
+            {
+                // Плоский fallback для экзотических CLI-режимов запекания:
+                // анимируем только ноды, чьи вершины запечены с object transform (иначе
+                // канал анимации двигал бы raw-геометрию из локального пространства).
                 var eligibleObjects = new List<(int Oid, List<Node> Nodes, IReadOnlyList<Collision.BspFile.BspObjectAnimSample> Samples)>();
                 foreach (var (oid, nodes) in mgNodesByObjectId.OrderBy(kv => kv.Key))
                 {
@@ -363,7 +709,7 @@ namespace RFMapToolSharp.Export
                             animatedNodes++;
                         }
                     }
-                    Console.WriteLine($"[GLTF] BSP animations: objects={eligibleObjects.Count}, nodes={animatedNodes}");
+                    Console.WriteLine($"[GLTF] BSP animations: objects={eligibleObjects.Count}, nodes={animatedNodes}, mode=flat");
                 }
             }
 
@@ -561,6 +907,35 @@ namespace RFMapToolSharp.Export
 
         private static bool IsFinite(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
 
+        /// <summary>Подготовленный канал анимации ноды: либо покадровые TRS-словари, либо константный local.</summary>
+        private sealed class PreparedChannel
+        {
+            public string Role { get; }
+            public Dictionary<float, Vector3>? T { get; }
+            public Dictionary<float, Quaternion>? R { get; }
+            public Dictionary<float, Vector3>? S { get; }
+            public SharpGLTF.Transforms.AffineTransform? ConstantLocal { get; }
+
+            private PreparedChannel(string role, Dictionary<float, Vector3>? t, Dictionary<float, Quaternion>? r,
+                Dictionary<float, Vector3>? s, SharpGLTF.Transforms.AffineTransform? constantLocal)
+            {
+                Role = role;
+                T = t;
+                R = r;
+                S = s;
+                ConstantLocal = constantLocal;
+            }
+
+            public static PreparedChannel Animated(string role, Dictionary<float, Vector3> t,
+                Dictionary<float, Quaternion> r, Dictionary<float, Vector3> s) =>
+                new(role, t, r, s, null);
+
+            public static PreparedChannel Constant(string role, SharpGLTF.Transforms.AffineTransform local) =>
+                new(role, null, null, null, local);
+        }
+
+        private static Quaternion Negate(Quaternion q) => new(-q.X, -q.Y, -q.Z, -q.W);
+
         /// <summary>Проверяет, что сэмплы анимации действительно меняются (иначе каналы бесполезны).</summary>
         private static bool SamplesVary(IReadOnlyList<Collision.BspFile.BspObjectAnimSample> samples)
         {
@@ -575,6 +950,66 @@ namespace RFMapToolSharp.Export
                 if (1f - MathF.Abs(dot) > 1e-5f) return true;
             }
             return false;
+        }
+
+        private static float[] MatrixToFloats(Matrix4x4 m) => new[]
+        {
+            m.M11, m.M12, m.M13, m.M14,
+            m.M21, m.M22, m.M23, m.M24,
+            m.M31, m.M32, m.M33, m.M34,
+            m.M41, m.M42, m.M43, m.M44
+        };
+
+        /// <summary>Матрица близка к identity (с учётом масштаба элементов).</summary>
+        private static bool NearlyIdentity(Matrix4x4 m)
+        {
+            return NearlyEqual(m.M11, 1f) && NearlyEqual(m.M12, 0f) && NearlyEqual(m.M13, 0f) && NearlyEqual(m.M14, 0f)
+                && NearlyEqual(m.M21, 0f) && NearlyEqual(m.M22, 1f) && NearlyEqual(m.M23, 0f) && NearlyEqual(m.M24, 0f)
+                && NearlyEqual(m.M31, 0f) && NearlyEqual(m.M32, 0f) && NearlyEqual(m.M33, 1f) && NearlyEqual(m.M34, 0f)
+                && NearlyEqual(m.M41, 0f) && NearlyEqual(m.M42, 0f) && NearlyEqual(m.M43, 0f) && NearlyEqual(m.M44, 1f);
+        }
+
+        /// <summary>Поэлементное сравнение матриц с допуском, масштабированным по величине элементов.</summary>
+        private static bool NearlyEqual(Matrix4x4 a, Matrix4x4 b)
+        {
+            return NearlyEqual(a.M11, b.M11) && NearlyEqual(a.M12, b.M12) && NearlyEqual(a.M13, b.M13) && NearlyEqual(a.M14, b.M14)
+                && NearlyEqual(a.M21, b.M21) && NearlyEqual(a.M22, b.M22) && NearlyEqual(a.M23, b.M23) && NearlyEqual(a.M24, b.M24)
+                && NearlyEqual(a.M31, b.M31) && NearlyEqual(a.M32, b.M32) && NearlyEqual(a.M33, b.M33) && NearlyEqual(a.M34, b.M34)
+                && NearlyEqual(a.M41, b.M41) && NearlyEqual(a.M42, b.M42) && NearlyEqual(a.M43, b.M43) && NearlyEqual(a.M44, b.M44);
+        }
+
+        private static bool NearlyEqual(float a, float b)
+        {
+            float tol = 1e-3f * MathF.Max(1f, MathF.Max(MathF.Abs(a), MathF.Abs(b)));
+            return MathF.Abs(a - b) <= tol;
+        }
+
+        private static float MaxAbs(Matrix4x4 m)
+        {
+            float d = 0f;
+            d = MathF.Max(d, MathF.Abs(m.M11)); d = MathF.Max(d, MathF.Abs(m.M12));
+            d = MathF.Max(d, MathF.Abs(m.M13)); d = MathF.Max(d, MathF.Abs(m.M14));
+            d = MathF.Max(d, MathF.Abs(m.M21)); d = MathF.Max(d, MathF.Abs(m.M22));
+            d = MathF.Max(d, MathF.Abs(m.M23)); d = MathF.Max(d, MathF.Abs(m.M24));
+            d = MathF.Max(d, MathF.Abs(m.M31)); d = MathF.Max(d, MathF.Abs(m.M32));
+            d = MathF.Max(d, MathF.Abs(m.M33)); d = MathF.Max(d, MathF.Abs(m.M34));
+            d = MathF.Max(d, MathF.Abs(m.M41)); d = MathF.Max(d, MathF.Abs(m.M42));
+            d = MathF.Max(d, MathF.Abs(m.M43)); d = MathF.Max(d, MathF.Abs(m.M44));
+            return d;
+        }
+
+        private static float MaxAbsDiff(Matrix4x4 a, Matrix4x4 b)
+        {
+            float d = 0f;
+            d = MathF.Max(d, MathF.Abs(a.M11 - b.M11)); d = MathF.Max(d, MathF.Abs(a.M12 - b.M12));
+            d = MathF.Max(d, MathF.Abs(a.M13 - b.M13)); d = MathF.Max(d, MathF.Abs(a.M14 - b.M14));
+            d = MathF.Max(d, MathF.Abs(a.M21 - b.M21)); d = MathF.Max(d, MathF.Abs(a.M22 - b.M22));
+            d = MathF.Max(d, MathF.Abs(a.M23 - b.M23)); d = MathF.Max(d, MathF.Abs(a.M24 - b.M24));
+            d = MathF.Max(d, MathF.Abs(a.M31 - b.M31)); d = MathF.Max(d, MathF.Abs(a.M32 - b.M32));
+            d = MathF.Max(d, MathF.Abs(a.M33 - b.M33)); d = MathF.Max(d, MathF.Abs(a.M34 - b.M34));
+            d = MathF.Max(d, MathF.Abs(a.M41 - b.M41)); d = MathF.Max(d, MathF.Abs(a.M42 - b.M42));
+            d = MathF.Max(d, MathF.Abs(a.M43 - b.M43)); d = MathF.Max(d, MathF.Abs(a.M44 - b.M44));
+            return d;
         }
 
         private static bool IsStretchedTriangle(Vector3 a, Vector3 b, Vector3 c, out float maxEdge, out float minEdge, out float area)
