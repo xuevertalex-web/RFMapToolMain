@@ -1222,6 +1222,13 @@ class Program
 
             try
             {
+                // Sette requires legacy-like handling for Attr=8192 object groups.
+                // (Восстановлено: блок был случайно удалён в 26cf98a при рефакторинге
+                // цикла экспорта — из-за этого mg89-92/objectId=9 потеряли object transform.)
+                RFMapToolSharp.Collision.BspFile.SkipTransformForAttr8192 =
+                    !string.Equals(mapName, "Sette", StringComparison.OrdinalIgnoreCase);
+                RFMapToolSharp.Collision.BspFile.SkipTransformObjectIds.Clear();
+
                 var scene = new MapScene
                 {
                     Name = mapName,
