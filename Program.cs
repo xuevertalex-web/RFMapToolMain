@@ -582,8 +582,8 @@ class Program
                 Console.WriteLine("ERROR: Entity folder not found.");
                 return;
             }
-            string outPath = Path.Combine(Environment.CurrentDirectory, "RF_Release", "Entity", "entity_rpk_report.json");
-            string idxPath = Path.Combine(Environment.CurrentDirectory, "RF_Release", "Entity", "entity_rpk_index.json");
+            string outPath = Path.Combine(Environment.CurrentDirectory, "ReadyMaps", "Entity", "entity_rpk_report.json");
+            string idxPath = Path.Combine(Environment.CurrentDirectory, "ReadyMaps", "Entity", "entity_rpk_index.json");
             Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
             RpkInspector.WriteEntityReport(entityDir, outPath);
             RpkInspector.WriteEntityIndexReport(entityDir, idxPath);
@@ -667,7 +667,7 @@ class Program
             }
             else
             {
-                // По умолчанию — в _diagnostics/<map>/ внутри RF_Release корня проекта.
+                // По умолчанию — в _diagnostics/<map>/ внутри ReadyMaps корня проекта.
                 var projectRoot = Environment.CurrentDirectory;
                 var probe = new DirectoryInfo(AppContext.BaseDirectory);
                 while (probe != null)
@@ -679,7 +679,7 @@ class Program
                     }
                     probe = probe.Parent;
                 }
-                DiagnosticsOutput.ExportRoot = Path.Combine(projectRoot, "RF_Release");
+                DiagnosticsOutput.ExportRoot = Path.Combine(projectRoot, "ReadyMaps");
                 outPath = DiagnosticsOutput.DiagnosticPath(Path.GetFileName(srcMapDir), $"bsp_dump_{Path.GetFileName(srcMapDir)}.json");
             }
 
@@ -1031,7 +1031,7 @@ class Program
                 if (hasMarkers) { rootDirIso = curIso.FullName; break; }
                 curIso = curIso.Parent;
             }
-            var exportRootIso = Path.Combine(rootDirIso, "RF_Release");
+            var exportRootIso = Path.Combine(rootDirIso, "ReadyMaps");
             Directory.CreateDirectory(exportRootIso);
 
             if (!RFMapToolSharp.Export.SetteCleanExporter.Run(mr, exportRootIso))
@@ -1059,7 +1059,7 @@ class Program
                 if (hasMarkers) { rootDirIso = curIso.FullName; break; }
                 curIso = curIso.Parent;
             }
-            var exportRootIso = Path.Combine(rootDirIso, "RF_Release");
+            var exportRootIso = Path.Combine(rootDirIso, "ReadyMaps");
             Directory.CreateDirectory(exportRootIso);
             if (!RFMapToolSharp.Export.SetteRawExporter.Run(mr, exportRootIso))
             {
@@ -1079,7 +1079,7 @@ class Program
         }
         Console.WriteLine($"Map folder found: {mapRoot}\n");
 
-        // РС‰РµРј РєРѕСЂРµРЅСЊ РїСЂРѕРµРєС‚Р° РїРѕ РЅР°Р»РёС‡РёСЋ .csproj/.sln, С‡С‚РѕР±С‹ РєРѕСЂСЂРµРєС‚РЅРѕ РїРёСЃР°С‚СЊ RF_Release РІРЅРµ bin\Debug
+        // РС‰РµРј РєРѕСЂРµРЅСЊ РїСЂРѕРµРєС‚Р° РїРѕ РЅР°Р»РёС‡РёСЋ .csproj/.sln, С‡С‚РѕР±С‹ РєРѕСЂСЂРµРєС‚РЅРѕ РїРёСЃР°С‚СЊ ReadyMaps РІРЅРµ bin\Debug
         var exeDir = AppContext.BaseDirectory;
         var current = new DirectoryInfo(exeDir);
         string rootDir = Environment.CurrentDirectory;
@@ -1097,8 +1097,8 @@ class Program
             current = current.Parent;
         }
 
-        // Экспорт всегда в RFMapToolSharp\RF_Release
-        var exportRoot = Path.Combine(rootDir, "RF_Release");
+        // Экспорт всегда в RFMapToolSharp\ReadyMaps
+        var exportRoot = Path.Combine(rootDir, "ReadyMaps");
         Directory.CreateDirectory(exportRoot);
         DiagnosticsOutput.ExportRoot = exportRoot;
 

@@ -6,13 +6,13 @@ namespace RFMapToolSharp.Export;
 
 /// <summary>
 /// Единая точка маршрутизации отладочного вывода (Этап «Часть Б»).
-/// Результат экспорта (GLB) остаётся в RF_Release/&lt;map&gt;/,
-/// диагностика уходит в RF_Release/_diagnostics/&lt;map&gt;/,
-/// отчёты — в RF_Release/_reports/, логи — в RF_Release/_logs/.
+/// Результат экспорта (GLB) остаётся в ReadyMaps/&lt;map&gt;/,
+/// диагностика уходит в ReadyMaps/_diagnostics/&lt;map&gt;/,
+/// отчёты — в ReadyMaps/_reports/, логи — в ReadyMaps/_logs/.
 /// </summary>
 public static class DiagnosticsOutput
 {
-    /// <summary>Корень экспорта (RF_Release). Задаётся из Program перед циклом карт.</summary>
+    /// <summary>Корень экспорта (ReadyMaps). Задаётся из Program перед циклом карт.</summary>
     public static string ExportRoot { get; set; } = Environment.CurrentDirectory;
 
     public static string DiagnosticDir(string mapName)
@@ -106,7 +106,7 @@ public static class DiagnosticsOutput
     };
 
     /// <summary>
-    /// Удаляет legacy-диагностику из RF_Release/&lt;map&gt;/ ТОЛЬКО после явного подтверждения.
+    /// Удаляет legacy-диагностику из ReadyMaps/&lt;map&gt;/ ТОЛЬКО после явного подтверждения.
     /// В неинтерактивном режиме ничего не удаляет, только перечисляет.
     /// </summary>
     public static void CleanupLegacyDiagnostics(bool isInteractive, Func<string?> readLine)

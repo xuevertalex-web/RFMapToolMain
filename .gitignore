@@ -1,10 +1,10 @@
-﻿bin/
+bin/
 obj/
 .vs/
 *.user
 *.suo
 *.tmp
 Map/
-RF_Release/
+ReadyMaps/
 
 _runs/
