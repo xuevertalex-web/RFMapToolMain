@@ -176,7 +176,7 @@ namespace RFMapToolSharp.Export
             var normalAnomalyFaces = new List<object>();
             var bspNodeIndex = new List<object>();
             var mgTrace = new List<object>();
-            var mgNodesByObjectId = new Dictionary<int, List<Node>>();
+            var mgNodesByObjectId = new Dictionary<int, List<(Node Node, int Attr)>>();
 
             foreach (var matGroup in groups)
             {
@@ -306,10 +306,10 @@ namespace RFMapToolSharp.Export
                 {
                     if (!mgNodesByObjectId.TryGetValue(mgObjectId, out var lst))
                     {
-                        lst = new List<Node>();
+                        lst = new List<(Node, int)>();
                         mgNodesByObjectId[mgObjectId] = lst;
                     }
-                    lst.Add(node);
+                    lst.Add((node, mgAttr));
                 }
                 bspNodeIndex.Add(new
                 {
@@ -322,23 +322,48 @@ namespace RFMapToolSharp.Export
                 });
             }
 
-            if (string.Equals(name, "Sette", StringComparison.OrdinalIgnoreCase) && scene.Bsp != null)
+            // --- BSP object animations: все карты, все анимированные объекты ---
+            // Анимируем только ноды, чьи вершины запечены с object transform (иначе
+            // канал анимации двигал бы raw-геометрию из локального пространства).
+            if (scene.Bsp != null && !Collision.BspFile.DisableObjectTransform && mgNodesByObjectId.Count > 0)
             {
-                var anim = model.CreateAnimation("Sette_BSP_Objects");
-                foreach (var oid in new[] { 1, 2 })
+                // Сначала собираем пригодные объекты: анимацию создаём, только если есть что анимировать.
+                var eligibleObjects = new List<(int Oid, List<Node> Nodes, IReadOnlyList<Collision.BspFile.BspObjectAnimSample> Samples)>();
+                foreach (var (oid, nodes) in mgNodesByObjectId.OrderBy(kv => kv.Key))
                 {
-                    if (!mgNodesByObjectId.TryGetValue(oid, out var nodes) || nodes.Count == 0) continue;
+                    if (Collision.BspFile.SkipTransformObjectIds.Contains(oid)) continue;
+
+                    var eligible = nodes
+                        .Where(n => !Collision.BspFile.SkipTransformForAttr8192 || n.Attr != 8192)
+                        .Select(n => n.Node)
+                        .ToList();
+                    if (eligible.Count == 0) continue;
+
                     var samples = scene.Bsp.GetObjectAnimationSamples(oid);
                     if (samples.Count <= 1) continue;
-                    var trs = samples.ToDictionary(s => s.Time, s => s.Translation);
-                    var rts = samples.ToDictionary(s => s.Time, s => s.Rotation);
-                    var scs = samples.ToDictionary(s => s.Time, s => s.Scale);
-                    foreach (var node in nodes)
+                    if (!SamplesVary(samples)) continue; // статичная поза — каналы не нужны
+
+                    eligibleObjects.Add((oid, eligible, samples));
+                }
+
+                if (eligibleObjects.Count > 0)
+                {
+                    var anim = model.CreateAnimation($"{name}_BSP_Objects");
+                    int animatedNodes = 0;
+                    foreach (var (oid, nodes, samples) in eligibleObjects)
                     {
-                        anim.CreateTranslationChannel(node, trs, true);
-                        anim.CreateRotationChannel(node, rts, true);
-                        anim.CreateScaleChannel(node, scs, true);
+                        var trs = samples.ToDictionary(s => s.Time, s => s.Translation);
+                        var rts = samples.ToDictionary(s => s.Time, s => s.Rotation);
+                        var scs = samples.ToDictionary(s => s.Time, s => s.Scale);
+                        foreach (var node in nodes)
+                        {
+                            anim.CreateTranslationChannel(node, trs, true);
+                            anim.CreateRotationChannel(node, rts, true);
+                            anim.CreateScaleChannel(node, scs, true);
+                            animatedNodes++;
+                        }
                     }
+                    Console.WriteLine($"[GLTF] BSP animations: objects={eligibleObjects.Count}, nodes={animatedNodes}");
                 }
             }
 
@@ -535,6 +560,22 @@ namespace RFMapToolSharp.Export
         }
 
         private static bool IsFinite(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
+
+        /// <summary>Проверяет, что сэмплы анимации действительно меняются (иначе каналы бесполезны).</summary>
+        private static bool SamplesVary(IReadOnlyList<Collision.BspFile.BspObjectAnimSample> samples)
+        {
+            const float eps = 1e-4f;
+            var first = samples[0];
+            foreach (var s in samples)
+            {
+                if (Vector3.DistanceSquared(s.Translation, first.Translation) > eps) return true;
+                if (Vector3.DistanceSquared(s.Scale, first.Scale) > eps) return true;
+                // кватернионы: q и -q — одна и та же ориентация
+                float dot = Quaternion.Dot(s.Rotation, first.Rotation);
+                if (1f - MathF.Abs(dot) > 1e-5f) return true;
+            }
+            return false;
+        }
 
         private static bool IsStretchedTriangle(Vector3 a, Vector3 b, Vector3 c, out float maxEdge, out float minEdge, out float area)
         {
