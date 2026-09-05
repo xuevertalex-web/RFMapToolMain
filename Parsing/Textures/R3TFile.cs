@@ -51,6 +51,34 @@ public class R3TFile
         return r3t;
     }
 
+    /// <summary>
+    /// Запись .r3t в том же формате, что читает Load:
+    /// float version; uint textureCount; textureCount имён по 128 байт; затем пары uint size + DDS bytes.
+    /// </summary>
+    public void Save(string path)
+    {
+        using var fs = File.Create(path);
+        using var bw = new BinaryWriter(fs, Encoding.ASCII, leaveOpen: false);
+
+        bw.Write(Version);
+        bw.Write((uint)Textures.Count);
+
+        foreach (var tex in Textures)
+        {
+            var nameBytes = new byte[128];
+            var raw = Encoding.ASCII.GetBytes(tex.Name ?? string.Empty);
+            Array.Copy(raw, 0, nameBytes, 0, Math.Min(raw.Length, nameBytes.Length - 1));
+            bw.Write(nameBytes);
+        }
+
+        foreach (var tex in Textures)
+        {
+            var data = tex.DdsData ?? Array.Empty<byte>();
+            bw.Write((uint)data.Length);
+            bw.Write(data);
+        }
+    }
+
     public void ExportAll(string outDir)
     {
         Directory.CreateDirectory(outDir);

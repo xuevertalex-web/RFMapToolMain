@@ -6,3 +6,5 @@ obj/
 *.tmp
 Map/
 RF_Release/
+
+_runs/

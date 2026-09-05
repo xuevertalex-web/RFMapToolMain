@@ -123,6 +123,58 @@ public class R3MMaterialFile
         };
     }
 
+    /// <summary>
+    /// Запись R3M в том же бинарном формате, что читает Load
+    /// (float version; uint count; на материал: header + имя[128] + слои).
+    /// </summary>
+    public void Save(string path)
+    {
+        using var fs = File.Create(path);
+        using var bw = new BinaryWriter(fs, Encoding.ASCII, leaveOpen: false);
+
+        bw.Write(Version);
+        bw.Write((uint)Materials.Count);
+
+        foreach (var mat in Materials)
+        {
+            bw.Write((uint)mat.Layers.Count);
+            bw.Write(mat.Flag);
+            bw.Write(mat.DetailSurfaceId);
+            bw.Write(mat.DetailScale);
+
+            var nameBytes = new byte[128];
+            var raw = Encoding.ASCII.GetBytes(mat.Name ?? string.Empty);
+            Array.Copy(raw, 0, nameBytes, 0, Math.Min(raw.Length, nameBytes.Length - 1));
+            bw.Write(nameBytes);
+
+            foreach (var layer in mat.Layers)
+                WriteLayer(bw, layer);
+        }
+    }
+
+    private static void WriteLayer(BinaryWriter bw, R3MMaterialLayer layer)
+    {
+        bw.Write(layer.TileAniTexNum);
+        bw.Write(layer.Surface);
+        bw.Write(layer.AlphaType);
+        bw.Write(layer.Argb);
+        bw.Write(layer.Flag);
+        bw.Write(layer.UvLavaWave);
+        bw.Write(layer.UvLavaSpeed);
+        bw.Write(layer.UvScrollU);
+        bw.Write(layer.UvScrollV);
+        bw.Write(layer.UvRotate);
+        bw.Write(layer.UvScaleStart);
+        bw.Write(layer.UvScaleEnd);
+        bw.Write(layer.UvScaleSpeed);
+        bw.Write(layer.UvMetal);
+        bw.Write(layer.AniAlphaFlicker);
+        bw.Write(layer.AniAlphaFlickerAni);
+        bw.Write(layer.AniTexFrame);
+        bw.Write(layer.AniTexSpeed);
+        bw.Write(layer.GradientAlpha);
+    }
+
     private static string ReadAsciiZ(byte[] bytes)
     {
         int zero = Array.IndexOf(bytes, (byte)0);
