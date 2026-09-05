@@ -135,7 +135,8 @@ public sealed class TextureDiagnostics
 
     // ===== Report =====
 
-    public void WriteReport(string exportDir)
+    /// <summary>Пишет texture_report в указанный файл (маршрутизация через DiagnosticsOutput).</summary>
+    public void WriteReport(string outputFilePath)
     {
         var failed = new List<object>();
         foreach (var t in Textures)
@@ -181,7 +182,7 @@ public sealed class TextureDiagnostics
             WriteIndented = true,
             NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
         });
-        File.WriteAllText(Path.Combine(exportDir, "texture_report.json"), json);
+        File.WriteAllText(outputFilePath, json);
     }
 
     private static string FormatBytes(long bytes)

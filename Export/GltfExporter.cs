@@ -346,38 +346,33 @@ namespace RFMapToolSharp.Export
             if (!string.Equals(SptOptions.Mode, "off", StringComparison.OrdinalIgnoreCase))
             {
                 var debugMesh = CreateDebugCube(model);
-                ProcessSpt(scene.RootPath, gltfScene, MirrorWorldY, debugMesh, exportDir);
+                ProcessSpt(scene.RootPath, gltfScene, MirrorWorldY, debugMesh, name);
             }
 
             model.SaveGLB(Path.Combine(exportDir, $"{name}.glb"));
-            var stretchJson = JsonSerializer.Serialize(stretchedFaces, SafeJson);
-            File.WriteAllText(Path.Combine(exportDir, "stretched_faces.json"), stretchJson);
-            var uvJson = JsonSerializer.Serialize(uvAnomalyFaces, SafeJson);
-            File.WriteAllText(Path.Combine(exportDir, "uv_anomaly_faces.json"), uvJson);
-            var nJson = JsonSerializer.Serialize(normalAnomalyFaces, SafeJson);
-            File.WriteAllText(Path.Combine(exportDir, "normal_anomaly_faces.json"), nJson);
-            var idxJson = JsonSerializer.Serialize(bspNodeIndex, SafeJson);
-            File.WriteAllText(Path.Combine(exportDir, "bsp_node_index.json"), idxJson);
-            var traceJson = JsonSerializer.Serialize(mgTrace, SafeJson);
-            File.WriteAllText(Path.Combine(exportDir, "mg_trace_89_92.json"), traceJson);
-            scene.Bsp.WriteMgFaceTrace89_92Report(Path.Combine(exportDir, "mg_face_trace_89_92_bspbuild.json"));
+            DiagnosticsOutput.WriteDiagnostic(name, "stretched_faces.json", JsonSerializer.Serialize(stretchedFaces, SafeJson));
+            DiagnosticsOutput.WriteDiagnostic(name, "uv_anomaly_faces.json", JsonSerializer.Serialize(uvAnomalyFaces, SafeJson));
+            DiagnosticsOutput.WriteDiagnostic(name, "normal_anomaly_faces.json", JsonSerializer.Serialize(normalAnomalyFaces, SafeJson));
+            DiagnosticsOutput.WriteDiagnostic(name, "bsp_node_index.json", JsonSerializer.Serialize(bspNodeIndex, SafeJson));
+            DiagnosticsOutput.WriteDiagnostic(name, "mg_trace_89_92.json", JsonSerializer.Serialize(mgTrace, SafeJson));
+            scene.Bsp.WriteMgFaceTrace89_92Report(DiagnosticsOutput.DiagnosticPath(name, "mg_face_trace_89_92_bspbuild.json"));
             if (string.Equals(name, "Sette", StringComparison.OrdinalIgnoreCase))
             {
                 var mg91Only = mgTrace.Where(x => (int)x.GetType().GetProperty("MatGroup")!.GetValue(x)! == 91).ToList();
-                File.WriteAllText(Path.Combine(exportDir, "mg91_face_rebuild_log.json"), JsonSerializer.Serialize(mg91Only, SafeJson));
+                DiagnosticsOutput.WriteDiagnostic(name, "mg91_face_rebuild_log.json", JsonSerializer.Serialize(mg91Only, SafeJson));
             }
             Console.WriteLine("[GLTF] Saved!");
 
             var diag = TextureDiagnostics.Current;
-            diag.WriteReport(exportDir);
+            diag.WriteReport(DiagnosticsOutput.ReportPath($"texture_report_{name}.json"));
             int matsWithTex = diag.Materials.Count(m => m.TextureAssigned);
             int texOk = diag.Textures.Count(t => t.Status == "ok");
             int texFailed = diag.Textures.Count(t => t.Status == "convert_failed");
             Console.WriteLine($"[GLTF] Summary: materials={diag.Materials.Count} (textured={matsWithTex}), textures converted={texOk}, failed={texFailed}");
-            Console.WriteLine($"[GLTF] texture_report.json written.");
+            Console.WriteLine($"[GLTF] texture_report_{name}.json written to _reports.");
         }
 
-        private static void ProcessSpt(string mapRootPath, Scene gltfScene, bool mirrorY, Mesh debugMesh, string exportDir)
+        private static void ProcessSpt(string mapRootPath, Scene gltfScene, bool mirrorY, Mesh debugMesh, string mapName)
         {
             var sptDir = Path.Combine(mapRootPath, "Spt");
             var files = new List<string>();
@@ -480,8 +475,7 @@ namespace RFMapToolSharp.Export
                 }
             }
             Console.WriteLine($"[SPT] Created markers: {count}");
-            var logJson = JsonSerializer.Serialize(resolveLog, SafeJson);
-            File.WriteAllText(Path.Combine(exportDir, "spt_resolve_log.json"), logJson);
+            DiagnosticsOutput.WriteDiagnostic(mapName, "spt_resolve_log.json", JsonSerializer.Serialize(resolveLog, SafeJson));
         }
 
         private static string? ResolveModelPath(string mapRootPath, string modelName)

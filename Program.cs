@@ -445,6 +445,7 @@ class Program
         bool exportAll = args.Any(a => string.Equals(a, "--all", StringComparison.OrdinalIgnoreCase));
         bool resumeMode = args.Any(a => string.Equals(a, "--resume", StringComparison.OrdinalIgnoreCase));
         bool validateAfterExport = args.Any(a => string.Equals(a, "--validate", StringComparison.OrdinalIgnoreCase));
+        bool cleanupDiagnostics = args.Any(a => string.Equals(a, "--cleanup-diagnostics", StringComparison.OrdinalIgnoreCase));
         string? wildcardFilterArg = null;
         for (int i = 0; i < args.Length; i++)
         {
@@ -659,9 +660,28 @@ class Program
             if (srcBsp == null) { Console.WriteLine("ERROR: BSP not found."); return; }
 
             var bsp = RFMapToolSharp.Collision.BspFile.Load(srcBsp);
-            string outPath = string.IsNullOrWhiteSpace(bspDumpOutArg)
-                ? Path.Combine(Environment.CurrentDirectory, $"bsp_dump_{Path.GetFileName(srcMapDir)}.json")
-                : Path.GetFullPath(bspDumpOutArg);
+            string outPath;
+            if (!string.IsNullOrWhiteSpace(bspDumpOutArg))
+            {
+                outPath = Path.GetFullPath(bspDumpOutArg);
+            }
+            else
+            {
+                // По умолчанию — в _diagnostics/<map>/ внутри RF_Release корня проекта.
+                var projectRoot = Environment.CurrentDirectory;
+                var probe = new DirectoryInfo(AppContext.BaseDirectory);
+                while (probe != null)
+                {
+                    if (probe.GetFiles("*.csproj").Any() || probe.GetFiles("*.sln").Any())
+                    {
+                        projectRoot = probe.FullName;
+                        break;
+                    }
+                    probe = probe.Parent;
+                }
+                DiagnosticsOutput.ExportRoot = Path.Combine(projectRoot, "RF_Release");
+                outPath = DiagnosticsOutput.DiagnosticPath(Path.GetFileName(srcMapDir), $"bsp_dump_{Path.GetFileName(srcMapDir)}.json");
+            }
 
             var payload = new
             {
@@ -1077,9 +1097,17 @@ class Program
             current = current.Parent;
         }
 
-        // Р­РєСЃРїРѕСЂС‚ РІСЃРµРіРґР° РІ RFMapToolSharp\RF_Release
+        // Экспорт всегда в RFMapToolSharp\RF_Release
         var exportRoot = Path.Combine(rootDir, "RF_Release");
         Directory.CreateDirectory(exportRoot);
+        DiagnosticsOutput.ExportRoot = exportRoot;
+
+        // Ручная чистка legacy-диагностики из папок карт (--cleanup-diagnostics, с подтверждением)
+        if (cleanupDiagnostics)
+        {
+            DiagnosticsOutput.CleanupLegacyDiagnostics(IsInteractive, () => Console.ReadLine());
+            return;
+        }
 
 
 
@@ -1220,6 +1248,8 @@ class Program
 
             Console.WriteLine($"---> Processing: {mapName}");
 
+            DiagnosticsOutput.BeginMapLog(mapName);
+
             try
             {
                 // Sette requires legacy-like handling for Attr=8192 object groups.
@@ -1314,7 +1344,7 @@ class Program
                 Directory.CreateDirectory(targetDir);
 
                 string sourceSpt = Path.Combine(dir, "Spt");
-                string destSpt = Path.Combine(targetDir, "Spt");
+                string destSpt = Path.Combine(DiagnosticsOutput.DiagnosticDir(mapName), "Spt");
                 CopySptFolder(sourceSpt, destSpt);
                 Console.WriteLine($"[DEBUG] {mapName}: BSP = {bspPath}");
                 Console.WriteLine($"[DEBUG] {mapName}: SPT root = {sourceSpt}");
@@ -1353,13 +1383,13 @@ class Program
                 }
                 try
                 {
-                    scene.Bsp?.WriteBrokenFacesReport(Path.Combine(targetDir, "broken_faces.json"));
-                    scene.Bsp?.WriteObjectMatricesReport(Path.Combine(targetDir, "object_matrices.json"));
-                    scene.Bsp?.WriteAnimatedObjectsReport(Path.Combine(targetDir, "animated_objects.json"));
-                    scene.Bsp?.WriteMatGroupDebugReport(Path.Combine(targetDir, "matgroup_debug.json"));
+                    scene.Bsp?.WriteBrokenFacesReport(DiagnosticsOutput.DiagnosticPath(mapName, "broken_faces.json"));
+                    scene.Bsp?.WriteObjectMatricesReport(DiagnosticsOutput.DiagnosticPath(mapName, "object_matrices.json"));
+                    scene.Bsp?.WriteAnimatedObjectsReport(DiagnosticsOutput.DiagnosticPath(mapName, "animated_objects.json"));
+                    scene.Bsp?.WriteMatGroupDebugReport(DiagnosticsOutput.DiagnosticPath(mapName, "matgroup_debug.json"));
                     if (string.Equals(mapName, "Sette", StringComparison.OrdinalIgnoreCase))
                     {
-                        scene.Bsp?.WriteDonor89_92Diagnostics(targetDir);
+                        scene.Bsp?.WriteDonor89_92Diagnostics(DiagnosticsOutput.DiagnosticDir(mapName));
                     }
                 }
                 catch (OutOfMemoryException)
@@ -1380,12 +1410,14 @@ class Program
                 Console.WriteLine($"[OK] {mapName} completed.");
                 Console.ResetColor();
                 success++;
+                DiagnosticsOutput.EndMapLog();
             }
             catch (Exception ex)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine($"[FAIL] Error {mapName}: {ex.Message}");
                 Console.ResetColor();
+                DiagnosticsOutput.EndMapLog();
             }
         }
 
