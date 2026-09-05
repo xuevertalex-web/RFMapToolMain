@@ -716,8 +716,8 @@ namespace RFMapToolSharp.Export
             // --- SPT (OBJECT MARKERS) ---
             if (!string.Equals(SptOptions.Mode, "off", StringComparison.OrdinalIgnoreCase))
             {
-                var debugMesh = CreateDebugCube(model);
-                ProcessSpt(scene.RootPath, gltfScene, MirrorWorldY, debugMesh, name);
+                var helperMeshes = CreateHelperMeshes(model);
+                ProcessSpt(scene.RootPath, gltfScene, MirrorWorldY, helperMeshes, name);
             }
 
             model.SaveGLB(Path.Combine(exportDir, $"{name}.glb"));
@@ -743,7 +743,28 @@ namespace RFMapToolSharp.Export
             Console.WriteLine($"[GLTF] texture_report_{name}.json written to _reports.");
         }
 
-        private static void ProcessSpt(string mapRootPath, Scene gltfScene, bool mirrorY, Mesh debugMesh, string mapName)
+        private static string ClassifySptHelper(RFMapToolSharp.Parsing.SptMapObject obj)
+        {
+            if (string.Equals(obj.Tag, "music", StringComparison.OrdinalIgnoreCase)) return "music";
+            var n = obj.ModelName ?? string.Empty;
+            if (n.StartsWith("dpgoto", StringComparison.OrdinalIgnoreCase) ||
+                n.StartsWith("dpfrom", StringComparison.OrdinalIgnoreCase)) return "portal";
+            if (n.StartsWith("dsstart", StringComparison.OrdinalIgnoreCase)) return "spawn";
+            return "helper";
+        }
+
+        /// <summary>Конвертация node_tm в mirrored space: M' = S·M·S, S = diag(1,-1,1,1)
+        /// (инвертируются элементы ровно с одним Y-индексом). Сохраняет поворот и масштаб.</summary>
+        private static Matrix4x4 MirrorSptMatrix(Matrix4x4 m, bool mirrorY)
+        {
+            if (!mirrorY) return m;
+            m.M12 = -m.M12; m.M21 = -m.M21;
+            m.M23 = -m.M23; m.M32 = -m.M32;
+            m.M24 = -m.M24; m.M42 = -m.M42;
+            return m;
+        }
+
+        private static void ProcessSpt(string mapRootPath, Scene gltfScene, bool mirrorY, Dictionary<string, Mesh> helperMeshes, string mapName)
         {
             var sptDir = Path.Combine(mapRootPath, "Spt");
             var files = new List<string>();
@@ -771,9 +792,9 @@ namespace RFMapToolSharp.Export
                     bool isExtScript = Path.GetFileName(file).EndsWith("ext.spt", StringComparison.OrdinalIgnoreCase);
                     var pos = new Vector3(obj.Position.X, mirrorY ? -obj.Position.Y : obj.Position.Y, obj.Position.Z);
                     if (!IsFinite(pos)) pos = Vector3.Zero;
+                    var kind = ClassifySptHelper(obj);
                     var node = gltfScene.CreateNode(obj.ModelName);
                     bool usedRealMesh = false;
-                    node.Mesh = debugMesh;
                     if (string.Equals(SptOptions.Mode, "real-if-supported", StringComparison.OrdinalIgnoreCase))
                     {
                         var resolved = ResolveModelPath(mapRootPath, obj.ModelName);
@@ -797,22 +818,34 @@ namespace RFMapToolSharp.Export
                         }
                     }
 
-                    var objScale = obj.Scale;
-                    if (!IsFinite(objScale) || objScale.X <= 0 || objScale.Y <= 0 || objScale.Z <= 0 || objScale.X > 1000 || objScale.Y > 1000 || objScale.Z > 1000)
+                    // Трансформ: при наличии сырой node_tm (текстовые helper-скрипты)
+                    // берём её целиком — с поворотом и масштабом; иначе legacy (pos + scale).
+                    Matrix4x4 transform;
+                    bool usedNodeTm = false;
+                    if (obj.NodeTm.HasValue)
                     {
-                        objScale = Vector3.One;
+                        transform = MirrorSptMatrix(obj.NodeTm.Value, mirrorY);
+                        usedNodeTm = true;
                     }
-                    objScale *= SptOptions.ScaleMultiplier;
+                    else
+                    {
+                        var objScale = obj.Scale;
+                        if (!IsFinite(objScale) || objScale.X <= 0 || objScale.Y <= 0 || objScale.Z <= 0 || objScale.X > 1000 || objScale.Y > 1000 || objScale.Z > 1000)
+                        {
+                            objScale = Vector3.One;
+                        }
+                        objScale *= SptOptions.ScaleMultiplier;
 
-                    var transform = Matrix4x4.CreateTranslation(pos);
-                    if (!isExtScript && objScale != Vector3.One)
-                    {
-                        transform = Matrix4x4.CreateScale(objScale) * transform;
-                    }
-                    if (SptOptions.PivotFix)
-                    {
-                        // RF helper pivot compensation for marker mode.
-                        transform = Matrix4x4.CreateTranslation(0, mirrorY ? 0.5f : -0.5f, 0) * transform;
+                        transform = Matrix4x4.CreateTranslation(pos);
+                        if (!isExtScript && objScale != Vector3.One)
+                        {
+                            transform = Matrix4x4.CreateScale(objScale) * transform;
+                        }
+                        if (SptOptions.PivotFix)
+                        {
+                            // RF helper pivot compensation for marker mode.
+                            transform = Matrix4x4.CreateTranslation(0, mirrorY ? 0.5f : -0.5f, 0) * transform;
+                        }
                     }
 
                     if (!IsFinite(transform))
@@ -828,15 +861,41 @@ namespace RFMapToolSharp.Export
                     {
                         node.LocalTransform = Matrix4x4.CreateTranslation(pos);
                     }
+
+                    // Маркер-бокс реального размера helper'а (bbox из SPT) — дочерней нодой,
+                    // чтобы поворот/масштаб node_tm применялись к боксу.
+                    if (!usedRealMesh)
+                    {
+                        var size = obj.HasBbox ? obj.BboxMax - obj.BboxMin : new Vector3(100f);
+                        var center = obj.HasBbox ? (obj.BboxMax + obj.BboxMin) * 0.5f : Vector3.Zero;
+                        size = new Vector3(
+                            Math.Clamp(MathF.Abs(size.X), 1f, 200000f),
+                            Math.Clamp(MathF.Abs(size.Y), 1f, 200000f),
+                            Math.Clamp(MathF.Abs(size.Z), 1f, 200000f));
+                        var box = node.CreateNode(obj.ModelName + "_box");
+                        box.Mesh = helperMeshes[kind];
+                        try
+                        {
+                            box.LocalTransform = Matrix4x4.CreateScale(size) * Matrix4x4.CreateTranslation(center);
+                        }
+                        catch
+                        {
+                            box.LocalTransform = Matrix4x4.CreateScale(size);
+                        }
+                    }
+
                     resolveLog.Add(new
                     {
                         SourceFile = file,
                         obj.ModelName,
+                        Kind = kind,
                         UsedRealMesh = usedRealMesh,
+                        UsedNodeTm = usedNodeTm,
+                        obj.HasBbox,
                         ResolvedModelPath = ResolveModelPath(mapRootPath, obj.ModelName),
                         obj.Position,
                         obj.Rotation,
-                        Scale = objScale,
+                        Scale = obj.Scale,
                         SptOptions.Mode,
                         SptOptions.PivotFix,
                         SptOptions.RotationOrder,
@@ -1051,18 +1110,44 @@ namespace RFMapToolSharp.Export
 
         private static Mesh CreateDebugCube(ModelRoot model)
         {
-            var meshBuilder = new MeshBuilder<VPOS, VTEX, VEMPTY>("DebugCube");
-            var redMat = new SharpGLTF.Materials.MaterialBuilder("RedDebug")
-                .WithBaseColor(new Vector4(1, 0, 0, 1))
-                .WithDoubleSide(true);
-            
-            var prim = meshBuilder.UsePrimitive(redMat);
+            return CreateUnitCube(model, "DebugCube", "RedDebug", new Vector4(1, 0, 0, 1), 50f);
+        }
 
-            float s = 50f;
+        /// <summary>
+        /// Маркеры helper-объектов SPT: юнит-куб ±0.5, полупрозрачный,
+        /// цвет по классу helper'а. Реальный размер задаётся нодой-_box
+        /// (scale = bbox из SPT), поэтому куб единый на всех.
+        /// </summary>
+        private static Dictionary<string, Mesh> CreateHelperMeshes(ModelRoot model)
+        {
+            var defs = new (string Kind, Vector4 Color)[]
+            {
+                ("helper", new Vector4(1.0f, 0.85f, 0.2f, 0.35f)),  // жёлтый — прочие helper'ы
+                ("music",  new Vector4(0.2f, 1.0f, 0.3f, 0.35f)),   // зелёный — музыкальные зоны
+                ("portal", new Vector4(1.0f, 0.5f, 0.1f, 0.40f)),   // оранжевый — dpgoto/dpfrom
+                ("spawn",  new Vector4(0.2f, 0.8f, 1.0f, 0.40f)),   // голубой — dsstart
+            };
+            var dict = new Dictionary<string, Mesh>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (kind, color) in defs)
+                dict[kind] = CreateUnitCube(model, $"SPT_marker_{kind}", $"SPT_marker_{kind}_mat", color, 0.5f);
+            return dict;
+        }
+
+        private static Mesh CreateUnitCube(ModelRoot model, string meshName, string matName, Vector4 color, float s)
+        {
+            var meshBuilder = new MeshBuilder<VPOS, VTEX, VEMPTY>(meshName);
+            var mat = new SharpGLTF.Materials.MaterialBuilder(matName)
+                .WithBaseColor(color)
+                .WithDoubleSide(true);
+            if (color.W < 1f)
+                mat.WithAlpha(SharpGLTF.Materials.AlphaMode.BLEND);
+
+            var prim = meshBuilder.UsePrimitive(mat);
+
             var p0 = new Vector3(-s, -s, -s); var p1 = new Vector3( s, -s, -s);
             var p2 = new Vector3( s,  s, -s); var p3 = new Vector3(-s,  s, -s);
             var p4 = new Vector3(-s, -s,  s); var p5 = new Vector3( s, -s,  s);
-            var p6 = new Vector3( s,  s,  s); var p7 = new Vector3(-s,  s,  s);
+            var p6 = new Vector3(-s,  s,  s); var p7 = new Vector3(-s,  s,  s);
 
             AddQuad(prim, p0, p1, p2, p3);
             AddQuad(prim, p5, p4, p7, p6);

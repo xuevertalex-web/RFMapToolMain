@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
@@ -13,6 +13,14 @@ namespace RFMapToolSharp.Parsing
         public Vector3 Position;
         public Vector3 Rotation;
         public Vector3 Scale;
+
+        // Доп. данные текстовых helper-скриптов (script_begin):
+        public Vector3 BboxMin;        // локальный bbox из строки "*name minX minY minZ maxX maxY maxZ"
+        public Vector3 BboxMax;
+        public bool HasBbox;
+        public string? Tag;            // "-music" и др. флаги helper'а
+        public int HelperId = -1;      // "-id N"
+        public Matrix4x4? NodeTm;      // сырая node_tm (row-major, как в файле)
     }
 
     public static class SptMapParser
@@ -124,17 +132,48 @@ namespace RFMapToolSharp.Parsing
                 if (line.StartsWith("*", StringComparison.Ordinal))
                 {
                     if (current != null && !string.IsNullOrWhiteSpace(current.ModelName)) result.Add(current);
+                    var head = line.Substring(1).Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
                     current = new SptMapObject
                     {
-                        ModelName = line.Substring(1).Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries)[0],
+                        ModelName = head.Length > 0 ? head[0] : string.Empty,
                         Position = Vector3.Zero,
                         Rotation = Vector3.Zero,
                         Scale = Vector3.One
                     };
+                    // "*name minX minY minZ maxX maxY maxZ" — локальный bbox helper'а
+                    if (head.Length >= 7 &&
+                        float.TryParse(head[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var mnx) &&
+                        float.TryParse(head[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var mny) &&
+                        float.TryParse(head[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var mnz) &&
+                        float.TryParse(head[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var mxx) &&
+                        float.TryParse(head[5], NumberStyles.Float, CultureInfo.InvariantCulture, out var mxy) &&
+                        float.TryParse(head[6], NumberStyles.Float, CultureInfo.InvariantCulture, out var mxz))
+                    {
+                        current.BboxMin = new Vector3(mnx, mny, mnz);
+                        current.BboxMax = new Vector3(mxx, mxy, mxz);
+                        current.HasBbox = true;
+                    }
                     continue;
                 }
 
                 if (current == null) continue;
+
+                // Флаги helper'а: "-music", "-id 8" и т.п.
+                if (line.StartsWith("-", StringComparison.Ordinal) &&
+                    !line.StartsWith("-node_tm", StringComparison.OrdinalIgnoreCase))
+                {
+                    var flag = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (flag.Length > 0)
+                    {
+                        var fname = flag[0].TrimStart('-').ToLowerInvariant();
+                        if (fname == "id" && flag.Length > 1 &&
+                            int.TryParse(flag[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var idv))
+                            current.HelperId = idv;
+                        else if (fname != "node_tm" && current.Tag == null)
+                            current.Tag = fname;
+                    }
+                    continue;
+                }
                 if (!line.StartsWith("-node_tm", StringComparison.OrdinalIgnoreCase)) continue;
                 if (i + 4 >= lines.Length) continue;
 
@@ -145,6 +184,11 @@ namespace RFMapToolSharp.Parsing
                 if (m1 == null || m2 == null || m3 == null || m4 == null) continue;
 
                 current.Position = new Vector3(m4.Value.X, m4.Value.Y, m4.Value.Z);
+                current.NodeTm = new Matrix4x4(
+                    m1.Value.X, m1.Value.Y, m1.Value.Z, m1.Value.W,
+                    m2.Value.X, m2.Value.Y, m2.Value.Z, m2.Value.W,
+                    m3.Value.X, m3.Value.Y, m3.Value.Z, m3.Value.W,
+                    m4.Value.X, m4.Value.Y, m4.Value.Z, m4.Value.W);
                 var rowX = new Vector3(m1.Value.X, m1.Value.Y, m1.Value.Z);
                 var rowY = new Vector3(m2.Value.X, m2.Value.Y, m2.Value.Z);
                 var rowZ = new Vector3(m3.Value.X, m3.Value.Y, m3.Value.Z);
