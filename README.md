@@ -91,8 +91,15 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
 ## Запуск
 
 Без аргументов — интерактивное меню. Папка карт ищется автоматически:
-`rf_path.txt` рядом с exe/лаунчером → `Map|map` в рабочей папке → обход вверх
-от cwd и exe → `C:\Games\RF_Online\Map`.
+`rf_path.txt` (построчно, `#` = комментарий; ищется в рабочей папке, рядом с exe
+и на уровень выше exe) → `Map|map` в рабочей папке → обход вверх от cwd и exe →
+`C:\Games\RF_Online\Map`.
+
+Результат (`ReadyMaps/`, `_diagnostics/`, `_logs/`, `_reports/`) пишется в корень,
+который определяется так (`ResolveRootDir`): вверх от папки exe, затем от cwd —
+первый предок с маркером portable-пакета (`RFMapToolSharp.cmd` / `rf_path.txt`)
+или с `.csproj`/`.sln`. Поэтому portable-пакет всегда пишет в свой собственный
+`ReadyMaps/`, даже если лежит внутри репозитория, а dev-сборка — в корень проекта.
 
 ### Основные флаги (batch mode)
 

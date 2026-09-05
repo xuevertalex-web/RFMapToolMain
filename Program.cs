@@ -575,15 +575,15 @@ class Program
 
         if (entityReport)
         {
-            string entityDir = Path.Combine(Environment.CurrentDirectory, "map", "Entity");
-            if (!Directory.Exists(entityDir)) entityDir = Path.Combine(Environment.CurrentDirectory, "Map", "Entity");
-            if (!Directory.Exists(entityDir))
+            string? mrEntity = FindMapRoot();
+            string? entityDir = mrEntity != null ? Path.Combine(mrEntity, "Entity") : null;
+            if (entityDir == null || !Directory.Exists(entityDir))
             {
                 Console.WriteLine("ERROR: Entity folder not found.");
                 return;
             }
-            string outPath = Path.Combine(Environment.CurrentDirectory, "ReadyMaps", "Entity", "entity_rpk_report.json");
-            string idxPath = Path.Combine(Environment.CurrentDirectory, "ReadyMaps", "Entity", "entity_rpk_index.json");
+            string outPath = Path.Combine(ResolveRootDir(), "ReadyMaps", "Entity", "entity_rpk_report.json");
+            string idxPath = Path.Combine(ResolveRootDir(), "ReadyMaps", "Entity", "entity_rpk_index.json");
             Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
             RpkInspector.WriteEntityReport(entityDir, outPath);
             RpkInspector.WriteEntityIndexReport(entityDir, idxPath);
@@ -667,19 +667,8 @@ class Program
             }
             else
             {
-                // По умолчанию — в _diagnostics/<map>/ внутри ReadyMaps корня проекта.
-                var projectRoot = Environment.CurrentDirectory;
-                var probe = new DirectoryInfo(AppContext.BaseDirectory);
-                while (probe != null)
-                {
-                    if (probe.GetFiles("*.csproj").Any() || probe.GetFiles("*.sln").Any())
-                    {
-                        projectRoot = probe.FullName;
-                        break;
-                    }
-                    probe = probe.Parent;
-                }
-                DiagnosticsOutput.ExportRoot = Path.Combine(projectRoot, "ReadyMaps");
+                // По умолчанию — в _diagnostics/<map>/ внутри ReadyMaps корня (пакет или проект).
+                DiagnosticsOutput.ExportRoot = Path.Combine(ResolveRootDir(), "ReadyMaps");
                 outPath = DiagnosticsOutput.DiagnosticPath(Path.GetFileName(srcMapDir), $"bsp_dump_{Path.GetFileName(srcMapDir)}.json");
             }
 
@@ -1022,16 +1011,7 @@ class Program
                 return;
             }
 
-            var exeDirIso = AppContext.BaseDirectory;
-            var curIso = new DirectoryInfo(exeDirIso);
-            string rootDirIso = Environment.CurrentDirectory;
-            while (curIso != null)
-            {
-                bool hasMarkers = curIso.GetFiles("*.csproj").Any() || curIso.GetFiles("*.sln").Any();
-                if (hasMarkers) { rootDirIso = curIso.FullName; break; }
-                curIso = curIso.Parent;
-            }
-            var exportRootIso = Path.Combine(rootDirIso, "ReadyMaps");
+            var exportRootIso = Path.Combine(ResolveRootDir(), "ReadyMaps");
             Directory.CreateDirectory(exportRootIso);
 
             if (!RFMapToolSharp.Export.SetteCleanExporter.Run(mr, exportRootIso))
@@ -1050,16 +1030,7 @@ class Program
                 Console.WriteLine("ERROR: Map folder not found.");
                 return;
             }
-            var exeDirIso = AppContext.BaseDirectory;
-            var curIso = new DirectoryInfo(exeDirIso);
-            string rootDirIso = Environment.CurrentDirectory;
-            while (curIso != null)
-            {
-                bool hasMarkers = curIso.GetFiles("*.csproj").Any() || curIso.GetFiles("*.sln").Any();
-                if (hasMarkers) { rootDirIso = curIso.FullName; break; }
-                curIso = curIso.Parent;
-            }
-            var exportRootIso = Path.Combine(rootDirIso, "ReadyMaps");
+            var exportRootIso = Path.Combine(ResolveRootDir(), "ReadyMaps");
             Directory.CreateDirectory(exportRootIso);
             if (!RFMapToolSharp.Export.SetteRawExporter.Run(mr, exportRootIso))
             {
@@ -1079,25 +1050,10 @@ class Program
         }
         Console.WriteLine($"Map folder found: {mapRoot}\n");
 
-        // РС‰РµРј РєРѕСЂРµРЅСЊ РїСЂРѕРµРєС‚Р° РїРѕ РЅР°Р»РёС‡РёСЋ .csproj/.sln, С‡С‚РѕР±С‹ РєРѕСЂСЂРµРєС‚РЅРѕ РїРёСЃР°С‚СЊ ReadyMaps РІРЅРµ bin\Debug
-        var exeDir = AppContext.BaseDirectory;
-        var current = new DirectoryInfo(exeDir);
-        string rootDir = Environment.CurrentDirectory;
+        // Корень для ReadyMaps: portable-пакет или корень dev-проекта (см. ResolveRootDir).
+        string rootDir = ResolveRootDir();
 
-        while (current != null)
-        {
-            bool hasProjectMarkers =
-                current.GetFiles("*.csproj").Any() ||
-                current.GetFiles("*.sln").Any();
-            if (hasProjectMarkers)
-            {
-                rootDir = current.FullName;
-                break;
-            }
-            current = current.Parent;
-        }
-
-        // Экспорт всегда в RFMapToolSharp\ReadyMaps
+        // Экспорт всегда в <rootDir>\ReadyMaps
         var exportRoot = Path.Combine(rootDir, "ReadyMaps");
         Directory.CreateDirectory(exportRoot);
         DiagnosticsOutput.ExportRoot = exportRoot;
@@ -1492,6 +1448,28 @@ class Program
         return 0;
     }
 
+    /// <summary>
+    /// Корень для записи ReadyMaps: portable-пакет (маркер RFMapToolSharp.cmd/rf_path.txt)
+    /// или корень dev-проекта (.csproj/.sln). Цепочка от exe проверяется первой:
+    /// portable exe лежит в &lt;пакет&gt;/app, dev exe — в bin/… под проектом.
+    /// </summary>
+    static string ResolveRootDir()
+    {
+        foreach (var start in new[] { AppContext.BaseDirectory, Environment.CurrentDirectory })
+        {
+            var dir = new DirectoryInfo(start);
+            for (int i = 0; i < 12 && dir != null; i++, dir = dir.Parent)
+            {
+                if (File.Exists(Path.Combine(dir.FullName, "RFMapToolSharp.cmd")) ||
+                    File.Exists(Path.Combine(dir.FullName, ConfigFile)))
+                    return dir.FullName;
+                if (dir.GetFiles("*.csproj").Any() || dir.GetFiles("*.sln").Any())
+                    return dir.FullName;
+            }
+        }
+        return Environment.CurrentDirectory;
+    }
+
     static string? FindMapRoot()
     {
         static string? TryMapDir(string? baseDir)
@@ -1509,20 +1487,28 @@ class Program
 
         // 1) Explicit path from config file (rf_path.txt)
         // File can contain either game root (with Map inside) or direct Map path.
-        var cfgPath = Path.Combine(Environment.CurrentDirectory, ConfigFile);
-        if (File.Exists(cfgPath))
+        // Построчно: пустые строки и комментарии (#) пропускаются.
+        // Ищем рядом с cwd, с exe и на уровень выше exe (portable: exe в app/, конфиг в корне пакета).
+        var cfgBases = new[]
         {
-            var raw = File.ReadAllText(cfgPath).Trim().Trim('"');
-            if (!string.IsNullOrWhiteSpace(raw))
+            Environment.CurrentDirectory,
+            AppContext.BaseDirectory,
+            Directory.GetParent(AppContext.BaseDirectory)?.FullName
+        };
+        foreach (var baseDir in cfgBases)
+        {
+            if (string.IsNullOrWhiteSpace(baseDir)) continue;
+            var cfgPath = Path.Combine(baseDir, ConfigFile);
+            if (!File.Exists(cfgPath)) continue;
+            foreach (var lineRaw in File.ReadAllLines(cfgPath))
             {
-                if (Directory.Exists(raw))
-                {
-                    if (string.Equals(Path.GetFileName(raw), "map", StringComparison.OrdinalIgnoreCase))
-                        return raw;
-
-                    var fromCfg = TryMapDir(raw);
-                    if (fromCfg != null) return fromCfg;
-                }
+                var raw = lineRaw.Trim().Trim('"');
+                if (raw.Length == 0 || raw.StartsWith("#")) continue;
+                if (!Directory.Exists(raw)) continue;
+                if (string.Equals(Path.GetFileName(raw.TrimEnd('\\', '/')), "map", StringComparison.OrdinalIgnoreCase))
+                    return raw;
+                var fromCfg = TryMapDir(raw);
+                if (fromCfg != null) return fromCfg;
             }
         }
 
