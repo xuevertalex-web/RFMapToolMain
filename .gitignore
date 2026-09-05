@@ -6,5 +6,7 @@ obj/
 *.tmp
 Map/
 ReadyMaps/
+publish/
+*.zip
 
 _runs/

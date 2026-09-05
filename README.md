@@ -4,12 +4,26 @@
 текстур и анимаций объектов из игровых форматов и экспорт в `.glb` (glTF 2.0),
 а также задел на обратное направление (GLB → BSP, репак карт).
 
+## Быстрый старт (для пользователя, без установки чего-либо)
+
+1. Скачай и распакуй `RFMapToolSharp-portable.zip` — это один self-contained
+   пакет, **.NET устанавливать не нужно** (рантайм внутри, Windows 10/11 x64).
+2. Положи папку `RFMapToolSharp/` рядом с клиентом игры так, чтобы рядом была
+   папка `Map` клиента — или просто создай рядом с exe файл `rf_path.txt`
+   с полным путём к клиенту (например `D:\Games\RF_Online`).
+3. Запусти `RFMapToolSharp.exe` и выбери карту в меню — или из командной строки
+   `RFMapToolSharp.exe --all` (все карты) / `--map Sette` (одна).
+
+Готовые `.glb` появятся в `ReadyMaps/<карта>/`. Файл `.glb` открывается без
+установки программ: перетащи его в браузер на gltf-viewer.donmccurdy.com,
+либо открой в Blender / Windows 3D Viewer.
+
 ## Структура репозитория
 
 | Папка | Назначение |
 |---|---|
 | `Maps/Map/` | Входные карты клиента RF Online (`.bsp`, `.r3m`, `.r3t`, `.spt` и пр.). Не коммитится. |
-| `ReadyMaps/` | Готовые результаты экспорта (см. ниже). Не коммитится. |
+| `ReadyMaps/` | Готовые результаты экспорта. |
 | `Parsing/` | Парсеры форматов: BSP/EBP, R3M (материалы), R3T (текстуры), SPT, RPK и др. |
 | `Export/` | Экспорт в GLB (SharpGLTF), диагностика, мост SPT-моделей. |
 | `Editor/` | Задел редактора карт (шаблоны, dry-run). |
@@ -53,6 +67,12 @@ ReadyMaps/
 
 ```bash
 dotnet build -c Debug
+```
+
+Portable-пакет для пользователей (self-contained, один exe без установки .NET):
+
+```bash
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish
 ```
 
 ## Запуск
