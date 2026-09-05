@@ -7,6 +7,7 @@ obj/
 Map/
 ReadyMaps/
 publish/
+RFMapToolSharp-portable/
 *.zip
 
 _runs/
