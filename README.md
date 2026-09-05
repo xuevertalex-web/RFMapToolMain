@@ -6,17 +6,30 @@
 
 ## Быстрый старт (для пользователя, без установки чего-либо)
 
-1. Скачай и распакуй `RFMapToolSharp-portable.zip` — это один self-contained
-   пакет, **.NET устанавливать не нужно** (рантайм внутри, Windows 10/11 x64).
-2. Положи папку `RFMapToolSharp/` рядом с клиентом игры так, чтобы рядом была
-   папка `Map` клиента — или просто создай рядом с exe файл `rf_path.txt`
-   с полным путём к клиенту (например `D:\Games\RF_Online`).
-3. Запусти `RFMapToolSharp.exe` и выбери карту в меню — или из командной строки
-   `RFMapToolSharp.exe --all` (все карты) / `--map Sette` (одна).
+1. Скачай и распакуй `RFMapToolSharp-portable.zip` — self-contained пакет,
+   **.NET устанавливать не нужно** (рантайм внутри, Windows 10/11 x64).
+2. Закинь папки карт клиента в `Map/` внутри пакета (рядом лежит подсказка
+   `_сюда_папки_карт.txt`). Альтернатива: ничего не копировать, а вписать
+   полный путь к клиенту в `rf_path.txt` (например `D:\Games\RF_Online`).
+3. Запусти `RFMapToolSharp.cmd` — откроется меню выбора карты.
+   Из командной строки: `RFMapToolSharp.cmd --all` (все карты) /
+   `RFMapToolSharp.cmd --map Sette` (одна).
 
-Готовые `.glb` появятся в `ReadyMaps/<карта>/`. Файл `.glb` открывается без
-установки программ: перетащи его в браузер на gltf-viewer.donmccurdy.com,
-либо открой в Blender / Windows 3D Viewer.
+Готовые `.glb` появятся в `ReadyMaps/<карта>/` внутри пакета. Файл `.glb`
+открывается без установки программ: перетащи его в браузер на
+gltf-viewer.donmccurdy.com, либо открой в Blender / Windows 3D Viewer.
+
+Структура пакета:
+
+```
+RFMapToolSharp/
+  RFMapToolSharp.cmd   — запуск (двойной клик)
+  Map/                 — сюда кладёшь папки карт
+  ReadyMaps/           — здесь появятся готовые карты
+  rf_path.txt          — или впиши путь к клиенту сюда
+  app/                 — программа и рантайм (не трогай)
+  ПРОЧТИ_МЕНЯ.txt      — короткая инструкция
+```
 
 ## Структура репозитория
 
@@ -78,8 +91,8 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
 ## Запуск
 
 Без аргументов — интерактивное меню. Папка карт ищется автоматически:
-`rf_path.txt` рядом с exe → `<cwd>/Map|map` → обход вверх от cwd и exe →
-`C:\Games\RF_Online\Map`.
+`rf_path.txt` рядом с exe/лаунчером → `Map|map` в рабочей папке → обход вверх
+от cwd и exe → `C:\Games\RF_Online\Map`.
 
 ### Основные флаги (batch mode)
 
