@@ -64,12 +64,18 @@ namespace RFMapToolSharp.Export
                 if (texId < 0 || texId >= scene.Textures.Count) return default;
                 try
                 {
-                    var pngBytes = TextureConverter.ToPngBytes(scene.Textures[texId].DdsData);
+                    var texName = scene.Textures[texId].Name;
+                    var pngBytes = TextureConverter.ToPngBytes(scene.Textures[texId].DdsData, texId, texName);
                     var newImg = new MemoryImage(pngBytes);
                     imageCache[texId] = newImg;
                     return newImg;
                 }
-                catch { return default; }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[GLTF] TexId={texId} Name=\"{scene.Textures[texId].Name}\" image load FAILED: {ex.Message}");
+                    imageCache[texId] = default; // не повторять неудачную конверсию
+                    return default;
+                }
             }
 
             var materialCache = new Dictionary<int, SharpGLTF.Materials.MaterialBuilder>();
@@ -92,11 +98,22 @@ namespace RFMapToolSharp.Export
                         var layer0 = rfMat.Layers[0];
                         int texId = layer0.Surface - 1 < 0 ? layer0.Surface : layer0.Surface - 1;
 
+                        var matRec = new TextureDiagnostics.MatRecord
+                        {
+                            MatId = matId,
+                            Name = rfMat.Name ?? string.Empty,
+                            Surface = layer0.Surface,
+                            TexId = texId
+                        };
+
                         if (texId >= 0 && texId < scene.Textures.Count)
                         {
+                            matRec.TextureName = scene.Textures[texId].Name ?? string.Empty;
                             var img = GetOrLoadImage(texId);
                             if (!img.IsEmpty)
                             {
+                                matRec.TextureAssigned = true;
+                                matRec.Status = "ok";
                                 var wrap = SharpGLTF.Schema2.TextureWrapMode.REPEAT;
 
                                 matBuilder.UseChannel(SharpGLTF.Materials.KnownChannel.BaseColor)
@@ -121,7 +138,28 @@ namespace RFMapToolSharp.Export
                                     matBuilder.WithMetallicRoughness(0.0f, 0.9f);
                                 }
                             }
+                            else
+                            {
+                                matRec.Status = "convert_failed";
+                            }
                         }
+                        else
+                        {
+                            matRec.Status = "tex_out_of_range";
+                        }
+
+                        TextureDiagnostics.Current.LogMaterial(matRec);
+                    }
+                    else
+                    {
+                        TextureDiagnostics.Current.LogMaterial(new TextureDiagnostics.MatRecord
+                        {
+                            MatId = matId,
+                            Name = rfMat.Name ?? string.Empty,
+                            Surface = -1,
+                            TexId = -1,
+                            Status = "no_layers"
+                        });
                     }
                 }
                 materialCache[matId] = matBuilder;
@@ -329,6 +367,14 @@ namespace RFMapToolSharp.Export
                 File.WriteAllText(Path.Combine(exportDir, "mg91_face_rebuild_log.json"), JsonSerializer.Serialize(mg91Only, SafeJson));
             }
             Console.WriteLine("[GLTF] Saved!");
+
+            var diag = TextureDiagnostics.Current;
+            diag.WriteReport(exportDir);
+            int matsWithTex = diag.Materials.Count(m => m.TextureAssigned);
+            int texOk = diag.Textures.Count(t => t.Status == "ok");
+            int texFailed = diag.Textures.Count(t => t.Status == "convert_failed");
+            Console.WriteLine($"[GLTF] Summary: materials={diag.Materials.Count} (textured={matsWithTex}), textures converted={texOk}, failed={texFailed}");
+            Console.WriteLine($"[GLTF] texture_report.json written.");
         }
 
         private static void ProcessSpt(string mapRootPath, Scene gltfScene, bool mirrorY, Mesh debugMesh, string exportDir)

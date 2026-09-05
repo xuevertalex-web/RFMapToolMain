@@ -27,20 +27,97 @@ public static class TextureConverter
         sharp.Save(outputPath, new PngEncoder());
     }
 
-    public static byte[] ToPngBytes(byte[] ddsData)
+    public static byte[] ToPngBytes(byte[] ddsData) => ToPngBytes(ddsData, -1, null);
+
+    /// <summary>
+    /// DDS -> PNG с диагностикой [CONV]: формат (DXT1/3/5, ATI1/2, BC7...), размеры, размер выхода.
+    /// Ошибки декодирования/кодирования протоколируются и пробрасываются вызывающему коду.
+    /// </summary>
+    public static byte[] ToPngBytes(byte[] ddsData, int texIndex, string? name)
     {
         var buffer = (byte[])ddsData.Clone();
         XorHeader(buffer);
 
-        using var ms = new MemoryStream(buffer);
-        using var image = Pfim.Dds.Create(ms, new PfimConfig());
-        if (image.Compressed)
-            image.Decompress();
+        var sniff = SniffDdsFormat(buffer);
+        string texName = string.IsNullOrWhiteSpace(name) ? (texIndex >= 0 ? $"tex#{texIndex}" : "tex") : name!;
 
-        using var sharp = ToImageSharp(image);
-        using var outMs = new MemoryStream();
-        sharp.Save(outMs, new PngEncoder());
-        return outMs.ToArray();
+        try
+        {
+            using var ms = new MemoryStream(buffer);
+            using var image = Pfim.Dds.Create(ms, new PfimConfig());
+            if (image.Compressed)
+                image.Decompress();
+
+            if (image.Width <= 1 || image.Height <= 1)
+                Console.WriteLine($"[CONV] {texName} {sniff} WARNING: suspicious dimensions {image.Width}x{image.Height}");
+
+            using var sharp = ToImageSharp(image);
+            using var outMs = new MemoryStream();
+            sharp.Save(outMs, new PngEncoder());
+            var png = outMs.ToArray();
+
+            // Валидация: перечитываем созданный PNG (Причина В — ImageSharp encode ошибки).
+            // Эвристика по размеру не используется: маленькие текстуры легально дают ~100 байт.
+            try
+            {
+                using var probe = Image.Load(png);
+                if (probe.Width != image.Width || probe.Height != image.Height)
+                    TextureDiagnostics.Current.LogConversionFailed(texIndex, texName, sniff,
+                        $"PNG round-trip mismatch {probe.Width}x{probe.Height} != {image.Width}x{image.Height}");
+                else
+                    TextureDiagnostics.Current.LogConversion(texIndex, texName, sniff, image.Width, image.Height, png.Length);
+            }
+            catch (Exception rex)
+            {
+                TextureDiagnostics.Current.LogConversionFailed(texIndex, texName, sniff, $"PNG round-trip failed: {rex.Message}");
+            }
+
+            return png;
+        }
+        catch (Exception ex)
+        {
+            TextureDiagnostics.Current.LogConversionFailed(texIndex, texName, sniff, ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>Читает FourCC/DXGI формат из уже расшифрованного (после XOR) DDS заголовка.</summary>
+    public static string SniffDdsFormat(byte[] dds)
+    {
+        try
+        {
+            if (dds.Length < 128) return "not-dds";
+            if (dds[0] != 'D' || dds[1] != 'D' || dds[2] != 'S' || dds[3] != ' ') return "not-dds";
+
+            uint fourCc = BitConverter.ToUInt32(dds, 84);
+            string cc = System.Text.Encoding.ASCII.GetString(dds, 84, 4).TrimEnd('\0');
+            if (cc == "DX10" && dds.Length >= 132)
+            {
+                uint dxgi = BitConverter.ToUInt32(dds, 128);
+                return dxgi switch
+                {
+                    71 or 72 => "BC1/DXT1",
+                    74 or 75 => "BC2/DXT3",
+                    77 or 78 => "BC3/DXT5",
+                    80 or 81 => "BC4/ATI1",
+                    83 or 84 => "BC5/ATI2",
+                    95 or 96 => "BC6H",
+                    98 or 99 => "BC7",
+                    28 or 29 => "RGBA8",
+                    87 or 88 => "BGRA8",
+                    _ => $"DX10(dxgi={dxgi})"
+                };
+            }
+            if (!string.IsNullOrWhiteSpace(cc)) return cc;
+
+            // RGB-форматы без FourCC
+            uint rgbBitCount = BitConverter.ToUInt32(dds, 88);
+            return $"RGB{rgbBitCount}";
+        }
+        catch
+        {
+            return "unknown";
+        }
     }
 
     private static Image<Rgba32> ToImageSharp(IImage image)

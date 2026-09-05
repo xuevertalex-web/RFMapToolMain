@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Linq;
@@ -441,6 +441,30 @@ class Program
                 break;
             }
         }
+        // === Batch mode (Этап 3.3): --all, --filter=Vol*, --resume, --validate ===
+        bool exportAll = args.Any(a => string.Equals(a, "--all", StringComparison.OrdinalIgnoreCase));
+        bool resumeMode = args.Any(a => string.Equals(a, "--resume", StringComparison.OrdinalIgnoreCase));
+        bool validateAfterExport = args.Any(a => string.Equals(a, "--validate", StringComparison.OrdinalIgnoreCase));
+        string? wildcardFilterArg = null;
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i].StartsWith("--filter=", StringComparison.OrdinalIgnoreCase))
+            {
+                wildcardFilterArg = args[i]["--filter=".Length..];
+                break;
+            }
+            if (string.Equals(args[i], "--filter", StringComparison.OrdinalIgnoreCase) && i < args.Length - 1)
+            {
+                wildcardFilterArg = args[i + 1];
+                break;
+            }
+        }
+        static bool WildcardMatch(string value, string pattern)
+        {
+            // Простая маска: * и ?, без учёта регистра.
+            var rx = "^" + Regex.Escape(pattern).Replace("\\*", ".*").Replace("\\?", ".") + "$";
+            return Regex.IsMatch(value, rx, RegexOptions.IgnoreCase);
+        }
         for (int i = 0; i < args.Length - 1; i++)
         {
             if (string.Equals(args[i], "--spt-mode", StringComparison.OrdinalIgnoreCase))
@@ -647,7 +671,7 @@ class Program
                 fvertex_count = bsp.FVertices.Count,
                 fvertices = bsp.FVertices.Select((v, i) => new { vid = i, x = v.X, y = v.Y, z = v.Z }).ToArray()
             };
-            File.WriteAllText(outPath, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(outPath, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
             Console.WriteLine($"[BSP-DUMP] Saved: {outPath}");
             return;
         }
@@ -1072,7 +1096,19 @@ class Program
         // === Р Р•Р–РРњ Р’Р«Р‘РћР Рђ РљРђР Рў ===
         string[] mapsToProcess = bspCapableMapDirs;
 
-        if (!string.IsNullOrWhiteSpace(mapFilterArg))
+        if (!string.IsNullOrWhiteSpace(wildcardFilterArg))
+        {
+            mapsToProcess = bspCapableMapDirs
+                .Where(d => WildcardMatch(Path.GetFileName(d), wildcardFilterArg))
+                .ToArray();
+            if (mapsToProcess.Length == 0)
+            {
+                Console.WriteLine($"No maps found by --filter '{wildcardFilterArg}'.");
+                return;
+            }
+            Console.WriteLine($"Non-interactive mode: --filter {wildcardFilterArg} ({mapsToProcess.Length} map(s))");
+        }
+        else if (!string.IsNullOrWhiteSpace(mapFilterArg))
         {
             mapsToProcess = bspCapableMapDirs
                 .Where(d => Path.GetFileName(d).IndexOf(mapFilterArg, StringComparison.OrdinalIgnoreCase) >= 0)
@@ -1083,6 +1119,10 @@ class Program
                 return;
             }
             Console.WriteLine($"Non-interactive mode: --map {mapFilterArg}");
+        }
+        else if (exportAll)
+        {
+            Console.WriteLine($"Non-interactive mode: --all ({mapsToProcess.Length} map(s))");
         }
         else
         {
@@ -1147,6 +1187,28 @@ class Program
         }
 
         int success = 0;
+        int validateExitCode = 0;
+
+        if (resumeMode)
+        {
+            int before = mapsToProcess.Length;
+            mapsToProcess = mapsToProcess.Where(d =>
+            {
+                var name = Path.GetFileName(d);
+                var glb = Path.Combine(exportRoot, name, name + ".glb");
+                if (!File.Exists(glb)) return true;
+                var glbTime = File.GetLastWriteTimeUtc(glb);
+                // Переэкспортируем, только если какой-то исходник карты новее GLB.
+                return Directory.GetFiles(d, "*.*", SearchOption.TopDirectoryOnly)
+                    .Any(f => File.GetLastWriteTimeUtc(f) > glbTime);
+            }).ToArray();
+            Console.WriteLine($"--resume: {before - mapsToProcess.Length} up-to-date map(s) skipped, {mapsToProcess.Length} to export.");
+            if (mapsToProcess.Length == 0)
+            {
+                Console.WriteLine("Nothing to do.");
+                return;
+            }
+        }
 
         foreach (var dir in mapsToProcess)
         {
@@ -1165,6 +1227,8 @@ class Program
                     Name = mapName,
                     RootPath = dir
                 };
+
+                TextureDiagnostics.Reset(mapName);
 
                 /// === 1. BSP ===
                 scene.Bsp = RFMapToolSharp.Collision.BspFile.Load(bspPath);
@@ -1217,14 +1281,25 @@ class Program
                 {
                     var r3tFiles = Directory.GetFiles(dir, "*.r3t", SearchOption.TopDirectoryOnly);
                     if (r3tFiles.Length > 0)
+                    {
                         texturePath = r3tFiles[0];
+                        Console.WriteLine($"[TEX] Map={mapName}: {mapName}.r3t not found, fallback -> {Path.GetFileName(texturePath)}");
+                    }
                 }
+
+                TextureDiagnostics.Current.LogR3tSource(mapName, texturePath, File.Exists(texturePath));
 
                 if (File.Exists(texturePath))
                 {
                     Console.WriteLine($"[DEBUG] {mapName}: R3T = {texturePath}");
                     var r3tFile = RFMapToolSharp.Textures.R3TFile.Load(texturePath);
                     scene.Textures.AddRange(r3tFile.Textures);
+                    TextureDiagnostics.Current.RegisterTextureEntries(
+                        r3tFile.Textures.Select(t => (t.Name ?? string.Empty, (long)(t.DdsData?.Length ?? 0))).ToList());
+                }
+                else
+                {
+                    Console.WriteLine($"[WARNING] {mapName}: .r3t not found, materials will have no textures.");
                 }
 
                 // === 4. Р­РљРЎРџРћР Рў ===
@@ -1285,6 +1360,15 @@ class Program
                     Console.WriteLine($"[WARN] {mapName}: not enough memory to write all debug reports.");
                 }
 
+                // === 5. VALIDATION HOOK (--validate, Этап 3.2) ===
+                if (validateAfterExport)
+                {
+                    var glbPath = Path.Combine(targetDir, $"{mapName}.glb");
+                    int vcode = ValidateExportedGlb(glbPath, out var vmsg);
+                    Console.WriteLine($"[VALIDATE] {mapName}: code={vcode} {vmsg}");
+                    if (vcode > validateExitCode) validateExitCode = vcode;
+                }
+
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.WriteLine($"[OK] {mapName} completed.");
                 Console.ResetColor();
@@ -1305,11 +1389,67 @@ class Program
         }
         Console.WriteLine($"\nProcessing complete. Exported maps: {success} of {bspCapableMapDirs.Length} BSP map(s).");
         Console.WriteLine($"Exported maps path: {exportRoot}");
+        if (validateAfterExport)
+        {
+            Console.WriteLine($"[VALIDATE] Overall exit code: {validateExitCode} (0=OK, 1=warnings, 2=errors)");
+            Environment.ExitCode = validateExitCode;
+        }
         if (IsInteractive)
         {
             Console.WriteLine("Press any key to exit...");
             Console.ReadKey();
         }
+    }
+
+    /// <summary>
+    /// Round-trip валидация свежего GLB (Этап 3.2): перечитывает файл через SharpGLTF,
+    /// проверяет читаемость изображений и наличие BaseColorTexture у материалов.
+    /// Возвращает 0=OK, 1=warnings (часть материалов без текстур), 2=errors (GLB битый/текстур нет вообще).
+    /// </summary>
+    static int ValidateExportedGlb(string glbPath, out string message)
+    {
+        message = "";
+        if (!File.Exists(glbPath))
+        {
+            message = $"GLB not found: {glbPath}";
+            return 2;
+        }
+
+        ModelRoot model;
+        try
+        {
+            model = ModelRoot.Load(glbPath);
+        }
+        catch (Exception ex)
+        {
+            message = $"GLB load failed: {ex.Message}";
+            return 2;
+        }
+
+        int images = model.LogicalImages.Count;
+        int textures = model.LogicalTextures.Count;
+        int materials = model.LogicalMaterials.Count;
+        int textured = 0;
+        int unreadableImages = 0;
+
+        foreach (var img in model.LogicalImages)
+        {
+            var content = img.Content;
+            if (!content.IsValid || content.IsEmpty) unreadableImages++;
+        }
+
+        foreach (var mat in model.LogicalMaterials)
+        {
+            var baseColor = mat.FindChannel(SharpGLTF.Materials.KnownChannel.BaseColor.ToString());
+            if (baseColor?.Texture != null) textured++;
+        }
+
+        message = $"images={images} textures={textures} materials={materials} textured={textured} unreadableImages={unreadableImages}";
+
+        if (materials > 0 && textures == 0) return 2;      // текстур нет вообще — регрессия
+        if (unreadableImages > 0) return 2;                 // битые изображения
+        if (textured < materials) return 1;                 // часть материалов без текстур — warning
+        return 0;
     }
 
     static string? FindMapRoot()
